@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/novel_generator.db}
+      ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/app/artifacts}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.1:8b}
+      HOST: 0.0.0.0
+      PORT: 8000
+    command: ["uvicorn", "novel_generator.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - app_data:/app/data
+      - app_artifacts:/app/artifacts
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  worker:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/novel_generator.db}
+      ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/app/artifacts}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.1:8b}
+      HOST: 0.0.0.0
+      PORT: 8000
+    command: ["python", "-m", "novel_generator.worker"]
+    depends_on:
+      web:
+        condition: service_healthy
+    volumes:
+      - app_data:/app/data
+      - app_artifacts:/app/artifacts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  app_data:
+  app_artifacts:
+  ollama_data:

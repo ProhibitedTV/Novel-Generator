@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Novel Generator{% endblock %}
+
+{% block content %}
+<section class="hero-card">
+  <div>
+    <p class="eyebrow">Control room</p>
+    <h1>Run local novel jobs without babysitting the browser.</h1>
+    <p class="hero-copy">Projects keep the premise and defaults. Runs queue in the background, stream progress, and save artifacts for download or chapter-level regeneration.</p>
+  </div>
+  <div class="status-card">
+    <h2>Ollama</h2>
+    <p><strong>Status:</strong> {{ "Connected" if provider_status.reachable else "Unavailable" }}</p>
+    <p><strong>Base URL:</strong> {{ provider_config.base_url }}</p>
+    <p><strong>Default model:</strong> {{ provider_config.default_model }}</p>
+    {% if provider_status.error %}
+      <p class="error-text">{{ provider_status.error }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="grid two-up">
+  <article class="panel">
+    <h2>Create a project</h2>
+    <form method="post" action="/projects/new" class="stack-form">
+      <label>Title <input type="text" name="title" required placeholder="The Glass Orchard"></label>
+      <label>Premise <textarea name="premise" rows="5" required placeholder="A disgraced archivist uncovers a living map hidden beneath a dying city."></textarea></label>
+      <div class="grid compact">
+        <label>Total words <input type="number" name="desired_word_count" value="40000" min="1000"></label>
+        <label>Chapters <input type="number" name="requested_chapters" value="12" min="1"></label>
+      </div>
+      <div class="grid compact">
+        <label>Min words/chapter <input type="number" name="min_words_per_chapter" value="1200" min="100"></label>
+        <label>Max words/chapter <input type="number" name="max_words_per_chapter" value="2200" min="100"></label>
+      </div>
+      <label>Preferred model <input type="text" name="preferred_model" value="{{ provider_config.default_model }}" required></label>
+      <label>Notes <textarea name="notes" rows="3" placeholder="Optional worldbuilding, tone, or POV reminders."></textarea></label>
+      <button type="submit">Create project</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <h2>Provider settings</h2>
+    <form method="post" action="/settings/providers/ollama" class="stack-form">
+      <label>Ollama base URL <input type="text" name="base_url" value="{{ provider_config.base_url }}" required></label>
+      <label>Default model <input type="text" name="default_model" value="{{ provider_config.default_model }}" required></label>
+      <button type="submit">Save provider settings</button>
+    </form>
+    <div class="model-list">
+      <h3>Available models</h3>
+      {% if provider_status.available_models %}
+        <ul>
+          {% for model in provider_status.available_models %}
+            <li>{{ model }}</li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p>No models were returned yet.</p>
+      {% endif %}
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="section-header">
+    <h2>Projects</h2>
+    <p>{{ projects|length }} tracked project{{ "" if projects|length == 1 else "s" }}</p>
+  </div>
+  {% if projects %}
+    <div class="project-list">
+      {% for project in projects %}
+        <a class="project-card" href="/projects/{{ project.id }}">
+          <div>
+            <h3>{{ project.title }}</h3>
+            <p>{{ project.premise }}</p>
+          </div>
+          <dl>
+            <div><dt>Words</dt><dd>{{ project.desired_word_count }}</dd></div>
+            <div><dt>Chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
+            <div><dt>Runs</dt><dd>{{ project.runs|length }}</dd></div>
+          </dl>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>No projects yet. Create one above to start queueing novels.</p>
+  {% endif %}
+</section>
+{% endblock %}

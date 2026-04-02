@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a reproducible bug in Novel Generator.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Share the shortest path to reproduce the problem.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Which release, image tag, or commit were you using?
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, deployment style, Ollama version, and model name if relevant.

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}Run {{ run.id }} - Novel Generator{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="section-header">
+    <div>
+      <p class="eyebrow">Run</p>
+      <h1>{{ project.title }}</h1>
+    </div>
+    <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
+  </div>
+  <div class="run-overview">
+    <div>
+      <p><strong>Run ID:</strong> <code>{{ run.id }}</code></p>
+      <p><strong>Model:</strong> {{ run.model_name }}</p>
+      <p><strong>Step:</strong> <span id="run-step">{{ run.current_step }}</span></p>
+      <p><strong>Current chapter:</strong> <span id="run-chapter">{{ run.current_chapter or "-" }}</span></p>
+    </div>
+    <div>
+      <p><strong>Status:</strong> <span id="run-status" class="badge status-{{ run.status.value }}">{{ run.status.value }}</span></p>
+      <p><strong>Queued:</strong> {{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+      <p><strong>Started:</strong> {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') if run.started_at else "-" }}</p>
+      <p><strong>Finished:</strong> {{ run.completed_at.strftime('%Y-%m-%d %H:%M:%S') if run.completed_at else "-" }}</p>
+    </div>
+  </div>
+  {% if run.status.value in ["queued", "running"] %}
+    <form method="post" action="/runs/{{ run.id }}/cancel">
+      <button class="danger" type="submit">Cancel run</button>
+    </form>
+  {% endif %}
+  {% if run.error_message %}
+    <p class="error-text">{{ run.error_message }}</p>
+  {% endif %}
+  {% if run.source_run_id %}
+    <p class="muted">This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.</p>
+  {% endif %}
+</section>
+
+<section class="grid two-up">
+  <article class="panel">
+    <div class="section-header">
+      <h2>Progress events</h2>
+      <p>Live stream</p>
+    </div>
+    <ul id="event-log" class="event-log">
+      {% for event in run.events|sort(attribute='sequence') %}
+        <li data-sequence="{{ event.sequence }}">
+          <strong>{{ event.event_type }}</strong>
+          <span>{{ event.payload.message or event.payload.title or event.payload.chapter_number or "" }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </article>
+
+  <article class="panel">
+    <div class="section-header">
+      <h2>Artifacts</h2>
+      <p>{{ run.artifacts|length }} ready</p>
+    </div>
+    {% if run.artifacts %}
+      <div class="artifact-list">
+        {% for artifact in run.artifacts %}
+          <a class="artifact-card" href="/api/artifacts/{{ artifact.id }}/download">
+            <strong>{{ artifact.kind }}</strong>
+            <span>{{ artifact.filename }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p>Artifacts will appear here when the run completes.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel">
+  <div class="section-header">
+    <h2>Chapters</h2>
+    <p>{{ run.chapters|length }} tracked</p>
+  </div>
+  {% if run.chapters %}
+    <div class="chapter-list">
+      {% for chapter in run.chapters %}
+        <article class="chapter-card">
+          <div class="chapter-topline">
+            <h3>Chapter {{ chapter.chapter_number }}: {{ chapter.title }}</h3>
+            <span class="badge status-{{ chapter.status.value }}">{{ chapter.status.value }}</span>
+          </div>
+          <p class="muted">{{ chapter.outline_summary }}</p>
+          {% if chapter.summary %}
+            <p><strong>Summary:</strong> {{ chapter.summary }}</p>
+          {% endif %}
+          {% if chapter.word_count %}
+            <p><strong>Word count:</strong> {{ chapter.word_count }}</p>
+          {% endif %}
+          {% if chapter.error_message %}
+            <p class="error-text">{{ chapter.error_message }}</p>
+          {% endif %}
+          {% if chapter.content %}
+            <details>
+              <summary>Preview chapter text</summary>
+              <pre class="chapter-preview">{{ chapter.content }}</pre>
+            </details>
+          {% endif %}
+          {% if run.status in terminal_statuses %}
+            <form method="post" action="/runs/{{ run.id }}/chapters/{{ chapter.chapter_number }}/regenerate">
+              <button type="submit" class="secondary">Regenerate from this chapter</button>
+            </form>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>No chapters created yet.</p>
+  {% endif %}
+</section>
+
+<script>
+  (() => {
+    const terminalStatuses = new Set(["completed", "failed", "canceled"]);
+    const log = document.getElementById("event-log");
+    const statusNode = document.getElementById("run-status");
+    const stepNode = document.getElementById("run-step");
+    const chapterNode = document.getElementById("run-chapter");
+    const source = new EventSource("/api/runs/{{ run.id }}/events");
+
+    function addEvent(payload) {
+      const item = document.createElement("li");
+      item.dataset.sequence = payload.sequence || "";
+      const summary = payload.payload?.message || payload.payload?.title || payload.payload?.chapter_number || "";
+      item.innerHTML = `<strong>${payload.event_type || "update"}</strong><span>${summary}</span>`;
+      log.appendChild(item);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    source.onmessage = (event) => {
+      const payload = JSON.parse(event.data);
+      addEvent(payload);
+      statusNode.textContent = payload.run_status;
+      statusNode.className = `badge status-${payload.run_status}`;
+      stepNode.textContent = payload.current_step || "-";
+      chapterNode.textContent = payload.current_chapter || "-";
+    };
+
+    source.addEventListener("terminal", (event) => {
+      const payload = JSON.parse(event.data);
+      statusNode.textContent = payload.run_status;
+      statusNode.className = `badge status-${payload.run_status}`;
+      stepNode.textContent = payload.current_step || "-";
+      chapterNode.textContent = payload.current_chapter || "-";
+      source.close();
+      if (terminalStatuses.has(payload.run_status)) {
+        window.setTimeout(() => window.location.reload(), 1000);
+      }
+    });
+
+    source.onerror = () => {
+      if (terminalStatuses.has(statusNode.textContent.trim())) {
+        source.close();
+      }
+    };
+  })();
+</script>
+{% endblock %}

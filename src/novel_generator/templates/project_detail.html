@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}{{ project.title }} - Novel Generator{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="section-header">
+    <div>
+      <p class="eyebrow">Project</p>
+      <h1>{{ project.title }}</h1>
+    </div>
+    <a class="button secondary" href="/">Back to dashboard</a>
+  </div>
+  <p class="lead">{{ project.premise }}</p>
+  {% if project.notes %}
+    <p class="muted">{{ project.notes }}</p>
+  {% endif %}
+  <dl class="stats-grid">
+    <div><dt>Target words</dt><dd>{{ project.desired_word_count }}</dd></div>
+    <div><dt>Requested chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
+    <div><dt>Chapter range</dt><dd>{{ project.min_words_per_chapter }}-{{ project.max_words_per_chapter }}</dd></div>
+    <div><dt>Preferred model</dt><dd>{{ project.preferred_model }}</dd></div>
+  </dl>
+</section>
+
+<section class="grid two-up">
+  <article class="panel">
+    <h2>Queue a run</h2>
+    <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form">
+      <label>Model <input type="text" name="model_name" value="{{ project.preferred_model }}" required></label>
+      <div class="grid compact">
+        <label>Total words <input type="number" name="target_word_count" value="{{ project.desired_word_count }}" min="1000"></label>
+        <label>Chapters <input type="number" name="requested_chapters" value="{{ project.requested_chapters }}" min="1"></label>
+      </div>
+      <div class="grid compact">
+        <label>Min words/chapter <input type="number" name="min_words_per_chapter" value="{{ project.min_words_per_chapter }}" min="100"></label>
+        <label>Max words/chapter <input type="number" name="max_words_per_chapter" value="{{ project.max_words_per_chapter }}" min="100"></label>
+      </div>
+      <button type="submit">Queue run</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <h2>Provider snapshot</h2>
+    <p><strong>Status:</strong> {{ "Connected" if provider_status.reachable else "Unavailable" }}</p>
+    <p><strong>Base URL:</strong> {{ provider_config.base_url }}</p>
+    <p><strong>Default model:</strong> {{ provider_config.default_model }}</p>
+    {% if provider_status.available_models %}
+      <ul>
+        {% for model in provider_status.available_models %}
+          <li>{{ model }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>No models available.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel">
+  <div class="section-header">
+    <h2>Run history</h2>
+    <p>{{ project.runs|length }} total</p>
+  </div>
+  {% if project.runs %}
+    <div class="run-table">
+      {% for run in project.runs|sort(attribute='created_at', reverse=True) %}
+        <a class="run-row" href="/runs/{{ run.id }}">
+          <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
+          <span>{{ run.model_name }}</span>
+          <span>{{ run.requested_chapters }} chapters</span>
+          <span>{{ run.current_step }}</span>
+          <span>{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>No runs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}
