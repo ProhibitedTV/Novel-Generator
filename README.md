@@ -2,7 +2,7 @@
 
 Novel Generator is a self-hosted, Ollama-first writing studio for long-form fiction. It lets a single author create reusable projects, queue background generation runs, stream progress in the browser, persist chapter-by-chapter state, and export finished manuscripts as Markdown and DOCX.
 
-![Dashboard preview](docs/screenshots/dashboard-preview.svg)
+![Updated product preview](docs/screenshots/dashboard-preview.svg)
 
 ## What It Ships
 
