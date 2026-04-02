@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Novel Generated</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: auto; padding: 2em; }
+  </style>
+</head>
+<body>
+  <h1>Your Novel Is Ready</h1>
+  <p>The novel has been generated successfully.</p>
+  <p>
+    <a href="{{ url_for('static_files', filename=filename) }}" download>
+      Download {{ filename }}
+    </a>
+  </p>
+  <p><a href="{{ url_for('index') }}">Generate another novel</a></p>
+</body>
+</html>

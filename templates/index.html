@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Novel Generator</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: auto; padding: 2em; }
+    label { display: block; margin-bottom: 0.5em; }
+    input[type=text], input[type=number] { width: 100%; padding: 0.5em; margin-top: 0.2em; box-sizing: border-box; }
+    button { padding: 0.7em 1.5em; font-size: 1em; margin-top: 1em; }
+    .error { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Generate a Novel</h1>
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+  <form method="post">
+    <label>
+      Story premise:
+      <input type="text" name="topic" required placeholder="e.g. A software engineer from Indiana comes of age" />
+    </label>
+    <label>
+      Total word count:
+      <input type="number" name="word_count" value="90000" min="10000" />
+    </label>
+    <label>
+      Number of chapters (optional):
+      <input type="number" name="chapters" min="0" placeholder="Leave blank to auto calculate" />
+    </label>
+    <label>
+      Minimum words per chapter:
+      <input type="number" name="min_words" value="2000" min="500" />
+    </label>
+    <label>
+      Maximum words per chapter:
+      <input type="number" name="max_words" value="4000" min="1000" />
+    </label>
+    <label>
+      Model (Ollama):
+      <input type="text" name="model" value="gpt-oss:20b" />
+    </label>
+    <label>
+      Output filename:
+      <input type="text" name="output" value="novel.docx" />
+    </label>
+    <button type="submit">Generate Novel</button>
+  </form>
+  <p style="margin-top: 2em; font-size: 0.9em; color: #555;">Note: Generating a full‑length novel can take a long time depending on your hardware. Please be patient after submitting the form.</p>
+</body>
+</html>
