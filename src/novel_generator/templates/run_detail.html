@@ -53,6 +53,23 @@
       </div>
     </div>
   </div>
+  <div class="metric-grid">
+    <div class="metric-card">
+      <span class="detail-label">Planned chapters</span>
+      <strong>{{ run.requested_chapters }}</strong>
+      <p class="metric-copy">Targeted for this run.</p>
+    </div>
+    <div class="metric-card">
+      <span class="detail-label">Chapters tracked</span>
+      <strong>{{ run.chapters|length }}</strong>
+      <p class="metric-copy">Saved checkpoints so far.</p>
+    </div>
+    <div class="metric-card">
+      <span class="detail-label">Artifacts ready</span>
+      <strong>{{ run.artifacts|length }}</strong>
+      <p class="metric-copy">Downloads appear as they are generated.</p>
+    </div>
+  </div>
   {% if run.status.value in ["queued", "running"] %}
     <form method="post" action="/runs/{{ run.id }}/cancel" class="panel-actions">
       <button class="danger" type="submit">Cancel run</button>
@@ -62,21 +79,27 @@
     <p class="error-text">{{ run.error_message }}</p>
   {% endif %}
   {% if run.source_run_id %}
-    <p class="muted long-value">This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.</p>
+    <p class="notice long-value">This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.</p>
   {% endif %}
 </section>
 
 <section class="grid two-up">
   <article class="panel">
     <div class="section-header">
-      <h2>Progress events</h2>
-      <p>Live stream</p>
+      <div class="section-header-copy">
+        <h2>Progress events</h2>
+        <p>Live worker updates land here as the queue advances.</p>
+      </div>
+      <p>{{ run.events|length }} logged</p>
     </div>
     <ul id="event-log" class="event-log">
       {% for event in run.events|sort(attribute='sequence') %}
-        <li data-sequence="{{ event.sequence }}">
-          <strong>{{ event.event_type }}</strong>
-          <span class="event-copy">{{ event.payload.message or event.payload.title or event.payload.chapter_number or "" }}</span>
+        <li class="event-item" data-sequence="{{ event.sequence }}">
+          <div class="event-topline">
+            <span class="event-kind">{{ event.event_type.replace("_", " ") }}</span>
+            <span class="event-sequence">#{{ event.sequence }}</span>
+          </div>
+          <p class="event-copy">{{ event.payload.message or event.payload.title or event.payload.chapter_number or "Waiting for the next update." }}</p>
         </li>
       {% endfor %}
     </ul>
@@ -84,7 +107,10 @@
 
   <article class="panel">
     <div class="section-header">
-      <h2>Artifacts</h2>
+      <div class="section-header-copy">
+        <h2>Artifacts</h2>
+        <p>Completed exports stay available for download from this run.</p>
+      </div>
       <p>{{ run.artifacts|length }} ready</p>
     </div>
     {% if run.artifacts %}
@@ -92,42 +118,59 @@
         {% for artifact in run.artifacts %}
           <a class="artifact-card" href="/api/artifacts/{{ artifact.id }}/download">
             <span class="artifact-kind">{{ artifact.kind }}</span>
-            <strong class="artifact-name long-value">{{ artifact.filename }}</strong>
+            <div class="artifact-meta">
+              <strong class="artifact-name long-value">{{ artifact.filename }}</strong>
+              <span class="detail-value">Download generated output</span>
+            </div>
           </a>
         {% endfor %}
       </div>
     {% else %}
-      <p>Artifacts will appear here when the run completes.</p>
+      <p class="empty-state">Artifacts will appear here when the run completes.</p>
     {% endif %}
   </article>
 </section>
 
 <section class="panel">
   <div class="section-header">
-    <h2>Chapters</h2>
+    <div class="section-header-copy">
+      <h2>Chapters</h2>
+      <p>Each chapter is stored independently so it can be reviewed or regenerated later.</p>
+    </div>
     <p>{{ run.chapters|length }} tracked</p>
   </div>
   {% if run.chapters %}
     <div class="chapter-list">
       {% for chapter in run.chapters %}
-        <article class="chapter-card">
+        <article class="chapter-card{% if run.current_chapter == chapter.chapter_number %} active-chapter{% endif %}">
           <div class="chapter-topline">
-            <h3>Chapter {{ chapter.chapter_number }}: {{ chapter.title }}</h3>
+            <div class="chapter-heading">
+              <p class="eyebrow">Chapter {{ chapter.chapter_number }}</p>
+              <h3>{{ chapter.title }}</h3>
+            </div>
             <span class="badge status-{{ chapter.status.value }}">{{ chapter.status.value }}</span>
           </div>
           <div class="chapter-body">
+            <div class="chapter-meta-row">
+              {% if chapter.word_count %}
+                <span class="meta-chip">{{ chapter.word_count }} words</span>
+              {% endif %}
+              {% if chapter.summary %}
+                <span class="meta-chip">Summary saved</span>
+              {% endif %}
+              {% if chapter.content %}
+                <span class="meta-chip">Preview ready</span>
+              {% endif %}
+            </div>
             <p class="muted chapter-copy">{{ chapter.outline_summary }}</p>
             {% if chapter.summary %}
               <p class="chapter-copy"><strong>Summary:</strong> {{ chapter.summary }}</p>
-            {% endif %}
-            {% if chapter.word_count %}
-              <p><strong>Word count:</strong> {{ chapter.word_count }}</p>
             {% endif %}
             {% if chapter.error_message %}
               <p class="error-text">{{ chapter.error_message }}</p>
             {% endif %}
             {% if chapter.content %}
-              <details>
+              <details class="chapter-preview-shell">
                 <summary>Preview chapter text</summary>
                 <pre class="chapter-preview">{{ chapter.content }}</pre>
               </details>
@@ -142,7 +185,7 @@
       {% endfor %}
     </div>
   {% else %}
-    <p>No chapters created yet.</p>
+    <p class="empty-state">No chapters created yet. They will appear here as the worker checkpoints progress.</p>
   {% endif %}
 </section>
 
@@ -157,9 +200,16 @@
 
     function addEvent(payload) {
       const item = document.createElement("li");
+      item.className = "event-item";
       item.dataset.sequence = payload.sequence || "";
       const summary = payload.payload?.message || payload.payload?.title || payload.payload?.chapter_number || "";
-      item.innerHTML = `<strong>${payload.event_type || "update"}</strong><span class="event-copy">${summary}</span>`;
+      item.innerHTML = `
+        <div class="event-topline">
+          <span class="event-kind">${(payload.event_type || "update").replace(/_/g, " ")}</span>
+          <span class="event-sequence">#${payload.sequence || "-"}</span>
+        </div>
+        <p class="event-copy">${summary || "Waiting for the next update."}</p>
+      `;
       log.appendChild(item);
       log.scrollTop = log.scrollHeight;
     }

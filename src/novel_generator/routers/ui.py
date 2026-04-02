@@ -54,8 +54,9 @@ def index(
     templates = get_templates()
     config, provider_status, _ = _provider_status(settings, db)
     return templates.TemplateResponse(
-        "index.html",
-        {
+        request=request,
+        name="index.html",
+        context={
             "request": request,
             "projects": list_projects(db),
             "provider_config": config,
@@ -118,8 +119,9 @@ def project_detail(
     templates = get_templates()
     config, provider_status, _ = _provider_status(settings, db)
     return templates.TemplateResponse(
-        "project_detail.html",
-        {
+        request=request,
+        name="project_detail.html",
+        context={
             "request": request,
             "project": project,
             "provider_config": config,
@@ -178,8 +180,9 @@ def run_detail(
         raise HTTPException(status_code=404, detail="Run not found.")
     templates = get_templates()
     return templates.TemplateResponse(
-        "run_detail.html",
-        {
+        request=request,
+        name="run_detail.html",
+        context={
             "request": request,
             "run": run,
             "project": run.project,

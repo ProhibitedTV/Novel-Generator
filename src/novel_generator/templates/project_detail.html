@@ -25,9 +25,45 @@
 
 <section class="grid two-up">
   <article class="panel">
-    <h2>Queue a run</h2>
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Queue a run</h2>
+        <p>Keep the project defaults or swap in any detected Ollama model before sending the run to the worker.</p>
+      </div>
+    </div>
     <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form">
-      <label>Model <input type="text" name="model_name" value="{{ project.preferred_model }}" required></label>
+      <label>
+        Model
+        <input id="project-run-model" data-model-input type="text" name="model_name" value="{{ project.preferred_model }}" required>
+      </label>
+      <p class="field-note">Click an available model below to fill this field instantly, or type any installed model name manually.</p>
+      {% if provider_status.available_models %}
+        <div class="model-picker">
+          <div class="model-picker-header">
+            <div class="section-header-copy">
+              <p class="model-picker-title">Quick pick for this run</p>
+              <p class="model-picker-copy">Available models stay clickable so you can compare or swap without editing text.</p>
+            </div>
+            <p class="selection-note">The selected chip mirrors the current input value.</p>
+          </div>
+          <ul class="model-chip-list">
+            {% for model in provider_status.available_models %}
+              <li>
+                <button
+                  class="model-chip"
+                  type="button"
+                  data-model-choice
+                  data-target="project-run-model"
+                  data-model="{{ model }}"
+                  aria-pressed="false"
+                >
+                  <span class="model-chip-value">{{ model }}</span>
+                </button>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
       <div class="grid compact">
         <label>Total words <input type="number" name="target_word_count" value="{{ project.desired_word_count }}" min="1000"></label>
         <label>Chapters <input type="number" name="requested_chapters" value="{{ project.requested_chapters }}" min="1"></label>
@@ -41,7 +77,13 @@
   </article>
 
   <article class="panel meta-panel">
-    <h2>Provider snapshot</h2>
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Provider snapshot</h2>
+        <p>Live connection details from Ollama, plus quick-select models for the run form.</p>
+      </div>
+      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">{{ "Connected" if provider_status.reachable else "Unavailable" }}</span>
+    </div>
     <div class="detail-list">
       <div class="detail-item inline-detail">
         <span class="detail-label">Status</span>
@@ -55,15 +97,30 @@
         <span class="detail-label">Default model</span>
         <span class="detail-value long-value">{{ provider_config.default_model }}</span>
       </div>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Detected models</span>
+        <span class="detail-value">{{ provider_status.available_models|length }}</span>
+      </div>
     </div>
     {% if provider_status.available_models %}
-      <ul class="token-list">
+      <ul class="model-chip-list">
         {% for model in provider_status.available_models %}
-          <li>{{ model }}</li>
+          <li>
+            <button
+              class="model-chip"
+              type="button"
+              data-model-choice
+              data-target="project-run-model"
+              data-model="{{ model }}"
+              aria-pressed="false"
+            >
+              <span class="model-chip-value">{{ model }}</span>
+            </button>
+          </li>
         {% endfor %}
       </ul>
     {% else %}
-      <p>No models available.</p>
+      <p class="empty-state">No models available right now. Check the Ollama connection or pull a model to see quick-select options here.</p>
     {% endif %}
   </article>
 </section>
@@ -101,7 +158,7 @@
       {% endfor %}
     </div>
   {% else %}
-    <p>No runs yet.</p>
+    <p class="empty-state">No runs yet. Queue one above to start generating chapters in the background.</p>
   {% endif %}
 </section>
 {% endblock %}
