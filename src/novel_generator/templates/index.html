@@ -4,16 +4,27 @@
 
 {% block content %}
 <section class="hero-card">
-  <div>
+  <div class="page-header-copy">
     <p class="eyebrow">Control room</p>
     <h1>Run local novel jobs without babysitting the browser.</h1>
     <p class="hero-copy">Projects keep the premise and defaults. Runs queue in the background, stream progress, and save artifacts for download or chapter-level regeneration.</p>
   </div>
-  <div class="status-card">
+  <div class="status-card meta-panel">
     <h2>Ollama</h2>
-    <p><strong>Status:</strong> {{ "Connected" if provider_status.reachable else "Unavailable" }}</p>
-    <p><strong>Base URL:</strong> {{ provider_config.base_url }}</p>
-    <p><strong>Default model:</strong> {{ provider_config.default_model }}</p>
+    <div class="detail-list">
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Status</span>
+        <span class="detail-value">{{ "Connected" if provider_status.reachable else "Unavailable" }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Base URL</span>
+        <span class="detail-value long-value">{{ provider_config.base_url }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Default model</span>
+        <span class="detail-value long-value">{{ provider_config.default_model }}</span>
+      </div>
+    </div>
     {% if provider_status.error %}
       <p class="error-text">{{ provider_status.error }}</p>
     {% endif %}
@@ -50,7 +61,7 @@
     <div class="model-list">
       <h3>Available models</h3>
       {% if provider_status.available_models %}
-        <ul>
+        <ul class="token-list">
           {% for model in provider_status.available_models %}
             <li>{{ model }}</li>
           {% endfor %}
@@ -71,11 +82,11 @@
     <div class="project-list">
       {% for project in projects %}
         <a class="project-card" href="/projects/{{ project.id }}">
-          <div>
+          <div class="project-card-main">
             <h3>{{ project.title }}</h3>
-            <p>{{ project.premise }}</p>
+            <p class="chapter-copy">{{ project.premise }}</p>
           </div>
-          <dl>
+          <dl class="project-card-meta">
             <div><dt>Words</dt><dd>{{ project.desired_word_count }}</dd></div>
             <div><dt>Chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
             <div><dt>Runs</dt><dd>{{ project.runs|length }}</dd></div>

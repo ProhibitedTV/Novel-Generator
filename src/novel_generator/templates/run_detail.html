@@ -5,28 +5,56 @@
 {% block content %}
 <section class="panel">
   <div class="section-header">
-    <div>
+    <div class="page-header-copy">
       <p class="eyebrow">Run</p>
       <h1>{{ project.title }}</h1>
     </div>
     <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
   </div>
   <div class="run-overview">
-    <div>
-      <p><strong>Run ID:</strong> <code>{{ run.id }}</code></p>
-      <p><strong>Model:</strong> {{ run.model_name }}</p>
-      <p><strong>Step:</strong> <span id="run-step">{{ run.current_step }}</span></p>
-      <p><strong>Current chapter:</strong> <span id="run-chapter">{{ run.current_chapter or "-" }}</span></p>
+    <div class="overview-card">
+      <div class="overview-grid">
+        <div class="detail-item">
+          <span class="detail-label">Run ID</span>
+          <code class="detail-value long-value">{{ run.id }}</code>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Model</span>
+          <span class="detail-value long-value">{{ run.model_name }}</span>
+        </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Step</span>
+          <span class="detail-value" id="run-step">{{ run.current_step }}</span>
+        </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Current chapter</span>
+          <span class="detail-value" id="run-chapter">{{ run.current_chapter or "-" }}</span>
+        </div>
+      </div>
     </div>
-    <div>
-      <p><strong>Status:</strong> <span id="run-status" class="badge status-{{ run.status.value }}">{{ run.status.value }}</span></p>
-      <p><strong>Queued:</strong> {{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-      <p><strong>Started:</strong> {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') if run.started_at else "-" }}</p>
-      <p><strong>Finished:</strong> {{ run.completed_at.strftime('%Y-%m-%d %H:%M:%S') if run.completed_at else "-" }}</p>
+    <div class="overview-card">
+      <div class="overview-grid">
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Status</span>
+          <span id="run-status" class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
+        </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Queued</span>
+          <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+        </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Started</span>
+          <span class="detail-value">{{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') if run.started_at else "-" }}</span>
+        </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Finished</span>
+          <span class="detail-value">{{ run.completed_at.strftime('%Y-%m-%d %H:%M:%S') if run.completed_at else "-" }}</span>
+        </div>
+      </div>
     </div>
   </div>
   {% if run.status.value in ["queued", "running"] %}
-    <form method="post" action="/runs/{{ run.id }}/cancel">
+    <form method="post" action="/runs/{{ run.id }}/cancel" class="panel-actions">
       <button class="danger" type="submit">Cancel run</button>
     </form>
   {% endif %}
@@ -34,7 +62,7 @@
     <p class="error-text">{{ run.error_message }}</p>
   {% endif %}
   {% if run.source_run_id %}
-    <p class="muted">This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.</p>
+    <p class="muted long-value">This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.</p>
   {% endif %}
 </section>
 
@@ -48,7 +76,7 @@
       {% for event in run.events|sort(attribute='sequence') %}
         <li data-sequence="{{ event.sequence }}">
           <strong>{{ event.event_type }}</strong>
-          <span>{{ event.payload.message or event.payload.title or event.payload.chapter_number or "" }}</span>
+          <span class="event-copy">{{ event.payload.message or event.payload.title or event.payload.chapter_number or "" }}</span>
         </li>
       {% endfor %}
     </ul>
@@ -63,8 +91,8 @@
       <div class="artifact-list">
         {% for artifact in run.artifacts %}
           <a class="artifact-card" href="/api/artifacts/{{ artifact.id }}/download">
-            <strong>{{ artifact.kind }}</strong>
-            <span>{{ artifact.filename }}</span>
+            <span class="artifact-kind">{{ artifact.kind }}</span>
+            <strong class="artifact-name long-value">{{ artifact.filename }}</strong>
           </a>
         {% endfor %}
       </div>
@@ -87,27 +115,29 @@
             <h3>Chapter {{ chapter.chapter_number }}: {{ chapter.title }}</h3>
             <span class="badge status-{{ chapter.status.value }}">{{ chapter.status.value }}</span>
           </div>
-          <p class="muted">{{ chapter.outline_summary }}</p>
-          {% if chapter.summary %}
-            <p><strong>Summary:</strong> {{ chapter.summary }}</p>
-          {% endif %}
-          {% if chapter.word_count %}
-            <p><strong>Word count:</strong> {{ chapter.word_count }}</p>
-          {% endif %}
-          {% if chapter.error_message %}
-            <p class="error-text">{{ chapter.error_message }}</p>
-          {% endif %}
-          {% if chapter.content %}
-            <details>
-              <summary>Preview chapter text</summary>
-              <pre class="chapter-preview">{{ chapter.content }}</pre>
-            </details>
-          {% endif %}
-          {% if run.status in terminal_statuses %}
-            <form method="post" action="/runs/{{ run.id }}/chapters/{{ chapter.chapter_number }}/regenerate">
-              <button type="submit" class="secondary">Regenerate from this chapter</button>
-            </form>
-          {% endif %}
+          <div class="chapter-body">
+            <p class="muted chapter-copy">{{ chapter.outline_summary }}</p>
+            {% if chapter.summary %}
+              <p class="chapter-copy"><strong>Summary:</strong> {{ chapter.summary }}</p>
+            {% endif %}
+            {% if chapter.word_count %}
+              <p><strong>Word count:</strong> {{ chapter.word_count }}</p>
+            {% endif %}
+            {% if chapter.error_message %}
+              <p class="error-text">{{ chapter.error_message }}</p>
+            {% endif %}
+            {% if chapter.content %}
+              <details>
+                <summary>Preview chapter text</summary>
+                <pre class="chapter-preview">{{ chapter.content }}</pre>
+              </details>
+            {% endif %}
+            {% if run.status in terminal_statuses %}
+              <form method="post" action="/runs/{{ run.id }}/chapters/{{ chapter.chapter_number }}/regenerate" class="panel-actions">
+                <button type="submit" class="secondary">Regenerate from this chapter</button>
+              </form>
+            {% endif %}
+          </div>
         </article>
       {% endfor %}
     </div>
@@ -129,7 +159,7 @@
       const item = document.createElement("li");
       item.dataset.sequence = payload.sequence || "";
       const summary = payload.payload?.message || payload.payload?.title || payload.payload?.chapter_number || "";
-      item.innerHTML = `<strong>${payload.event_type || "update"}</strong><span>${summary}</span>`;
+      item.innerHTML = `<strong>${payload.event_type || "update"}</strong><span class="event-copy">${summary}</span>`;
       log.appendChild(item);
       log.scrollTop = log.scrollHeight;
     }

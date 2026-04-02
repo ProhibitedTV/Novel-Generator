@@ -31,6 +31,19 @@ a {
   text-decoration: none;
 }
 
+h1,
+h2,
+h3,
+p,
+dt,
+dd,
+span,
+strong,
+code,
+summary {
+  overflow-wrap: anywhere;
+}
+
 .shell-header,
 .shell-main {
   width: min(1200px, calc(100% - 2rem));
@@ -41,6 +54,8 @@ a {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
   padding: 1.5rem 0 1rem;
 }
 
@@ -56,9 +71,18 @@ dt {
   color: var(--muted);
 }
 
+.brand-copy,
+.hero-copy,
+.muted {
+  margin: 0;
+}
+
 .shell-nav a,
 .button,
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   padding: 0.8rem 1.2rem;
   border: 1px solid transparent;
@@ -66,6 +90,8 @@ button {
   color: #fff;
   font-weight: 600;
   cursor: pointer;
+  max-width: 100%;
+  text-align: center;
 }
 
 .shell-nav a,
@@ -84,6 +110,19 @@ button.danger {
   display: grid;
   gap: 1.25rem;
   padding-bottom: 2rem;
+}
+
+.shell-header > *,
+.shell-main > *,
+.hero-card > *,
+.two-up > *,
+.compact > *,
+.section-header > *,
+.run-overview > *,
+.chapter-topline > *,
+.project-card > *,
+.run-row > * {
+  min-width: 0;
 }
 
 .hero-card,
@@ -111,6 +150,7 @@ button.danger {
 .panel h2,
 .panel h3 {
   margin-top: 0;
+  margin-bottom: 0.35rem;
 }
 
 .hero-copy,
@@ -122,6 +162,10 @@ button.danger {
 .status-card,
 .panel {
   padding: 1.25rem;
+}
+
+.panel > :first-child {
+  margin-top: 0;
 }
 
 .grid {
@@ -142,6 +186,11 @@ button.danger {
   gap: 0.9rem;
 }
 
+.stack-form button,
+.stack-form .button {
+  justify-self: start;
+}
+
 label {
   display: grid;
   gap: 0.35rem;
@@ -159,6 +208,10 @@ textarea {
   color: var(--ink);
 }
 
+textarea {
+  resize: vertical;
+}
+
 .section-header,
 .run-overview,
 .chapter-topline {
@@ -166,10 +219,18 @@ textarea {
   justify-content: space-between;
   gap: 1rem;
   align-items: start;
+  flex-wrap: wrap;
 }
 
 .section-header {
   margin-bottom: 1rem;
+}
+
+.section-header p,
+.section-header h1,
+.section-header h2,
+.section-header h3 {
+  margin: 0;
 }
 
 .project-list,
@@ -189,13 +250,27 @@ textarea {
 .project-card,
 .run-row {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 1.65fr) minmax(16rem, 1fr);
   gap: 1rem;
+  align-items: start;
 }
 
 .project-card p,
 .chapter-preview {
   white-space: pre-wrap;
+}
+
+.project-card h3,
+.artifact-card strong,
+.chapter-card h3 {
+  margin: 0;
+}
+
+.project-card:hover,
+.run-row:hover,
+.artifact-card:hover {
+  transform: translateY(-1px);
+  transition: transform 150ms ease, box-shadow 150ms ease;
 }
 
 .project-card dl,
@@ -211,13 +286,199 @@ dd {
   margin: 0;
 }
 
+.project-card dt,
+.stats-grid dt,
+.run-meta-label,
+.detail-label {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.project-card dd,
+.stats-grid dd,
+.detail-value,
+.long-value {
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.page-header-copy {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.status-card,
+.meta-panel {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.info-list,
+.detail-list {
+  display: grid;
+  gap: 0.8rem;
+  margin: 0;
+}
+
+.detail-item {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.detail-item.inline-detail {
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+}
+
+.detail-item.inline-detail .detail-label {
+  white-space: nowrap;
+}
+
+.detail-item.inline-detail .detail-value {
+  min-width: 0;
+}
+
+.model-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.model-list h3 {
+  margin: 0;
+}
+
+.token-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.token-list li {
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+  line-height: 1.3;
+}
+
+.project-card-main,
+.project-card-meta,
+.run-row-main,
+.run-row-meta,
+.overview-card,
+.overview-grid,
+.chapter-body {
+  min-width: 0;
+}
+
+.project-card-main,
+.chapter-body {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.project-card-meta {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+}
+
 .run-table {
   display: grid;
   gap: 0.8rem;
 }
 
 .run-row {
+  border-radius: 22px;
+}
+
+.run-row-main {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.run-row-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
   align-items: center;
+}
+
+.run-row-title {
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.run-row-meta {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.2rem 0;
+}
+
+.meta-cluster {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.meta-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.meta-chip {
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid var(--line);
+  line-height: 1.3;
+}
+
+.run-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.overview-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.overview-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.artifact-card {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.artifact-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+.artifact-name {
+  line-height: 1.45;
 }
 
 .badge {
@@ -229,6 +490,8 @@ dd {
   text-transform: capitalize;
   font-size: 0.9rem;
   font-weight: 700;
+  line-height: 1.2;
+  max-width: 100%;
 }
 
 .status-queued {
@@ -274,6 +537,7 @@ dd {
   letter-spacing: 0.14em;
   font-size: 0.78rem;
   color: var(--accent);
+  margin: 0;
 }
 
 .event-log {
@@ -292,7 +556,34 @@ dd {
   background: rgba(255, 255, 255, 0.65);
   border: 1px solid var(--line);
   display: grid;
-  gap: 0.25rem;
+  gap: 0.35rem;
+}
+
+.event-log strong {
+  line-height: 1.3;
+}
+
+.event-copy,
+.chapter-copy {
+  line-height: 1.55;
+}
+
+.chapter-card {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.chapter-card p,
+.chapter-card details {
+  margin: 0;
+}
+
+.chapter-topline {
+  gap: 0.85rem;
+}
+
+.chapter-topline h3 {
+  line-height: 1.35;
 }
 
 .chapter-preview {
@@ -317,10 +608,58 @@ code {
   .project-card,
   .run-row,
   .run-overview,
+  .stats-grid,
   .section-header,
   .chapter-topline,
   .shell-header {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .shell-header {
+    justify-items: start;
+  }
+
+  .project-card,
+  .run-row {
+    gap: 0.9rem;
+  }
+
+  .detail-item.inline-detail {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+
+  .run-row-top,
+  .panel-actions,
+  .meta-chip-row {
+    align-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .shell-header,
+  .shell-main {
+    width: min(1200px, calc(100% - 1.2rem));
+  }
+
+  .hero-card,
+  .panel,
+  .status-card,
+  .project-card,
+  .run-row,
+  .artifact-card,
+  .chapter-card {
+    border-radius: 20px;
+  }
+
+  .hero-card,
+  .panel,
+  .status-card {
+    padding: 1rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
   }
 }

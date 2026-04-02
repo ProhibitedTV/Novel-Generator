@@ -5,7 +5,7 @@
 {% block content %}
 <section class="panel">
   <div class="section-header">
-    <div>
+    <div class="page-header-copy">
       <p class="eyebrow">Project</p>
       <h1>{{ project.title }}</h1>
     </div>
@@ -19,7 +19,7 @@
     <div><dt>Target words</dt><dd>{{ project.desired_word_count }}</dd></div>
     <div><dt>Requested chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
     <div><dt>Chapter range</dt><dd>{{ project.min_words_per_chapter }}-{{ project.max_words_per_chapter }}</dd></div>
-    <div><dt>Preferred model</dt><dd>{{ project.preferred_model }}</dd></div>
+    <div><dt>Preferred model</dt><dd class="long-value">{{ project.preferred_model }}</dd></div>
   </dl>
 </section>
 
@@ -40,13 +40,24 @@
     </form>
   </article>
 
-  <article class="panel">
+  <article class="panel meta-panel">
     <h2>Provider snapshot</h2>
-    <p><strong>Status:</strong> {{ "Connected" if provider_status.reachable else "Unavailable" }}</p>
-    <p><strong>Base URL:</strong> {{ provider_config.base_url }}</p>
-    <p><strong>Default model:</strong> {{ provider_config.default_model }}</p>
+    <div class="detail-list">
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Status</span>
+        <span class="detail-value">{{ "Connected" if provider_status.reachable else "Unavailable" }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Base URL</span>
+        <span class="detail-value long-value">{{ provider_config.base_url }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Default model</span>
+        <span class="detail-value long-value">{{ provider_config.default_model }}</span>
+      </div>
+    </div>
     {% if provider_status.available_models %}
-      <ul>
+      <ul class="token-list">
         {% for model in provider_status.available_models %}
           <li>{{ model }}</li>
         {% endfor %}
@@ -66,11 +77,26 @@
     <div class="run-table">
       {% for run in project.runs|sort(attribute='created_at', reverse=True) %}
         <a class="run-row" href="/runs/{{ run.id }}">
-          <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
-          <span>{{ run.model_name }}</span>
-          <span>{{ run.requested_chapters }} chapters</span>
-          <span>{{ run.current_step }}</span>
-          <span>{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+          <div class="run-row-main">
+            <div class="run-row-top">
+              <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
+              <span class="run-row-title long-value">{{ run.model_name }}</span>
+            </div>
+            <div class="meta-chip-row">
+              <span class="meta-chip">{{ run.requested_chapters }} chapters</span>
+              <span class="meta-chip">{{ run.current_step }}</span>
+            </div>
+          </div>
+          <div class="run-row-meta">
+            <div class="meta-cluster">
+              <span class="run-meta-label">Created</span>
+              <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+            </div>
+            <div class="meta-cluster">
+              <span class="run-meta-label">Run ID</span>
+              <span class="detail-value long-value">{{ run.id }}</span>
+            </div>
+          </div>
         </a>
       {% endfor %}
     </div>
