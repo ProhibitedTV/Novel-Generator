@@ -1,43 +1,60 @@
 {% extends "base.html" %}
 
-{% block title %}Run {{ run.id }} - Novel Generator{% endblock %}
+{% block title %}Run for {{ project.title }} - Novel Generator{% endblock %}
 
 {% block content %}
-<section class="panel">
+<section
+  class="panel run-shell"
+  data-run-detail
+  data-run-id="{{ run.id }}"
+  data-run-status="{{ run.status.value }}"
+  data-run-step="{{ run.current_step }}"
+  data-run-current-chapter="{{ run.current_chapter or '' }}"
+>
   <div class="section-header">
     <div class="page-header-copy">
       <p class="eyebrow">Run</p>
       <h1>{{ project.title }}</h1>
+      <p class="hero-copy">This page keeps the current stage, live events, exports, and chapter-level recovery actions in one place.</p>
     </div>
-    <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
+    <div class="hero-actions">
+      <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
+      {% if run.status.value in ["queued", "running"] %}
+        <form method="post" action="/runs/{{ run.id }}/cancel">
+          <button class="danger" type="submit">Cancel run</button>
+        </form>
+      {% elif show_rerun %}
+        <form method="post" action="/runs/{{ run.id }}/rerun">
+          <button type="submit">Run again with same settings</button>
+        </form>
+      {% endif %}
+    </div>
   </div>
+
   <div class="run-overview">
     <div class="overview-card">
       <div class="overview-grid">
-        <div class="detail-item">
-          <span class="detail-label">Run ID</span>
-          <code class="detail-value long-value">{{ run.id }}</code>
-        </div>
         <div class="detail-item">
           <span class="detail-label">Model</span>
           <span class="detail-value long-value">{{ run.model_name }}</span>
         </div>
         <div class="detail-item inline-detail">
-          <span class="detail-label">Step</span>
-          <span class="detail-value" id="run-step">{{ run.current_step }}</span>
+          <span class="detail-label">Status</span>
+          <span class="badge status-{{ run.status.value }}" data-run-status-label>{{ run.status.value }}</span>
+        </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Current stage</span>
+          <span class="detail-value" data-run-step-label>{{ run.current_step }}</span>
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Current chapter</span>
-          <span class="detail-value" id="run-chapter">{{ run.current_chapter or "-" }}</span>
+          <span class="detail-value" data-run-chapter-label>{{ run.current_chapter or "-" }}</span>
         </div>
       </div>
     </div>
+
     <div class="overview-card">
       <div class="overview-grid">
-        <div class="detail-item inline-detail">
-          <span class="detail-label">Status</span>
-          <span id="run-status" class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
-        </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Queued</span>
           <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
@@ -53,6 +70,19 @@
       </div>
     </div>
   </div>
+
+  <div class="run-stepper" data-run-stepper>
+    {% for stage in run_stages %}
+      <article class="run-stage" data-stage="{{ stage.id }}">
+        <span class="run-stage-marker">{{ loop.index if loop.index <= 7 else "!" }}</span>
+        <div class="run-stage-copy">
+          <h3>{{ stage.label }}</h3>
+          <p>{{ stage.description }}</p>
+        </div>
+      </article>
+    {% endfor %}
+  </div>
+
   <div class="metric-grid">
     <div class="metric-card">
       <span class="detail-label">Planned chapters</span>
@@ -60,27 +90,40 @@
       <p class="metric-copy">Targeted for this run.</p>
     </div>
     <div class="metric-card">
-      <span class="detail-label">Chapters tracked</span>
-      <strong>{{ run.chapters|length }}</strong>
-      <p class="metric-copy">Saved checkpoints so far.</p>
+      <span class="detail-label">Completed chapters</span>
+      <strong>{{ completed_chapter_count }}</strong>
+      <p class="metric-copy">Saved checkpoints ready for review.</p>
     </div>
     <div class="metric-card">
       <span class="detail-label">Artifacts ready</span>
       <strong>{{ run.artifacts|length }}</strong>
-      <p class="metric-copy">Downloads appear as they are generated.</p>
+      <p class="metric-copy">Markdown and DOCX exports from this run.</p>
     </div>
   </div>
-  {% if run.status.value in ["queued", "running"] %}
-    <form method="post" action="/runs/{{ run.id }}/cancel" class="panel-actions">
-      <button class="danger" type="submit">Cancel run</button>
-    </form>
-  {% endif %}
+
   {% if run.error_message %}
     <p class="error-text">{{ run.error_message }}</p>
   {% endif %}
+
   {% if run.source_run_id %}
     <p class="notice long-value">This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.</p>
   {% endif %}
+
+  <details class="editor-shell technical-shell">
+    <summary>Technical details</summary>
+    <div class="detail-list">
+      <div class="detail-item">
+        <span class="detail-label">Run ID</span>
+        <code class="detail-value long-value">{{ run.id }}</code>
+      </div>
+      {% if run.source_run_id %}
+        <div class="detail-item">
+          <span class="detail-label">Source run</span>
+          <code class="detail-value long-value">{{ run.source_run_id }}</code>
+        </div>
+      {% endif %}
+    </div>
+  </details>
 </section>
 
 <section class="grid two-up">
@@ -88,11 +131,11 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Progress events</h2>
-        <p>Live worker updates land here as the queue advances.</p>
+        <p>Live worker updates appear here without changing the SSE payload shape.</p>
       </div>
       <p>{{ run.events|length }} logged</p>
     </div>
-    <ul id="event-log" class="event-log">
+    <ul class="event-log" data-event-log>
       {% for event in run.events|sort(attribute='sequence') %}
         <li class="event-item" data-sequence="{{ event.sequence }}">
           <div class="event-topline">
@@ -109,7 +152,7 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Artifacts</h2>
-        <p>Completed exports stay available for download from this run.</p>
+        <p>Finished exports stay attached to this run for download later.</p>
       </div>
       <p>{{ run.artifacts|length }} ready</p>
     </div>
@@ -126,7 +169,7 @@
         {% endfor %}
       </div>
     {% else %}
-      <p class="empty-state">Artifacts will appear here when the run completes.</p>
+      <p class="empty-state">Artifacts will appear here when the run reaches the export stage.</p>
     {% endif %}
   </article>
 </section>
@@ -135,7 +178,7 @@
   <div class="section-header">
     <div class="section-header-copy">
       <h2>Chapters</h2>
-      <p>Each chapter is stored independently so it can be reviewed or regenerated later.</p>
+      <p>Each chapter is saved independently so you can inspect the draft or restart from a specific point later.</p>
     </div>
     <p>{{ run.chapters|length }} tracked</p>
   </div>
@@ -188,58 +231,4 @@
     <p class="empty-state">No chapters created yet. They will appear here as the worker checkpoints progress.</p>
   {% endif %}
 </section>
-
-<script>
-  (() => {
-    const terminalStatuses = new Set(["completed", "failed", "canceled"]);
-    const log = document.getElementById("event-log");
-    const statusNode = document.getElementById("run-status");
-    const stepNode = document.getElementById("run-step");
-    const chapterNode = document.getElementById("run-chapter");
-    const source = new EventSource("/api/runs/{{ run.id }}/events");
-
-    function addEvent(payload) {
-      const item = document.createElement("li");
-      item.className = "event-item";
-      item.dataset.sequence = payload.sequence || "";
-      const summary = payload.payload?.message || payload.payload?.title || payload.payload?.chapter_number || "";
-      item.innerHTML = `
-        <div class="event-topline">
-          <span class="event-kind">${(payload.event_type || "update").replace(/_/g, " ")}</span>
-          <span class="event-sequence">#${payload.sequence || "-"}</span>
-        </div>
-        <p class="event-copy">${summary || "Waiting for the next update."}</p>
-      `;
-      log.appendChild(item);
-      log.scrollTop = log.scrollHeight;
-    }
-
-    source.onmessage = (event) => {
-      const payload = JSON.parse(event.data);
-      addEvent(payload);
-      statusNode.textContent = payload.run_status;
-      statusNode.className = `badge status-${payload.run_status}`;
-      stepNode.textContent = payload.current_step || "-";
-      chapterNode.textContent = payload.current_chapter || "-";
-    };
-
-    source.addEventListener("terminal", (event) => {
-      const payload = JSON.parse(event.data);
-      statusNode.textContent = payload.run_status;
-      statusNode.className = `badge status-${payload.run_status}`;
-      stepNode.textContent = payload.current_step || "-";
-      chapterNode.textContent = payload.current_chapter || "-";
-      source.close();
-      if (terminalStatuses.has(payload.run_status)) {
-        window.setTimeout(() => window.location.reload(), 1000);
-      }
-    });
-
-    source.onerror = () => {
-      if (terminalStatuses.has(statusNode.textContent.trim())) {
-        source.close();
-      }
-    };
-  })();
-</script>
 {% endblock %}

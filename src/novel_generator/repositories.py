@@ -16,7 +16,7 @@ from .models import (
     RunEvent,
     RunStatus,
 )
-from .schemas import ProjectCreate, ProviderConfigUpdate, RunCreate
+from .schemas import ProjectCreate, ProjectUpdate, ProviderConfigUpdate, RunCreate
 from .settings import Settings
 
 
@@ -75,6 +75,17 @@ def create_project(session: Session, payload: ProjectCreate) -> Project:
     return project
 
 
+def update_project(session: Session, project: Project, payload: ProjectUpdate) -> Project:
+    updates = payload.model_dump(exclude_unset=True)
+    if "notes" in updates and updates["notes"] == "":
+        updates["notes"] = None
+    for key, value in updates.items():
+        setattr(project, key, value)
+    project.updated_at = datetime.utcnow()
+    session.flush()
+    return project
+
+
 def get_run(session: Session, run_id: str) -> GenerationRun | None:
     stmt = (
         select(GenerationRun)
@@ -87,6 +98,20 @@ def get_run(session: Session, run_id: str) -> GenerationRun | None:
         )
     )
     return session.scalar(stmt)
+
+
+def list_recent_runs(session: Session, limit: int = 6) -> list[GenerationRun]:
+    stmt = (
+        select(GenerationRun)
+        .options(
+            selectinload(GenerationRun.project),
+            selectinload(GenerationRun.artifacts),
+            selectinload(GenerationRun.chapters),
+        )
+        .order_by(GenerationRun.created_at.desc())
+        .limit(limit)
+    )
+    return list(session.scalars(stmt).unique())
 
 
 def get_run_minimal(session: Session, run_id: str) -> GenerationRun | None:
@@ -111,13 +136,24 @@ def get_artifact(session: Session, artifact_id: str) -> Artifact | None:
 
 
 def create_run(session: Session, project: Project, payload: RunCreate) -> GenerationRun:
+    model_name = (payload.model_name or project.preferred_model).strip()
+    target_word_count = payload.target_word_count or project.desired_word_count
+    requested_chapters = payload.requested_chapters or project.requested_chapters
+    min_words_per_chapter = payload.min_words_per_chapter or project.min_words_per_chapter
+    max_words_per_chapter = payload.max_words_per_chapter or project.max_words_per_chapter
+
+    if not model_name:
+        raise ValueError("A model name is required.")
+    if max_words_per_chapter < min_words_per_chapter:
+        raise ValueError("Max words per chapter must be greater than or equal to min words per chapter.")
+
     run = GenerationRun(
         project_id=project.id,
-        model_name=(payload.model_name or project.preferred_model).strip(),
-        target_word_count=payload.target_word_count or project.desired_word_count,
-        requested_chapters=payload.requested_chapters or project.requested_chapters,
-        min_words_per_chapter=payload.min_words_per_chapter or project.min_words_per_chapter,
-        max_words_per_chapter=payload.max_words_per_chapter or project.max_words_per_chapter,
+        model_name=model_name,
+        target_word_count=target_word_count,
+        requested_chapters=requested_chapters,
+        min_words_per_chapter=min_words_per_chapter,
+        max_words_per_chapter=max_words_per_chapter,
         status=RunStatus.QUEUED,
         current_step="queued",
         source_run_id=payload.source_run_id,

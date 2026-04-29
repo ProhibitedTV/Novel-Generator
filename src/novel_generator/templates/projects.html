@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}Projects - Novel Generator{% endblock %}
+
+{% block content %}
+<section class="panel page-banner">
+  <div class="section-header">
+    <div class="page-header-copy">
+      <p class="eyebrow">Projects</p>
+      <h1>Reusable story setups for every run.</h1>
+      <p class="hero-copy">Projects hold the premise, length targets, chapter defaults, and preferred model so reruns and revisions stay consistent.</p>
+    </div>
+    <div class="hero-actions">
+      <a class="button" href="/projects/new">Create a project</a>
+      <a class="button secondary" href="/settings/provider">Provider settings</a>
+    </div>
+  </div>
+</section>
+
+{% if provider_guidance %}
+  <section class="callout callout-{{ provider_guidance.tone }}">
+    <div class="callout-copy">
+      <h2>{{ provider_guidance.title }}</h2>
+      <p>{{ provider_guidance.body }}</p>
+    </div>
+    <a class="button {{ 'secondary' if provider_guidance.tone == 'success' else '' }}" href="{{ provider_guidance.action_href }}">
+      {{ provider_guidance.action_label }}
+    </a>
+  </section>
+{% endif %}
+
+<section class="panel">
+  <div class="section-header">
+    <div class="section-header-copy">
+      <h2>Project library</h2>
+      <p>{{ projects|length }} tracked project{{ "" if projects|length == 1 else "s" }}</p>
+    </div>
+  </div>
+  {% if projects %}
+    <div class="project-list">
+      {% for project in projects %}
+        <a class="project-card" href="/projects/{{ project.id }}">
+          <div class="project-card-main">
+            <h3>{{ project.title }}</h3>
+            <p class="chapter-copy">{{ project.premise }}</p>
+            <div class="meta-chip-row">
+              <span class="meta-chip long-value">Model: {{ project.preferred_model }}</span>
+              {% if project.notes %}
+                <span class="meta-chip">Notes saved</span>
+              {% endif %}
+            </div>
+          </div>
+          <dl class="project-card-meta">
+            <div><dt>Words</dt><dd>{{ project.desired_word_count }}</dd></div>
+            <div><dt>Chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
+            <div><dt>Runs</dt><dd>{{ project.runs|length }}</dd></div>
+            <div><dt>Updated</dt><dd>{{ project.updated_at.strftime('%Y-%m-%d') }}</dd></div>
+          </dl>
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="empty-state">No projects yet. Create one to start saving reusable story settings and queueing runs with less friction.</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+
+{% block title %}Create Project - Novel Generator{% endblock %}
+
+{% block content %}
+<section class="panel page-banner">
+  <div class="section-header">
+    <div class="page-header-copy">
+      <p class="eyebrow">New project</p>
+      <h1>Create a reusable story setup.</h1>
+      <p class="hero-copy">Projects keep the premise, model, and run defaults together so your first queue action is confident and your next one is faster.</p>
+    </div>
+    <div class="hero-actions">
+      <a class="button secondary" href="/projects">Back to projects</a>
+      <a class="button secondary" href="/settings/provider">Provider settings</a>
+    </div>
+  </div>
+</section>
+
+{% if page_error %}
+  <div class="error-text">{{ page_error }}</div>
+{% endif %}
+
+{% if provider_guidance %}
+  <section class="callout callout-{{ provider_guidance.tone }}">
+    <div class="callout-copy">
+      <h2>{{ provider_guidance.title }}</h2>
+      <p>{{ provider_guidance.body }}</p>
+    </div>
+    <a class="button {{ 'secondary' if provider_guidance.tone == 'success' else '' }}" href="{{ provider_guidance.action_href }}">
+      {{ provider_guidance.action_label }}
+    </a>
+  </section>
+{% endif %}
+
+<section class="grid two-up form-layout">
+  <article class="panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Project details</h2>
+        <p>Start with the premise and a verified model. The numeric settings stay as easy defaults for the first run.</p>
+      </div>
+    </div>
+
+    {% if form_errors.__all__ %}
+      <p class="error-text">{{ form_errors.__all__ }}</p>
+    {% endif %}
+
+    <form method="post" action="/projects/new" class="stack-form">
+      <label>
+        Title
+        <input class="{{ 'input-invalid' if form_errors.title }}" type="text" name="title" value="{{ form_values.title }}" required placeholder="The Glass Orchard">
+      </label>
+      {% if form_errors.title %}<p class="field-error">{{ form_errors.title }}</p>{% endif %}
+
+      <label>
+        Premise
+        <textarea class="{{ 'input-invalid' if form_errors.premise }}" name="premise" rows="5" required placeholder="A disgraced archivist uncovers a living map hidden beneath a dying city.">{{ form_values.premise }}</textarea>
+      </label>
+      {% if form_errors.premise %}<p class="field-error">{{ form_errors.premise }}</p>{% endif %}
+
+      <div class="form-section">
+        <div class="section-header-copy">
+          <h3>Preferred model</h3>
+          <p>Use a detected model when one is available, or type a model name manually if you already know what you want.</p>
+        </div>
+        <label>
+          Preferred model
+          <input id="project-preferred-model" data-model-input class="{{ 'input-invalid' if form_errors.preferred_model }}" type="text" name="preferred_model" value="{{ form_values.preferred_model }}" required>
+        </label>
+        {% if form_errors.preferred_model %}<p class="field-error">{{ form_errors.preferred_model }}</p>{% endif %}
+        <p class="field-note">Verified models come from the currently saved Ollama configuration.</p>
+        {% if provider_status.available_models %}
+          <div class="model-picker">
+            <div class="model-picker-header">
+              <div class="section-header-copy">
+                <p class="model-picker-title">Detected models</p>
+                <p class="model-picker-copy">Click a model to fill the preferred model field instantly.</p>
+              </div>
+              <p class="selection-note">Selected chips stay in sync with the input above.</p>
+            </div>
+            <ul class="model-chip-list">
+              {% for model in provider_status.available_models %}
+                <li>
+                  <button
+                    class="model-chip"
+                    type="button"
+                    data-model-choice
+                    data-target="project-preferred-model"
+                    data-model="{{ model }}"
+                    aria-pressed="false"
+                  >
+                    <span class="model-chip-value">{{ model }}</span>
+                  </button>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% else %}
+          <p class="empty-state">No verified models are available yet. Open provider settings, save the Ollama connection, and refresh models.</p>
+        {% endif %}
+      </div>
+
+      <div class="form-section">
+        <div class="section-header-copy">
+          <h3>Basic defaults for new runs</h3>
+          <p>These are starting values, not permanent locks. Every run can still be adjusted later.</p>
+        </div>
+        <div class="grid compact">
+          <label>
+            Total words
+            <input class="{{ 'input-invalid' if form_errors.desired_word_count }}" type="number" name="desired_word_count" value="{{ form_values.desired_word_count }}" min="1000">
+          </label>
+          <label>
+            Chapters
+            <input class="{{ 'input-invalid' if form_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ form_values.requested_chapters }}" min="1">
+          </label>
+        </div>
+        {% if form_errors.desired_word_count %}<p class="field-error">{{ form_errors.desired_word_count }}</p>{% endif %}
+        {% if form_errors.requested_chapters %}<p class="field-error">{{ form_errors.requested_chapters }}</p>{% endif %}
+
+        <div class="grid compact">
+          <label>
+            Min words per chapter
+            <input class="{{ 'input-invalid' if form_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ form_values.min_words_per_chapter }}" min="100">
+          </label>
+          <label>
+            Max words per chapter
+            <input class="{{ 'input-invalid' if form_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ form_values.max_words_per_chapter }}" min="100">
+          </label>
+        </div>
+        {% if form_errors.min_words_per_chapter %}<p class="field-error">{{ form_errors.min_words_per_chapter }}</p>{% endif %}
+        {% if form_errors.max_words_per_chapter %}<p class="field-error">{{ form_errors.max_words_per_chapter }}</p>{% endif %}
+      </div>
+
+      <label>
+        Notes
+        <textarea name="notes" rows="4" placeholder="Optional worldbuilding, tone, POV, or continuity reminders.">{{ form_values.notes }}</textarea>
+      </label>
+
+      <div class="form-actions">
+        <button type="submit">Create project</button>
+        <a class="button secondary" href="/projects">Cancel</a>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel meta-panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Provider snapshot</h2>
+        <p>The new project form stays close to the saved Ollama state so you know what is verified right now.</p>
+      </div>
+      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">
+        {{ "Connected" if provider_status.reachable else "Unavailable" }}
+      </span>
+    </div>
+    <div class="detail-list">
+      <div class="detail-item">
+        <span class="detail-label">Base URL</span>
+        <span class="detail-value long-value">{{ provider_config.base_url }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Saved default model</span>
+        <span class="detail-value long-value">{{ provider_config.default_model }}</span>
+      </div>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Detected models</span>
+        <span class="detail-value">{{ provider_status.available_models|length }}</span>
+      </div>
+    </div>
+    {% if provider_status.error %}
+      <p class="error-text">{{ provider_status.error }}</p>
+    {% endif %}
+    <a class="button secondary" href="/settings/provider">Manage provider settings</a>
+  </aside>
+</section>
+{% endblock %}

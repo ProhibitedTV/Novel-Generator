@@ -9,17 +9,19 @@
 </head>
 <body>
   <header class="shell-header">
-    <div>
+    <div class="brand-block">
       <a class="brand" href="/">Novel Generator</a>
       <p class="brand-copy">Self-hosted long-form fiction generation for Ollama.</p>
     </div>
     <nav class="shell-nav">
-      <a href="/">Dashboard</a>
+      <a class="{{ 'is-active' if active_nav == 'dashboard' else '' }}" href="/">Dashboard</a>
+      <a class="{{ 'is-active' if active_nav == 'projects' else '' }}" href="/projects">Projects</a>
+      <a class="{{ 'is-active' if active_nav == 'provider' else '' }}" href="/settings/provider">Provider</a>
     </nav>
   </header>
   <main class="shell-main">
     {% if message %}
-      <div class="notice">{{ message }}</div>
+      <div class="notice success-notice">{{ message }}</div>
     {% endif %}
     {% block content %}{% endblock %}
   </main>

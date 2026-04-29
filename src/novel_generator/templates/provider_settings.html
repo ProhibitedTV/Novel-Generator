@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Provider Settings - Novel Generator{% endblock %}
+
+{% block content %}
+<section class="panel page-banner">
+  <div class="section-header">
+    <div class="page-header-copy">
+      <p class="eyebrow">Provider</p>
+      <h1>Saved Ollama connection and model defaults.</h1>
+      <p class="hero-copy">This page is the control point for first-run setup. Save the connection, choose a verified default model, then use the live actions to confirm what Ollama reports.</p>
+    </div>
+    <div class="hero-actions">
+      <a class="button secondary" href="/">Back to dashboard</a>
+      <a class="button secondary" href="/projects/new">Create a project</a>
+    </div>
+  </div>
+</section>
+
+{% if page_error %}
+  <div class="error-text">{{ page_error }}</div>
+{% endif %}
+
+{% if provider_guidance %}
+  <section class="callout callout-{{ provider_guidance.tone }}">
+    <div class="callout-copy">
+      <h2>{{ provider_guidance.title }}</h2>
+      <p>{{ provider_guidance.body }}</p>
+    </div>
+    <a class="button {{ 'secondary' if provider_guidance.tone == 'success' else '' }}" href="{{ provider_guidance.action_href }}">
+      {{ provider_guidance.action_label }}
+    </a>
+  </section>
+{% endif %}
+
+<section class="grid two-up form-layout">
+  <article class="panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Saved provider settings</h2>
+        <p>Save first, then use the live tools beside this form to verify the saved connection and refresh detected models.</p>
+      </div>
+    </div>
+
+    {% if form_errors.__all__ %}
+      <p class="error-text">{{ form_errors.__all__ }}</p>
+    {% endif %}
+
+    <form method="post" action="/settings/providers/ollama" class="stack-form">
+      <label>
+        Ollama base URL
+        <input class="{{ 'input-invalid' if form_errors.base_url }}" type="text" name="base_url" value="{{ form_values.base_url }}" required>
+      </label>
+      {% if form_errors.base_url %}<p class="field-error">{{ form_errors.base_url }}</p>{% endif %}
+      <p class="field-note">Examples: `http://127.0.0.1:11434`, `http://host.docker.internal:11434`, or `http://ollama:11434` inside the compose network.</p>
+
+      <label>
+        Default model
+        <input id="provider-default-model" data-model-input class="{{ 'input-invalid' if form_errors.default_model }}" type="text" name="default_model" value="{{ form_values.default_model }}" required>
+      </label>
+      {% if form_errors.default_model %}<p class="field-error">{{ form_errors.default_model }}</p>{% endif %}
+      <p class="field-note">When verified, this becomes the starting point for new project forms.</p>
+
+      {% if provider_status.available_models %}
+        <div class="model-picker">
+          <div class="model-picker-header">
+            <div class="section-header-copy">
+              <p class="model-picker-title">Detected models</p>
+              <p class="model-picker-copy">Click a model to fill the saved default model field.</p>
+            </div>
+            <p class="selection-note">These reflect the currently saved provider connection.</p>
+          </div>
+          <ul class="model-chip-list" data-provider-model-list data-model-target="provider-default-model">
+            {% for model in provider_status.available_models %}
+              <li>
+                <button
+                  class="model-chip"
+                  type="button"
+                  data-model-choice
+                  data-target="provider-default-model"
+                  data-model="{{ model }}"
+                  aria-pressed="false"
+                >
+                  <span class="model-chip-value">{{ model }}</span>
+                </button>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% else %}
+        <p class="empty-state" data-provider-model-empty>No models are currently detected from the saved provider connection.</p>
+        <ul class="model-chip-list is-hidden" data-provider-model-list data-model-target="provider-default-model"></ul>
+      {% endif %}
+
+      <div class="form-actions">
+        <button type="submit">Save provider settings</button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel meta-panel" data-provider-console>
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Live provider check</h2>
+        <p>These actions use the existing provider APIs to verify the saved configuration without leaving the page.</p>
+      </div>
+      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}" data-provider-badge>
+        {{ "Connected" if provider_status.reachable else "Unavailable" }}
+      </span>
+    </div>
+
+    <div class="detail-list">
+      <div class="detail-item">
+        <span class="detail-label">Saved base URL</span>
+        <span class="detail-value long-value" data-provider-base-url>{{ provider_status.base_url }}</span>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Saved default model</span>
+        <span class="detail-value long-value" data-provider-default-model>{{ provider_status.default_model }}</span>
+      </div>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Detected models</span>
+        <span class="detail-value" data-provider-model-count>{{ provider_status.available_models|length }}</span>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button type="button" class="secondary" data-provider-action="status">Test connection</button>
+      <button type="button" class="secondary" data-provider-action="models">Refresh models</button>
+    </div>
+
+    {% if provider_status.error %}
+      <p class="error-text" data-provider-error>{{ provider_status.error }}</p>
+    {% else %}
+      <p class="field-note" data-provider-error></p>
+    {% endif %}
+  </aside>
+</section>
+{% endblock %}

@@ -3,19 +3,40 @@
 {% block title %}Dashboard - Novel Generator{% endblock %}
 
 {% block content %}
-<section class="hero-card">
+<section class="hero-card dashboard-hero">
   <div class="page-header-copy">
-    <p class="eyebrow">Control room</p>
-    <h1>Run local novel jobs without babysitting the browser.</h1>
-    <p class="hero-copy">Projects keep the premise and defaults. Runs queue in the background, stream progress, and save artifacts for download or chapter-level regeneration.</p>
+    <p class="eyebrow">{{ "First run" if not has_projects else "Command center" }}</p>
+    <h1>
+      {% if not has_projects %}
+        Connect Ollama, choose a verified model, and queue your first novel run.
+      {% else %}
+        Keep projects moving without babysitting the browser.
+      {% endif %}
+    </h1>
+    <p class="hero-copy">
+      {% if not has_projects %}
+        Novel Generator walks you from provider setup to a reusable project so the first queued run feels deliberate instead of technical.
+      {% else %}
+        Your saved projects, recent runs, and provider health stay in one place so returning to the tool feels quick and calm.
+      {% endif %}
+    </p>
+    <div class="hero-actions">
+      <a class="button" href="{{ primary_action.href }}">{{ primary_action.label }}</a>
+      <a class="button secondary" href="/projects">Browse projects</a>
+    </div>
   </div>
-  <div class="status-card meta-panel">
-    <h2>Ollama</h2>
-    <div class="detail-list">
-      <div class="detail-item inline-detail">
-        <span class="detail-label">Status</span>
-        <span class="detail-value">{{ "Connected" if provider_status.reachable else "Unavailable" }}</span>
+
+  <aside class="status-card meta-panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Provider summary</h2>
+        <p>Live status from the saved Ollama configuration.</p>
       </div>
+      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">
+        {{ "Connected" if provider_status.reachable else "Unavailable" }}
+      </span>
+    </div>
+    <div class="detail-list">
       <div class="detail-item">
         <span class="detail-label">Base URL</span>
         <span class="detail-value long-value">{{ provider_config.base_url }}</span>
@@ -28,144 +49,169 @@
         <span class="detail-label">Detected models</span>
         <span class="detail-value">{{ provider_status.available_models|length }}</span>
       </div>
-    </div>
-    {% if provider_status.error %}
-      <p class="error-text">{{ provider_status.error }}</p>
-    {% endif %}
-  </div>
-</section>
-
-<section class="grid two-up">
-  <article class="panel">
-    <div class="section-header">
-      <div class="section-header-copy">
-        <h2>Create a project</h2>
-        <p>Set the premise, pick a default model, and keep the details editable for later runs.</p>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Verified default</span>
+        <span class="detail-value">{{ "Yes" if provider_status.reachable and provider_config.default_model in provider_status.available_models else "Not yet" }}</span>
       </div>
     </div>
-    <form method="post" action="/projects/new" class="stack-form">
-      <label>Title <input type="text" name="title" required placeholder="The Glass Orchard"></label>
-      <label>Premise <textarea name="premise" rows="5" required placeholder="A disgraced archivist uncovers a living map hidden beneath a dying city."></textarea></label>
-      <div class="grid compact">
-        <label>Total words <input type="number" name="desired_word_count" value="40000" min="1000"></label>
-        <label>Chapters <input type="number" name="requested_chapters" value="12" min="1"></label>
-      </div>
-      <div class="grid compact">
-        <label>Min words/chapter <input type="number" name="min_words_per_chapter" value="1200" min="100"></label>
-        <label>Max words/chapter <input type="number" name="max_words_per_chapter" value="2200" min="100"></label>
-      </div>
-      <label>
-        Preferred model
-        <input id="dashboard-preferred-model" data-model-input type="text" name="preferred_model" value="{{ provider_config.default_model }}" required>
-      </label>
-      <p class="field-note">Use the detected Ollama models below as quick fill buttons, or type a model name manually.</p>
+    <div class="meta-chip-row">
       {% if provider_status.available_models %}
-        <div class="model-picker">
-          <div class="model-picker-header">
-            <div class="section-header-copy">
-              <p class="model-picker-title">Quick pick for this project</p>
-              <p class="model-picker-copy">Click a model to populate the preferred model field.</p>
-            </div>
-            <p class="selection-note">Selected chips stay in sync with the input above.</p>
-          </div>
-          <ul class="model-chip-list">
-            {% for model in provider_status.available_models %}
-              <li>
-                <button
-                  class="model-chip"
-                  type="button"
-                  data-model-choice
-                  data-target="dashboard-preferred-model"
-                  data-model="{{ model }}"
-                  aria-pressed="false"
-                >
-                  <span class="model-chip-value">{{ model }}</span>
-                </button>
-              </li>
-            {% endfor %}
-          </ul>
-        </div>
-      {% endif %}
-      <label>Notes <textarea name="notes" rows="3" placeholder="Optional worldbuilding, tone, or POV reminders."></textarea></label>
-      <button type="submit">Create project</button>
-    </form>
-  </article>
-
-  <article class="panel">
-    <div class="section-header">
-      <div class="section-header-copy">
-        <h2>Provider settings</h2>
-        <p>Point the app at an Ollama host and choose the model used as the default starting point.</p>
-      </div>
-      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">{{ "Connected" if provider_status.reachable else "Unavailable" }}</span>
-    </div>
-    <form method="post" action="/settings/providers/ollama" class="stack-form">
-      <label>Ollama base URL <input type="text" name="base_url" value="{{ provider_config.base_url }}" required></label>
-      <label>
-        Default model
-        <input id="provider-default-model" data-model-input type="text" name="default_model" value="{{ provider_config.default_model }}" required>
-      </label>
-      <p class="field-note">This is the model prefilled for new projects. It can still be overridden per project or per run.</p>
-      <button type="submit">Save provider settings</button>
-    </form>
-    <div class="model-list">
-      <div class="section-header-copy">
-        <h3>Available models</h3>
-        <p>Detected live from Ollama. Click any model to fill the provider default field.</p>
-      </div>
-      {% if provider_status.available_models %}
-        <ul class="model-chip-list">
-          {% for model in provider_status.available_models %}
-            <li>
-              <button
-                class="model-chip"
-                type="button"
-                data-model-choice
-                data-target="provider-default-model"
-                data-model="{{ model }}"
-                aria-pressed="false"
-              >
-                <span class="model-chip-value">{{ model }}</span>
-              </button>
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="empty-state">No models were returned yet. Once Ollama reports them, they will show up here as quick-select chips.</p>
+        {% for model in provider_status.available_models[:3] %}
+          <span class="meta-chip long-value">{{ model }}</span>
+        {% endfor %}
       {% endif %}
     </div>
-  </article>
+    <a class="button secondary" href="/settings/provider">Manage provider</a>
+  </aside>
 </section>
 
-<section class="panel">
-  <div class="section-header">
-    <h2>Projects</h2>
-    <p>{{ projects|length }} tracked project{{ "" if projects|length == 1 else "s" }}</p>
-  </div>
-  {% if projects %}
-    <div class="project-list">
-      {% for project in projects %}
-        <a class="project-card" href="/projects/{{ project.id }}">
-          <div class="project-card-main">
-            <h3>{{ project.title }}</h3>
-            <p class="chapter-copy">{{ project.premise }}</p>
-            <div class="meta-chip-row">
-              <span class="meta-chip long-value">Model: {{ project.preferred_model }}</span>
-              {% if project.notes %}
-                <span class="meta-chip">Notes saved</span>
-              {% endif %}
-            </div>
+{% if provider_guidance %}
+  <section class="callout callout-{{ provider_guidance.tone }}">
+    <div class="callout-copy">
+      <h2>{{ provider_guidance.title }}</h2>
+      <p>{{ provider_guidance.body }}</p>
+    </div>
+    <a class="button {{ 'secondary' if provider_guidance.tone == 'success' else '' }}" href="{{ provider_guidance.action_href }}">
+      {{ provider_guidance.action_label }}
+    </a>
+  </section>
+{% endif %}
+
+{% if not has_projects %}
+  <section class="panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Get ready in four steps</h2>
+        <p>The checklist stays tied to real system state, so you can always tell what is blocking the first run.</p>
+      </div>
+    </div>
+    <ol class="checklist">
+      {% for step in onboarding_steps %}
+        <li class="checklist-item {{ 'is-complete' if step.done else 'is-pending' }}">
+          <div class="checklist-marker">
+            <span class="badge status-{{ 'completed' if step.done else 'queued' }}">{{ "Done" if step.done else "Next" }}</span>
           </div>
-          <dl class="project-card-meta">
-            <div><dt>Words</dt><dd>{{ project.desired_word_count }}</dd></div>
-            <div><dt>Chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
-            <div><dt>Runs</dt><dd>{{ project.runs|length }}</dd></div>
-          </dl>
-        </a>
+          <div class="checklist-copy">
+            <h3>{{ step.title }}</h3>
+            <p>{{ step.description }}</p>
+          </div>
+          <a class="button secondary" href="{{ step.action_href }}">{{ step.action_label }}</a>
+        </li>
       {% endfor %}
+    </ol>
+  </section>
+
+  <section class="grid two-up">
+    <article class="panel action-panel">
+      <p class="eyebrow">Step 1</p>
+      <h2>Provider setup</h2>
+      <p class="panel-intro">Save your Ollama base URL, pick a verified default model, and use the live actions to confirm the tool can see what Ollama exposes.</p>
+      <a class="button" href="/settings/provider">Open provider settings</a>
+    </article>
+
+    <article class="panel action-panel">
+      <p class="eyebrow">Step 2</p>
+      <h2>Create a reusable project</h2>
+      <p class="panel-intro">Once the provider is ready, create a project with premise, target length, and chapter defaults so future runs start from a clean baseline.</p>
+      <a class="button {{ '' if ready_for_projects else 'secondary' }}" href="/projects/new">Create first project</a>
+    </article>
+  </section>
+{% else %}
+  <section class="grid two-up">
+    <article class="panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>Recent projects</h2>
+          <p>Your latest reusable story setups.</p>
+        </div>
+        <a class="button secondary" href="/projects">View all</a>
+      </div>
+      <div class="project-list">
+        {% for project in recent_projects %}
+          <a class="project-card" href="/projects/{{ project.id }}">
+            <div class="project-card-main">
+              <h3>{{ project.title }}</h3>
+              <p class="chapter-copy">{{ project.premise }}</p>
+              <div class="meta-chip-row">
+                <span class="meta-chip long-value">Model: {{ project.preferred_model }}</span>
+                <span class="meta-chip">{{ project.runs|length }} run{{ "" if project.runs|length == 1 else "s" }}</span>
+              </div>
+            </div>
+            <dl class="project-card-meta">
+              <div><dt>Words</dt><dd>{{ project.desired_word_count }}</dd></div>
+              <div><dt>Chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
+              <div><dt>Updated</dt><dd>{{ project.updated_at.strftime('%Y-%m-%d') }}</dd></div>
+            </dl>
+          </a>
+        {% endfor %}
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>Recent runs</h2>
+          <p>The newest background jobs across every project.</p>
+        </div>
+      </div>
+      {% if recent_runs %}
+        <div class="run-table">
+          {% for run in recent_runs %}
+            <a class="run-row" href="/runs/{{ run.id }}">
+              <div class="run-row-main">
+                <div class="run-row-top">
+                  <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
+                  <span class="run-row-title">{{ run.project.title }}</span>
+                </div>
+                <div class="meta-chip-row">
+                  <span class="meta-chip long-value">{{ run.model_name }}</span>
+                  <span class="meta-chip">{{ run.current_step }}</span>
+                  <span class="meta-chip">{{ run.requested_chapters }} chapters</span>
+                </div>
+              </div>
+              <div class="run-row-meta">
+                <div class="meta-cluster">
+                  <span class="run-meta-label">Created</span>
+                  <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                </div>
+                <div class="meta-cluster">
+                  <span class="run-meta-label">Progress</span>
+                  <span class="detail-value">{{ run.chapters|length }} tracked / {{ run.requested_chapters }} planned</span>
+                </div>
+              </div>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty-state">No runs yet. Create a project, then queue your first background job.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Quick actions</h2>
+        <p>Common next steps once your library is active.</p>
+      </div>
     </div>
-  {% else %}
-    <p class="empty-state">No projects yet. Create one above to start queueing novels.</p>
-  {% endif %}
-</section>
+    <div class="quick-action-grid">
+      <a class="action-card" href="/projects/new">
+        <p class="eyebrow">New work</p>
+        <h3>Create a project</h3>
+        <p>Save a new premise, chapter target, and preferred model.</p>
+      </a>
+      <a class="action-card" href="/projects">
+        <p class="eyebrow">Library</p>
+        <h3>Open all projects</h3>
+        <p>Browse the full project list and jump into any run history.</p>
+      </a>
+      <a class="action-card" href="/settings/provider">
+        <p class="eyebrow">Provider</p>
+        <h3>Check Ollama health</h3>
+        <p>Refresh detected models or adjust the saved connection details.</p>
+      </a>
+    </div>
+  </section>
+{% endif %}
 {% endblock %}

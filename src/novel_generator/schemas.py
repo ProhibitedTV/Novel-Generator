@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import ChapterStatus, RunStatus
 
@@ -17,18 +17,48 @@ class ProviderCapabilities(BaseModel):
 
 
 class ProviderConfigUpdate(BaseModel):
-    base_url: str
-    default_model: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    base_url: str = Field(min_length=1)
+    default_model: str = Field(min_length=1)
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("Enter a full Ollama URL starting with http:// or https://.")
+        return value.rstrip("/")
 
 
 class ProjectCreate(BaseModel):
-    title: str
-    premise: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(min_length=1)
+    premise: str = Field(min_length=1)
     desired_word_count: int = Field(ge=1)
     requested_chapters: int = Field(ge=1)
     min_words_per_chapter: int = Field(ge=1)
     max_words_per_chapter: int = Field(ge=1)
-    preferred_model: str
+    preferred_model: str = Field(min_length=1)
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def validate_ranges(self) -> "ProjectCreate":
+        if self.max_words_per_chapter < self.min_words_per_chapter:
+            raise ValueError("Max words per chapter must be greater than or equal to min words per chapter.")
+        return self
+
+
+class ProjectUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str | None = None
+    premise: str | None = None
+    desired_word_count: int | None = Field(default=None, ge=1)
+    requested_chapters: int | None = Field(default=None, ge=1)
+    min_words_per_chapter: int | None = Field(default=None, ge=1)
+    max_words_per_chapter: int | None = Field(default=None, ge=1)
+    preferred_model: str | None = None
     notes: str | None = None
 
 
@@ -69,6 +99,8 @@ class RunEventRead(BaseModel):
 
 
 class RunCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     project_id: str
     model_name: str | None = None
     target_word_count: int | None = Field(default=None, ge=1)

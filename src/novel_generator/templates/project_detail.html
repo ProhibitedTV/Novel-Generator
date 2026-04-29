@@ -3,18 +3,23 @@
 {% block title %}{{ project.title }} - Novel Generator{% endblock %}
 
 {% block content %}
-<section class="panel">
+<section class="panel page-banner">
   <div class="section-header">
     <div class="page-header-copy">
       <p class="eyebrow">Project</p>
       <h1>{{ project.title }}</h1>
+      <p class="hero-copy">{{ project.premise }}</p>
     </div>
-    <a class="button secondary" href="/">Back to dashboard</a>
+    <div class="hero-actions">
+      <a class="button secondary" href="/projects">Back to projects</a>
+      <a class="button secondary" href="/settings/provider">Provider settings</a>
+    </div>
   </div>
-  <p class="lead">{{ project.premise }}</p>
+
   {% if project.notes %}
     <p class="muted">{{ project.notes }}</p>
   {% endif %}
+
   <dl class="stats-grid">
     <div><dt>Target words</dt><dd>{{ project.desired_word_count }}</dd></div>
     <div><dt>Requested chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
@@ -23,28 +28,141 @@
   </dl>
 </section>
 
-<section class="grid two-up">
+{% if page_error %}
+  <div class="error-text">{{ page_error }}</div>
+{% endif %}
+
+{% if provider_guidance %}
+  <section class="callout callout-{{ provider_guidance.tone }}">
+    <div class="callout-copy">
+      <h2>{{ provider_guidance.title }}</h2>
+      <p>{{ provider_guidance.body }}</p>
+    </div>
+    <a class="button {{ 'secondary' if provider_guidance.tone == 'success' else '' }}" href="{{ provider_guidance.action_href }}">
+      {{ provider_guidance.action_label }}
+    </a>
+  </section>
+{% endif %}
+
+<section class="panel">
+  <details class="editor-shell" {% if open_edit_form %}open{% endif %}>
+    <summary>Edit project defaults</summary>
+
+    {% if edit_errors.__all__ %}
+      <p class="error-text">{{ edit_errors.__all__ }}</p>
+    {% endif %}
+
+    <form method="post" action="/projects/{{ project.id }}/edit" class="stack-form spaced-form">
+      <div class="grid two-up form-layout-tight">
+        <div class="form-section">
+          <label>
+            Title
+            <input class="{{ 'input-invalid' if edit_errors.title }}" type="text" name="title" value="{{ edit_values.title }}" required>
+          </label>
+          {% if edit_errors.title %}<p class="field-error">{{ edit_errors.title }}</p>{% endif %}
+
+          <label>
+            Premise
+            <textarea class="{{ 'input-invalid' if edit_errors.premise }}" name="premise" rows="5" required>{{ edit_values.premise }}</textarea>
+          </label>
+          {% if edit_errors.premise %}<p class="field-error">{{ edit_errors.premise }}</p>{% endif %}
+
+          <label>
+            Preferred model
+            <input id="project-edit-model" data-model-input class="{{ 'input-invalid' if edit_errors.preferred_model }}" type="text" name="preferred_model" value="{{ edit_values.preferred_model }}" required>
+          </label>
+          {% if edit_errors.preferred_model %}<p class="field-error">{{ edit_errors.preferred_model }}</p>{% endif %}
+
+          {% if provider_status.available_models %}
+            <ul class="model-chip-list">
+              {% for model in provider_status.available_models %}
+                <li>
+                  <button
+                    class="model-chip"
+                    type="button"
+                    data-model-choice
+                    data-target="project-edit-model"
+                    data-model="{{ model }}"
+                    aria-pressed="false"
+                  >
+                    <span class="model-chip-value">{{ model }}</span>
+                  </button>
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </div>
+
+        <div class="form-section">
+          <div class="grid compact">
+            <label>
+              Total words
+              <input class="{{ 'input-invalid' if edit_errors.desired_word_count }}" type="number" name="desired_word_count" value="{{ edit_values.desired_word_count }}" min="1000">
+            </label>
+            <label>
+              Chapters
+              <input class="{{ 'input-invalid' if edit_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ edit_values.requested_chapters }}" min="1">
+            </label>
+          </div>
+          {% if edit_errors.desired_word_count %}<p class="field-error">{{ edit_errors.desired_word_count }}</p>{% endif %}
+          {% if edit_errors.requested_chapters %}<p class="field-error">{{ edit_errors.requested_chapters }}</p>{% endif %}
+
+          <div class="grid compact">
+            <label>
+              Min words per chapter
+              <input class="{{ 'input-invalid' if edit_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ edit_values.min_words_per_chapter }}" min="100">
+            </label>
+            <label>
+              Max words per chapter
+              <input class="{{ 'input-invalid' if edit_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ edit_values.max_words_per_chapter }}" min="100">
+            </label>
+          </div>
+          {% if edit_errors.min_words_per_chapter %}<p class="field-error">{{ edit_errors.min_words_per_chapter }}</p>{% endif %}
+          {% if edit_errors.max_words_per_chapter %}<p class="field-error">{{ edit_errors.max_words_per_chapter }}</p>{% endif %}
+
+          <label>
+            Notes
+            <textarea name="notes" rows="4">{{ edit_values.notes }}</textarea>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit">Save project defaults</button>
+      </div>
+    </form>
+  </details>
+</section>
+
+<section class="grid two-up form-layout">
   <article class="panel">
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Queue a run</h2>
-        <p>Keep the project defaults or swap in any detected Ollama model before sending the run to the worker.</p>
+        <p>Use the project defaults as a starting point, then adjust only what matters for this run.</p>
       </div>
     </div>
+
+    {% if run_errors.__all__ %}
+      <p class="error-text">{{ run_errors.__all__ }}</p>
+    {% endif %}
+
     <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form">
       <label>
         Model
-        <input id="project-run-model" data-model-input type="text" name="model_name" value="{{ project.preferred_model }}" required>
+        <input id="project-run-model" data-model-input class="{{ 'input-invalid' if run_errors.model_name }}" type="text" name="model_name" value="{{ run_values.model_name }}" required>
       </label>
-      <p class="field-note">Click an available model below to fill this field instantly, or type any installed model name manually.</p>
+      {% if run_errors.model_name %}<p class="field-error">{{ run_errors.model_name }}</p>{% endif %}
+      <p class="field-note">Pick a detected model for the safest first-run experience, or type one manually if you already know it exists in Ollama.</p>
+
       {% if provider_status.available_models %}
         <div class="model-picker">
           <div class="model-picker-header">
             <div class="section-header-copy">
-              <p class="model-picker-title">Quick pick for this run</p>
-              <p class="model-picker-copy">Available models stay clickable so you can compare or swap without editing text.</p>
+              <p class="model-picker-title">Verified models for this run</p>
+              <p class="model-picker-copy">Click a model to fill the run form instantly.</p>
             </div>
-            <p class="selection-note">The selected chip mirrors the current input value.</p>
+            <p class="selection-note">The selected chip follows the current input value.</p>
           </div>
           <ul class="model-chip-list">
             {% for model in provider_status.available_models %}
@@ -63,38 +181,65 @@
             {% endfor %}
           </ul>
         </div>
+      {% else %}
+        <p class="empty-state">No verified models are available right now. Fix the provider or pull a model before queueing the run.</p>
       {% endif %}
-      <div class="grid compact">
-        <label>Total words <input type="number" name="target_word_count" value="{{ project.desired_word_count }}" min="1000"></label>
-        <label>Chapters <input type="number" name="requested_chapters" value="{{ project.requested_chapters }}" min="1"></label>
+
+      <div class="form-section">
+        <div class="section-header-copy">
+          <h3>Basic defaults for this run</h3>
+          <p>These values are easy to tweak here without changing the saved project.</p>
+        </div>
+        <div class="grid compact">
+          <label>
+            Total words
+            <input class="{{ 'input-invalid' if run_errors.target_word_count }}" type="number" name="target_word_count" value="{{ run_values.target_word_count }}" min="1000">
+          </label>
+          <label>
+            Chapters
+            <input class="{{ 'input-invalid' if run_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ run_values.requested_chapters }}" min="1">
+          </label>
+        </div>
+        {% if run_errors.target_word_count %}<p class="field-error">{{ run_errors.target_word_count }}</p>{% endif %}
+        {% if run_errors.requested_chapters %}<p class="field-error">{{ run_errors.requested_chapters }}</p>{% endif %}
+
+        <div class="grid compact">
+          <label>
+            Min words per chapter
+            <input class="{{ 'input-invalid' if run_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ run_values.min_words_per_chapter }}" min="100">
+          </label>
+          <label>
+            Max words per chapter
+            <input class="{{ 'input-invalid' if run_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ run_values.max_words_per_chapter }}" min="100">
+          </label>
+        </div>
+        {% if run_errors.min_words_per_chapter %}<p class="field-error">{{ run_errors.min_words_per_chapter }}</p>{% endif %}
+        {% if run_errors.max_words_per_chapter %}<p class="field-error">{{ run_errors.max_words_per_chapter }}</p>{% endif %}
       </div>
-      <div class="grid compact">
-        <label>Min words/chapter <input type="number" name="min_words_per_chapter" value="{{ project.min_words_per_chapter }}" min="100"></label>
-        <label>Max words/chapter <input type="number" name="max_words_per_chapter" value="{{ project.max_words_per_chapter }}" min="100"></label>
+
+      <div class="form-actions">
+        <button type="submit">Queue run</button>
       </div>
-      <button type="submit">Queue run</button>
     </form>
   </article>
 
-  <article class="panel meta-panel">
+  <aside class="panel meta-panel">
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Provider snapshot</h2>
-        <p>Live connection details from Ollama, plus quick-select models for the run form.</p>
+        <p>A concise check so you know whether run queueing should feel safe right now.</p>
       </div>
-      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">{{ "Connected" if provider_status.reachable else "Unavailable" }}</span>
+      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">
+        {{ "Connected" if provider_status.reachable else "Unavailable" }}
+      </span>
     </div>
     <div class="detail-list">
-      <div class="detail-item inline-detail">
-        <span class="detail-label">Status</span>
-        <span class="detail-value">{{ "Connected" if provider_status.reachable else "Unavailable" }}</span>
-      </div>
       <div class="detail-item">
         <span class="detail-label">Base URL</span>
         <span class="detail-value long-value">{{ provider_config.base_url }}</span>
       </div>
       <div class="detail-item">
-        <span class="detail-label">Default model</span>
+        <span class="detail-label">Saved default model</span>
         <span class="detail-value long-value">{{ provider_config.default_model }}</span>
       </div>
       <div class="detail-item inline-detail">
@@ -102,37 +247,23 @@
         <span class="detail-value">{{ provider_status.available_models|length }}</span>
       </div>
     </div>
-    {% if provider_status.available_models %}
-      <ul class="model-chip-list">
-        {% for model in provider_status.available_models %}
-          <li>
-            <button
-              class="model-chip"
-              type="button"
-              data-model-choice
-              data-target="project-run-model"
-              data-model="{{ model }}"
-              aria-pressed="false"
-            >
-              <span class="model-chip-value">{{ model }}</span>
-            </button>
-          </li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="empty-state">No models available right now. Check the Ollama connection or pull a model to see quick-select options here.</p>
+    {% if provider_status.error %}
+      <p class="error-text">{{ provider_status.error }}</p>
     {% endif %}
-  </article>
+    <a class="button secondary" href="/settings/provider">Open provider settings</a>
+  </aside>
 </section>
 
 <section class="panel">
   <div class="section-header">
-    <h2>Run history</h2>
-    <p>{{ project.runs|length }} total</p>
+    <div class="section-header-copy">
+      <h2>Run history</h2>
+      <p>{{ project_runs|length }} total run{{ "" if project_runs|length == 1 else "s" }}</p>
+    </div>
   </div>
-  {% if project.runs %}
+  {% if project_runs %}
     <div class="run-table">
-      {% for run in project.runs|sort(attribute='created_at', reverse=True) %}
+      {% for run in project_runs %}
         <a class="run-row" href="/runs/{{ run.id }}">
           <div class="run-row-main">
             <div class="run-row-top">
@@ -142,6 +273,7 @@
             <div class="meta-chip-row">
               <span class="meta-chip">{{ run.requested_chapters }} chapters</span>
               <span class="meta-chip">{{ run.current_step }}</span>
+              <span class="meta-chip">{{ run.chapters|length }} tracked</span>
             </div>
           </div>
           <div class="run-row-meta">
@@ -150,8 +282,8 @@
               <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
             </div>
             <div class="meta-cluster">
-              <span class="run-meta-label">Run ID</span>
-              <span class="detail-value long-value">{{ run.id }}</span>
+              <span class="run-meta-label">Artifacts</span>
+              <span class="detail-value">{{ run.artifacts|length }}</span>
             </div>
           </div>
         </a>

@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -20,8 +21,17 @@ from ..repositories import (
     get_run_minimal,
     list_events_after,
     record_event,
+    update_project,
 )
-from ..schemas import GenerationRunRead, ProjectCreate, ProjectRead, ProviderCapabilities, ProviderConfigUpdate, RunCreate
+from ..schemas import (
+    GenerationRunRead,
+    ProjectCreate,
+    ProjectRead,
+    ProjectUpdate,
+    ProviderCapabilities,
+    ProviderConfigUpdate,
+    RunCreate,
+)
 from ..services.ollama import OllamaClient, OllamaError, OllamaTransportError
 from ..services.state import request_run_cancellation
 from ..settings import Settings
@@ -38,6 +48,22 @@ def _provider_client(settings: Settings, db: Session) -> tuple[OllamaClient, str
         max_retries=settings.ollama_max_retries,
     )
     return client, config.default_model
+
+
+def _validated_project_update(project, payload: ProjectUpdate) -> ProjectUpdate:
+    merged = {
+        "title": project.title,
+        "premise": project.premise,
+        "desired_word_count": project.desired_word_count,
+        "requested_chapters": project.requested_chapters,
+        "min_words_per_chapter": project.min_words_per_chapter,
+        "max_words_per_chapter": project.max_words_per_chapter,
+        "preferred_model": project.preferred_model,
+        "notes": project.notes,
+    }
+    merged.update(payload.model_dump(exclude_unset=True))
+    validated = ProjectCreate.model_validate(merged)
+    return ProjectUpdate(**validated.model_dump())
 
 
 @router.get("/health")
@@ -104,6 +130,25 @@ def api_get_project(project_id: str, db: Session = Depends(get_db)) -> ProjectRe
     return ProjectRead.model_validate(project)
 
 
+@router.patch("/projects/{project_id}", response_model=ProjectRead)
+def api_update_project(
+    project_id: str,
+    payload: ProjectUpdate,
+    db: Session = Depends(get_db),
+) -> ProjectRead:
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    try:
+        validated = _validated_project_update(project, payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=exc.errors()) from exc
+    project = update_project(db, project, validated)
+    db.commit()
+    project = get_project(db, project.id)
+    return ProjectRead.model_validate(project)
+
+
 @router.post("/runs", response_model=GenerationRunRead, status_code=status.HTTP_201_CREATED)
 def api_create_run(
     payload: RunCreate,
@@ -153,6 +198,41 @@ def api_cancel_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunR
     db.commit()
     run = get_run(db, run.id)
     return GenerationRunRead.model_validate(run)
+
+
+@router.post("/runs/{run_id}/rerun", response_model=GenerationRunRead, status_code=status.HTTP_201_CREATED)
+def api_rerun(
+    run_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> GenerationRunRead:
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status not in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}:
+        raise HTTPException(status_code=409, detail="Wait for the current run to finish before re-queueing it.")
+
+    client, _ = _provider_client(settings, db)
+    try:
+        client.ensure_model(run.model_name)
+    except OllamaTransportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except OllamaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    payload = RunCreate(
+        project_id=run.project_id,
+        model_name=run.model_name,
+        target_word_count=run.target_word_count,
+        requested_chapters=run.requested_chapters,
+        min_words_per_chapter=run.min_words_per_chapter,
+        max_words_per_chapter=run.max_words_per_chapter,
+    )
+    new_run = create_run(db, run.project, payload)
+    record_event(db, new_run, "run_queued", {"message": "Run re-queued with the same settings."})
+    db.commit()
+    new_run = get_run(db, new_run.id)
+    return GenerationRunRead.model_validate(new_run)
 
 
 @router.get("/runs/{run_id}/events")

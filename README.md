@@ -56,9 +56,11 @@ On Windows PowerShell, activate the environment with `.venv\Scripts\Activate.ps1
 - `GET /api/providers/ollama/models`
 - `POST /api/projects`
 - `GET /api/projects/{id}`
+- `PATCH /api/projects/{id}`
 - `POST /api/runs`
 - `GET /api/runs/{id}`
 - `POST /api/runs/{id}/cancel`
+- `POST /api/runs/{id}/rerun`
 - `GET /api/runs/{id}/events`
 - `GET /api/artifacts/{id}/download`
 
