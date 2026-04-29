@@ -134,6 +134,63 @@
     {% else %}
       <p class="field-note" data-provider-error></p>
     {% endif %}
+
+    <div class="support-stack">
+      <section class="support-block">
+        <div class="section-header-copy">
+          <h3>Recommended setup flow</h3>
+          <p>This keeps the first-run experience predictable.</p>
+        </div>
+        <ol class="mini-step-list">
+          <li class="mini-step">
+            <span class="mini-step-marker">1</span>
+            <div>
+              <strong>Save the Ollama address first</strong>
+              <p class="field-note">The live checks only validate the saved connection, not unsaved values in the form.</p>
+            </div>
+          </li>
+          <li class="mini-step">
+            <span class="mini-step-marker">2</span>
+            <div>
+              <strong>Test the connection</strong>
+              <p class="field-note">Make sure Novel Generator can actually reach the Ollama host you intend to use.</p>
+            </div>
+          </li>
+          <li class="mini-step">
+            <span class="mini-step-marker">3</span>
+            <div>
+              <strong>Refresh and pick a verified model</strong>
+              <p class="field-note">Using a detected model removes guesswork from project creation and run queueing.</p>
+            </div>
+          </li>
+          <li class="mini-step">
+            <span class="mini-step-marker">4</span>
+            <div>
+              <strong>Create a project</strong>
+              <p class="field-note">Once the provider is healthy, move on to a reusable story setup and queue a full draft run.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="support-block">
+        <div class="section-header-copy">
+          <h3>Setup progress</h3>
+          <p>Each step below reflects the current saved state of this self-hosted instance.</p>
+        </div>
+        <ol class="mini-step-list">
+          {% for step in setup_steps %}
+            <li class="mini-step">
+              <span class="mini-step-marker {{ 'is-complete' if step.done else '' }}">{{ loop.index }}</span>
+              <div>
+                <strong>{{ step.title }}</strong>
+                <p class="field-note">{{ step.description }}</p>
+              </div>
+            </li>
+          {% endfor %}
+        </ol>
+      </section>
+    </div>
   </aside>
 </section>
 {% endblock %}

@@ -122,6 +122,23 @@ function setupProviderConsole() {
   const modelsButton = consoleNode.querySelector('[data-provider-action="models"]');
   const targetId = modelListNode?.dataset.modelTarget || "";
 
+  function setProviderFeedback(message, tone = "neutral") {
+    if (!errorNode) {
+      return;
+    }
+
+    errorNode.textContent = message;
+    if (tone === "error") {
+      errorNode.className = "error-text";
+      return;
+    }
+    if (tone === "success") {
+      errorNode.className = "inline-note inline-note-success";
+      return;
+    }
+    errorNode.className = "field-note";
+  }
+
   function syncChoices(inputId) {
     const input = document.getElementById(inputId);
     if (!input) {
@@ -148,8 +165,11 @@ function setupProviderConsole() {
       modelCountNode.textContent = String((providerStatus.available_models || []).length);
     }
     if (errorNode) {
-      errorNode.textContent = providerStatus.error || "";
-      errorNode.className = providerStatus.error ? "error-text" : "field-note";
+      if (providerStatus.error) {
+        setProviderFeedback(providerStatus.error, "error");
+      } else {
+        setProviderFeedback("", "neutral");
+      }
     }
   }
 
@@ -197,11 +217,11 @@ function setupProviderConsole() {
       const statusPayload = await fetchJson("/api/providers/ollama/status");
       renderStatus(statusPayload);
       renderModels(statusPayload.available_models || []);
-    } catch (error) {
-      if (errorNode) {
-        errorNode.textContent = error.message;
-        errorNode.className = "error-text";
+      if (statusPayload.reachable) {
+        setProviderFeedback("Saved provider connection responded successfully.", "success");
       }
+    } catch (error) {
+      setProviderFeedback(error.message, "error");
     } finally {
       if (button) {
         button.disabled = false;
@@ -222,11 +242,11 @@ function setupProviderConsole() {
       renderModels(modelsPayload.models || []);
       const statusPayload = await fetchJson("/api/providers/ollama/status");
       renderStatus(statusPayload);
-    } catch (error) {
-      if (errorNode) {
-        errorNode.textContent = error.message;
-        errorNode.className = "error-text";
+      if (statusPayload.reachable) {
+        setProviderFeedback(`Refreshed ${modelsPayload.models?.length || 0} detected model(s) from the saved provider.`, "success");
       }
+    } catch (error) {
+      setProviderFeedback(error.message, "error");
     } finally {
       if (button) {
         button.disabled = false;

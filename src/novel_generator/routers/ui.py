@@ -47,8 +47,17 @@ RUN_STAGES = [
 TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
 
 
-def _redirect(path: str, **query: str) -> RedirectResponse:
+def _redirect(
+    path: str,
+    *,
+    message: str | None = None,
+    message_tone: str = "success",
+    **query: str,
+) -> RedirectResponse:
     url = path
+    if message is not None:
+        query["message"] = message
+        query["message_tone"] = message_tone
     if query:
         url = f"{path}?{urlencode(query)}"
     return RedirectResponse(url=url, status_code=303)
@@ -59,6 +68,7 @@ def _render(request: Request, name: str, context: dict[str, Any], status_code: i
     merged = {
         "request": request,
         "message": request.query_params.get("message"),
+        "message_tone": request.query_params.get("message_tone", "success"),
         **context,
     }
     return templates.TemplateResponse(request=request, name=name, context=merged, status_code=status_code)
@@ -316,11 +326,13 @@ def _project_new_context(
     page_error: str | None = None,
 ) -> dict[str, Any]:
     provider_config, provider_status, _ = _provider_status(settings, db)
+    projects = list_projects(db)
     return {
         "active_nav": "projects",
         "provider_config": provider_config,
         "provider_status": provider_status,
         "provider_guidance": _provider_guidance(provider_config.base_url, provider_config.default_model, provider_status),
+        "setup_steps": _onboarding_steps(provider_config, provider_status, projects),
         "form_values": _project_form_values(provider_config.default_model, values=form_values),
         "form_errors": form_errors or {},
         "page_error": page_error,
@@ -368,6 +380,7 @@ def _provider_settings_context(
     provider_status: ProviderCapabilities | None = None,
 ) -> dict[str, Any]:
     provider_config, saved_status, _ = _provider_status(settings, db)
+    projects = list_projects(db)
     values = _provider_form_values(provider_config.base_url, provider_config.default_model, form_values)
     return {
         "active_nav": "provider",
@@ -377,8 +390,9 @@ def _provider_settings_context(
             values["base_url"],
             values["default_model"],
             provider_status or saved_status,
-            len(list_projects(db)),
+            len(projects),
         ),
+        "setup_steps": _onboarding_steps(provider_config, provider_status or saved_status, projects),
         "form_values": values,
         "form_errors": form_errors or {},
         "page_error": page_error,
@@ -461,7 +475,7 @@ def create_project_ui(
     payload = payload.model_copy(update={"notes": payload.notes or None})
     project = create_project(db, payload)
     db.commit()
-    return _redirect(f"/projects/{project.id}", message="Project created.")
+    return _redirect(f"/projects/{project.id}", message="Project created.", message_tone="success")
 
 
 @router.get("/settings/provider")
@@ -515,10 +529,11 @@ def update_provider_ui(
     update_provider_config(db, settings, payload)
     db.commit()
     if preview_status.reachable:
-        return _redirect("/settings/provider", message="Provider settings saved.")
+        return _redirect("/settings/provider", message="Provider settings saved.", message_tone="success")
     return _redirect(
         "/settings/provider",
         message="Provider settings saved. Novel Generator still cannot reach Ollama at that address yet.",
+        message_tone="warning",
     )
 
 
@@ -605,7 +620,7 @@ def edit_project_ui(
     payload = ProjectUpdate(**validated.model_dump())
     update_project(db, project, payload)
     db.commit()
-    return _redirect(f"/projects/{project.id}", message="Project defaults updated.")
+    return _redirect(f"/projects/{project.id}", message="Project defaults updated.", message_tone="success")
 
 
 @router.post("/projects/{project_id}/delete")
@@ -621,12 +636,13 @@ def delete_project_ui(
         return _redirect(
             f"/projects/{project.id}",
             message="Cancel or finish active runs before deleting this project.",
+            message_tone="warning",
         )
 
     run_ids = delete_project(db, project)
     db.commit()
     delete_run_artifacts_dirs(settings.artifacts_dir, run_ids)
-    return _redirect("/projects", message="Project deleted.")
+    return _redirect("/projects", message="Project deleted.", message_tone="success")
 
 
 @router.post("/projects/{project_id}/runs/cleanup")
@@ -643,8 +659,16 @@ def cleanup_project_runs_ui(
     db.commit()
     delete_run_artifacts_dirs(settings.artifacts_dir, deleted_run_ids)
     if not deleted_run_ids:
-        return _redirect(f"/projects/{project_id}", message="No finished runs were available to delete.")
-    return _redirect(f"/projects/{project_id}", message=f"Deleted {len(deleted_run_ids)} finished run(s).")
+        return _redirect(
+            f"/projects/{project_id}",
+            message="No finished runs were available to delete.",
+            message_tone="warning",
+        )
+    return _redirect(
+        f"/projects/{project_id}",
+        message=f"Deleted {len(deleted_run_ids)} finished run(s).",
+        message_tone="success",
+    )
 
 
 @router.post("/projects/{project_id}/runs/new")
@@ -750,7 +774,7 @@ def create_run_ui(
         )
     record_event(db, run, "run_queued", {"message": "Run queued from the web UI."})
     db.commit()
-    return _redirect(f"/runs/{run.id}", message="Run queued.")
+    return _redirect(f"/runs/{run.id}", message="Run queued.", message_tone="success")
 
 
 @router.get("/runs/{run_id}")
@@ -789,13 +813,17 @@ def rerun_ui(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     if run.status not in TERMINAL_STATUSES:
-        return _redirect(f"/runs/{run.id}", message="Wait for the current run to finish before re-queueing it.")
+        return _redirect(
+            f"/runs/{run.id}",
+            message="Wait for the current run to finish before re-queueing it.",
+            message_tone="warning",
+        )
 
     _, _, client = _provider_status(settings, db)
     try:
         client.ensure_model(run.model_name)
     except (OllamaError, OllamaTransportError) as exc:
-        return _redirect(f"/runs/{run.id}", message=str(exc))
+        return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="error")
 
     payload = RunCreate(
         project_id=run.project_id,
@@ -808,10 +836,10 @@ def rerun_ui(
     try:
         new_run = create_run(db, run.project, payload)
     except ValueError as exc:
-        return _redirect(f"/runs/{run.id}", message=str(exc))
+        return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="error")
     record_event(db, new_run, "run_queued", {"message": "Run re-queued with the same settings."})
     db.commit()
-    return _redirect(f"/runs/{new_run.id}", message="Run re-queued.")
+    return _redirect(f"/runs/{new_run.id}", message="Run re-queued.", message_tone="success")
 
 
 @router.post("/runs/{run_id}/delete")
@@ -824,13 +852,13 @@ def delete_run_ui(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     if run.status not in TERMINAL_STATUSES:
-        return _redirect(f"/runs/{run.id}", message="Only finished runs can be deleted.")
+        return _redirect(f"/runs/{run.id}", message="Only finished runs can be deleted.", message_tone="warning")
 
     project_id = run.project_id
     deleted_run_id = delete_run(db, run)
     db.commit()
     delete_run_artifacts_dir(settings.artifacts_dir, deleted_run_id)
-    return _redirect(f"/projects/{project_id}", message="Run deleted.")
+    return _redirect(f"/projects/{project_id}", message="Run deleted.", message_tone="success")
 
 
 @router.post("/runs/{run_id}/cancel")
@@ -840,7 +868,7 @@ def cancel_run_ui(run_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Run not found.")
     request_run_cancellation(db, run)
     db.commit()
-    return _redirect(f"/runs/{run.id}", message="Cancellation requested.")
+    return _redirect(f"/runs/{run.id}", message="Cancellation requested.", message_tone="success")
 
 
 @router.post("/runs/{run_id}/chapters/{chapter_number}/regenerate")
@@ -854,12 +882,16 @@ def regenerate_chapter_ui(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     if run.status not in TERMINAL_STATUSES:
-        return _redirect(f"/runs/{run_id}", message="Wait for the current run to finish before regenerating.")
+        return _redirect(
+            f"/runs/{run_id}",
+            message="Wait for the current run to finish before regenerating.",
+            message_tone="warning",
+        )
     _, _, client = _provider_status(settings, db)
     try:
         client.ensure_model(run.model_name)
     except (OllamaError, OllamaTransportError) as exc:
-        return _redirect(f"/runs/{run_id}", message=str(exc))
+        return _redirect(f"/runs/{run_id}", message=str(exc), message_tone="error")
     payload = RunCreate(
         project_id=run.project_id,
         model_name=run.model_name,
@@ -873,7 +905,7 @@ def regenerate_chapter_ui(
     try:
         new_run = create_run(db, run.project, payload)
     except ValueError as exc:
-        return _redirect(f"/runs/{run_id}", message=str(exc))
+        return _redirect(f"/runs/{run_id}", message=str(exc), message_tone="error")
     record_event(
         db,
         new_run,
@@ -884,4 +916,8 @@ def regenerate_chapter_ui(
         },
     )
     db.commit()
-    return _redirect(f"/runs/{new_run.id}", message=f"Queued regeneration from chapter {chapter_number}.")
+    return _redirect(
+        f"/runs/{new_run.id}",
+        message=f"Queued regeneration from chapter {chapter_number}.",
+        message_tone="success",
+    )

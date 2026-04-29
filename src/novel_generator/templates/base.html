@@ -21,7 +21,7 @@
   </header>
   <main class="shell-main">
     {% if message %}
-      <div class="notice success-notice">{{ message }}</div>
+      <div class="notice notice-{{ message_tone|default('success') }}" role="status">{{ message }}</div>
     {% endif %}
     {% block content %}{% endblock %}
   </main>

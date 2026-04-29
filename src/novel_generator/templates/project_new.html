@@ -149,7 +149,7 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Provider snapshot</h2>
-        <p>The new project form stays close to the saved Ollama state so you know what is verified right now.</p>
+        <p>The new project form stays close to the saved Ollama state so you know what is verified before you save anything.</p>
       </div>
       <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">
         {{ "Connected" if provider_status.reachable else "Unavailable" }}
@@ -173,6 +173,56 @@
       <p class="error-text">{{ provider_status.error }}</p>
     {% endif %}
     <a class="button secondary" href="/settings/provider">Manage provider settings</a>
+
+    <div class="support-stack">
+      <section class="support-block">
+        <div class="section-header-copy">
+          <h3>What happens after this</h3>
+          <p>Creating a project is the handoff from setup into actual work.</p>
+        </div>
+        <ol class="mini-step-list">
+          <li class="mini-step">
+            <span class="mini-step-marker">1</span>
+            <div>
+              <strong>Save the project defaults</strong>
+              <p class="field-note">This keeps your premise, chapter targets, and preferred model together for later runs.</p>
+            </div>
+          </li>
+          <li class="mini-step">
+            <span class="mini-step-marker">2</span>
+            <div>
+              <strong>Queue a full draft run</strong>
+              <p class="field-note">The worker should outline the book, draft every requested chapter, save summaries, then export artifacts.</p>
+            </div>
+          </li>
+          <li class="mini-step">
+            <span class="mini-step-marker">3</span>
+            <div>
+              <strong>Manage finished runs later</strong>
+              <p class="field-note">Project pages keep rerun, cleanup, and deletion controls nearby once you start accumulating drafts.</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="support-block">
+        <div class="section-header-copy">
+          <h3>Setup progress</h3>
+          <p>The checklist below stays tied to real system state, not guesses.</p>
+        </div>
+        <ol class="mini-step-list">
+          {% for step in setup_steps %}
+            <li class="mini-step">
+              <span class="mini-step-marker {{ 'is-complete' if step.done else '' }}">{{ loop.index }}</span>
+              <div>
+                <strong>{{ step.title }}</strong>
+                <p class="field-note">{{ step.description }}</p>
+              </div>
+            </li>
+          {% endfor %}
+        </ol>
+      </section>
+    </div>
   </aside>
 </section>
 {% endblock %}

@@ -217,8 +217,12 @@
         {% if run_errors.max_words_per_chapter %}<p class="field-error">{{ run_errors.max_words_per_chapter }}</p>{% endif %}
       </div>
 
+      <div class="inline-note inline-note-success">
+        Queueing this asks the worker to outline the book, draft all {{ run_values.requested_chapters }} requested chapter{{ "" if run_values.requested_chapters == 1 else "s" }}, save continuity summaries, and export artifacts only after drafting is complete.
+      </div>
+
       <div class="form-actions">
-        <button type="submit">Queue run</button>
+        <button type="submit">Queue full draft run</button>
       </div>
     </form>
   </article>

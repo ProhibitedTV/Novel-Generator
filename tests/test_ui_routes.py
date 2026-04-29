@@ -117,6 +117,17 @@ def test_project_new_page_renders_model_picker_hooks(client, monkeypatch) -> Non
     assert response.status_code == 200
     assert 'data-model-input' in response.text
     assert 'data-model-choice' in response.text
+    assert "What happens after this" in response.text
+    assert "Setup progress" in response.text
+
+
+def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+
+    response = client.get("/?message=Heads+up&message_tone=warning")
+
+    assert response.status_code == 200
+    assert 'class="notice notice-warning"' in response.text
 
 
 def test_project_edit_validation_renders_inline_errors(client, monkeypatch) -> None:
@@ -161,6 +172,7 @@ def test_provider_settings_validation_and_live_actions_render(client, monkeypatc
     assert "These changes were tested but not saved yet." in response.text
     assert 'data-provider-action="status"' in response.text
     assert 'data-provider-action="models"' in response.text
+    assert "Recommended setup flow" in response.text
 
 
 def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> None:
@@ -231,6 +243,7 @@ def test_project_delete_ui_blocks_active_runs(client, monkeypatch) -> None:
 
     assert response.status_code == 303
     assert "Cancel+or+finish+active+runs+before+deleting+this+project." in response.headers["location"]
+    assert "message_tone=warning" in response.headers["location"]
     with get_session_factory()() as session:
         assert get_project(session, project_id) is not None
 
