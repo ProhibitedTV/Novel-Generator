@@ -1,8 +1,25 @@
 document.addEventListener("DOMContentLoaded", () => {
+  setupConfirmActions(document);
   setupModelPickers(document);
   setupProviderConsole();
   setupRunDetail();
 });
+
+function setupConfirmActions(root) {
+  const confirmForms = Array.from(root.querySelectorAll("form[data-confirm]"));
+  confirmForms.forEach((form) => {
+    if (form.dataset.confirmBound === "true") {
+      return;
+    }
+    form.dataset.confirmBound = "true";
+    form.addEventListener("submit", (event) => {
+      const message = form.dataset.confirm || "Are you sure you want to continue?";
+      if (!window.confirm(message)) {
+        event.preventDefault();
+      }
+    });
+  });
+}
 
 function setupModelPickers(root) {
   const modelInputs = Array.from(root.querySelectorAll("[data-model-input]"));

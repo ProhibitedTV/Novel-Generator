@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import ValidationError
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
@@ -14,6 +14,9 @@ from ..models import RunStatus
 from ..repositories import (
     create_project,
     create_run,
+    delete_project,
+    delete_run,
+    delete_terminal_runs_for_project,
     ensure_provider_config,
     get_artifact,
     get_project,
@@ -33,10 +36,12 @@ from ..schemas import (
     RunCreate,
 )
 from ..services.ollama import OllamaClient, OllamaError, OllamaTransportError
+from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
 from ..services.state import request_run_cancellation
 from ..settings import Settings
 
 router = APIRouter(tags=["api"])
+TERMINAL_RUN_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
 
 
 def _provider_client(settings: Settings, db: Session) -> tuple[OllamaClient, str]:
@@ -149,6 +154,40 @@ def api_update_project(
     return ProjectRead.model_validate(project)
 
 
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def api_delete_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> Response:
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if any(run.status not in TERMINAL_RUN_STATUSES for run in project.runs):
+        raise HTTPException(status_code=409, detail="Cancel or finish active runs before deleting this project.")
+
+    run_ids = delete_project(db, project)
+    db.commit()
+    delete_run_artifacts_dirs(settings.artifacts_dir, run_ids)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/projects/{project_id}/runs/terminal")
+def api_delete_terminal_runs_for_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> dict[str, int]:
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    deleted_run_ids = delete_terminal_runs_for_project(db, project)
+    db.commit()
+    delete_run_artifacts_dirs(settings.artifacts_dir, deleted_run_ids)
+    return {"deleted_runs": len(deleted_run_ids)}
+
+
 @router.post("/runs", response_model=GenerationRunRead, status_code=status.HTTP_201_CREATED)
 def api_create_run(
     payload: RunCreate,
@@ -200,6 +239,24 @@ def api_cancel_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunR
     return GenerationRunRead.model_validate(run)
 
 
+@router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+def api_delete_run(
+    run_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> Response:
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status not in TERMINAL_RUN_STATUSES:
+        raise HTTPException(status_code=409, detail="Only completed, failed, or canceled runs can be deleted.")
+
+    deleted_run_id = delete_run(db, run)
+    db.commit()
+    delete_run_artifacts_dir(settings.artifacts_dir, deleted_run_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/runs/{run_id}/rerun", response_model=GenerationRunRead, status_code=status.HTTP_201_CREATED)
 def api_rerun(
     run_id: str,
@@ -209,7 +266,7 @@ def api_rerun(
     run = get_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
-    if run.status not in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}:
+    if run.status not in TERMINAL_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Wait for the current run to finish before re-queueing it.")
 
     client, _ = _provider_client(settings, db)

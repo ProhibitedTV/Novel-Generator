@@ -226,12 +226,48 @@
   <aside class="panel meta-panel">
     <div class="section-header">
       <div class="section-header-copy">
-        <h2>Provider snapshot</h2>
-        <p>A concise check so you know whether run queueing should feel safe right now.</p>
+        <h2>Before you queue</h2>
+        <p>A quick confidence check so you know what the worker will do and whether the provider is ready.</p>
       </div>
       <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}">
         {{ "Connected" if provider_status.reachable else "Unavailable" }}
       </span>
+    </div>
+    <div class="run-flow">
+      <div class="section-header-copy">
+        <h3>What a run produces</h3>
+        <p>A healthy run should finish every requested chapter before the manuscript export step begins.</p>
+      </div>
+      <ol class="run-flow-list">
+        <li class="run-flow-item">
+          <span class="run-flow-number">1</span>
+          <div>
+            <strong>Outline the full book</strong>
+            <p class="field-note">Create a chapter-by-chapter structure sized for {{ run_values.requested_chapters }} requested chapter{{ "" if run_values.requested_chapters == 1 else "s" }}.</p>
+          </div>
+        </li>
+        <li class="run-flow-item">
+          <span class="run-flow-number">2</span>
+          <div>
+            <strong>Draft every chapter</strong>
+            <p class="field-note">Each chapter gets a beat plan, drafted prose, and a checkpoint in the database.</p>
+          </div>
+        </li>
+        <li class="run-flow-item">
+          <span class="run-flow-number">3</span>
+          <div>
+            <strong>Save continuity summaries</strong>
+            <p class="field-note">Those summaries feed later chapters so reruns and regeneration stay coherent.</p>
+          </div>
+        </li>
+        <li class="run-flow-item">
+          <span class="run-flow-number">4</span>
+          <div>
+            <strong>Export only after drafting is complete</strong>
+            <p class="field-note">If the worker cannot finish every chapter, the run should fail instead of claiming success.</p>
+          </div>
+        </li>
+      </ol>
     </div>
     <div class="detail-list">
       <div class="detail-item">
@@ -258,39 +294,91 @@
   <div class="section-header">
     <div class="section-header-copy">
       <h2>Run history</h2>
-      <p>{{ project_runs|length }} total run{{ "" if project_runs|length == 1 else "s" }}</p>
+      <p>{{ project_runs|length }} total run{{ "" if project_runs|length == 1 else "s" }}. Finished runs can be re-opened, rerun, or deleted once you no longer need their saved exports.</p>
     </div>
+    {% if terminal_run_count %}
+      <form method="post" action="/projects/{{ project.id }}/runs/cleanup" data-confirm="Delete all completed, failed, and canceled runs for this project? Their saved drafts, event logs, and exports will be removed.">
+        <button class="secondary" type="submit">Delete {{ terminal_run_count }} finished run{{ "" if terminal_run_count == 1 else "s" }}</button>
+      </form>
+    {% endif %}
   </div>
   {% if project_runs %}
     <div class="run-table">
       {% for run in project_runs %}
-        <a class="run-row" href="/runs/{{ run.id }}">
-          <div class="run-row-main">
-            <div class="run-row-top">
-              <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
-              <span class="run-row-title long-value">{{ run.model_name }}</span>
+        <article class="run-row">
+          <a class="run-row-link" href="/runs/{{ run.id }}">
+            <div class="run-row-main">
+              <div class="run-row-top">
+                <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
+                <span class="run-row-title long-value">{{ run.model_name }}</span>
+              </div>
+              <div class="meta-chip-row">
+                <span class="meta-chip">{{ run.requested_chapters }} chapters requested</span>
+                <span class="meta-chip">{{ run.current_step }}</span>
+                <span class="meta-chip">{{ run.chapters|length }} checkpoint{{ "" if run.chapters|length == 1 else "s" }}</span>
+              </div>
             </div>
-            <div class="meta-chip-row">
-              <span class="meta-chip">{{ run.requested_chapters }} chapters</span>
-              <span class="meta-chip">{{ run.current_step }}</span>
-              <span class="meta-chip">{{ run.chapters|length }} tracked</span>
+            <div class="run-row-meta">
+              <div class="meta-cluster">
+                <span class="run-meta-label">Created</span>
+                <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+              </div>
+              <div class="meta-cluster">
+                <span class="run-meta-label">Artifacts</span>
+                <span class="detail-value">{{ run.artifacts|length }}</span>
+              </div>
+            </div>
+          </a>
+          <div class="row-side">
+            <div class="row-actions">
+              <a class="button secondary" href="/runs/{{ run.id }}">Open run</a>
+              {% if run.status in terminal_statuses %}
+                <form method="post" action="/runs/{{ run.id }}/delete" data-confirm="Delete this run, including its saved chapters, event log, and exports?">
+                  <button class="danger" type="submit">Delete</button>
+                </form>
+              {% endif %}
             </div>
           </div>
-          <div class="run-row-meta">
-            <div class="meta-cluster">
-              <span class="run-meta-label">Created</span>
-              <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
-            </div>
-            <div class="meta-cluster">
-              <span class="run-meta-label">Artifacts</span>
-              <span class="detail-value">{{ run.artifacts|length }}</span>
-            </div>
-          </div>
-        </a>
+        </article>
       {% endfor %}
     </div>
   {% else %}
     <p class="empty-state">No runs yet. Queue one above to start generating chapters in the background.</p>
   {% endif %}
+</section>
+
+<section class="panel danger-panel">
+  <div class="section-header">
+    <div class="section-header-copy">
+      <h2>Manage project</h2>
+      <p>Use these controls when you want to clean out old work or retire the entire project.</p>
+    </div>
+  </div>
+  <div class="management-grid">
+    <article class="management-card">
+      <h3>Clean finished runs</h3>
+      <p class="panel-intro">Delete completed, failed, or canceled runs once you no longer need their drafts, event history, or exported files.</p>
+      <p class="field-note">{{ terminal_run_count }} finished run{{ "" if terminal_run_count == 1 else "s" }} can be removed right now.</p>
+      {% if terminal_run_count %}
+        <form method="post" action="/projects/{{ project.id }}/runs/cleanup" data-confirm="Delete all finished runs for this project? This also removes their chapter drafts, event logs, and exports.">
+          <button class="secondary" type="submit">Clean finished runs</button>
+        </form>
+      {% else %}
+        <p class="empty-state">Nothing to clean up yet. Finished runs will become removable here.</p>
+      {% endif %}
+    </article>
+
+    <article class="management-card danger-card">
+      <h3>Delete project</h3>
+      <p class="panel-intro">Deleting a project removes its saved setup plus every run, draft, event log, and exported file connected to it.</p>
+      {% if can_delete_project %}
+        <form method="post" action="/projects/{{ project.id }}/delete" data-confirm="Delete this entire project and all related run data? This cannot be undone.">
+          <button class="danger" type="submit">Delete project</button>
+        </form>
+      {% else %}
+        <p class="error-text">Cancel or finish {{ active_run_count }} active run{{ "" if active_run_count == 1 else "s" }} before deleting this project.</p>
+      {% endif %}
+    </article>
+  </div>
 </section>
 {% endblock %}

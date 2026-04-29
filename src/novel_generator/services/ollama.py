@@ -60,10 +60,22 @@ class OllamaClient:
         self.max_retries = max_retries
         self._client_factory = client_factory
 
-    def _make_client(self) -> httpx.Client:
+    def _default_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(self.timeout_seconds)
+
+    def _chat_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            connect=self.timeout_seconds,
+            read=None,
+            write=self.timeout_seconds,
+            pool=self.timeout_seconds,
+        )
+
+    def _make_client(self, *, for_chat: bool = False) -> httpx.Client:
         if self._client_factory is not None:
             return self._client_factory()
-        return httpx.Client(base_url=self.base_url, timeout=self.timeout_seconds)
+        timeout = self._chat_timeout() if for_chat else self._default_timeout()
+        return httpx.Client(base_url=self.base_url, timeout=timeout)
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
         last_error: Exception | None = None
@@ -116,7 +128,7 @@ class OllamaClient:
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
-                with self._make_client() as client:
+                with self._make_client(for_chat=True) as client:
                     response = client.post("/api/chat", json=payload)
                     response.raise_for_status()
                     return parse_ollama_chat_payload(response.text)

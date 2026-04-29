@@ -33,30 +33,38 @@
   <div class="section-header">
     <div class="section-header-copy">
       <h2>Project library</h2>
-      <p>{{ projects|length }} tracked project{{ "" if projects|length == 1 else "s" }}</p>
+      <p>{{ projects|length }} tracked project{{ "" if projects|length == 1 else "s" }}. Open any project to queue runs, revise defaults, or clean up old history.</p>
     </div>
   </div>
   {% if projects %}
     <div class="project-list">
       {% for project in projects %}
-        <a class="project-card" href="/projects/{{ project.id }}">
-          <div class="project-card-main">
-            <h3>{{ project.title }}</h3>
-            <p class="chapter-copy">{{ project.premise }}</p>
-            <div class="meta-chip-row">
-              <span class="meta-chip long-value">Model: {{ project.preferred_model }}</span>
-              {% if project.notes %}
-                <span class="meta-chip">Notes saved</span>
-              {% endif %}
+        <article class="project-card">
+          <a class="project-card-link" href="/projects/{{ project.id }}">
+            <div class="project-card-main">
+              <h3>{{ project.title }}</h3>
+              <p class="chapter-copy">{{ project.premise }}</p>
+              <div class="meta-chip-row">
+                <span class="meta-chip long-value">Model: {{ project.preferred_model }}</span>
+                {% if project.notes %}
+                  <span class="meta-chip">Notes saved</span>
+                {% endif %}
+              </div>
+            </div>
+            <dl class="project-card-meta">
+              <div><dt>Words</dt><dd>{{ project.desired_word_count }}</dd></div>
+              <div><dt>Chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
+              <div><dt>Runs</dt><dd>{{ project.runs|length }}</dd></div>
+              <div><dt>Updated</dt><dd>{{ project.updated_at.strftime('%Y-%m-%d') }}</dd></div>
+            </dl>
+          </a>
+          <div class="row-side">
+            <p class="field-note">Project defaults, run history, and cleanup tools live inside the project view.</p>
+            <div class="row-actions">
+              <a class="button secondary" href="/projects/{{ project.id }}">Manage project</a>
             </div>
           </div>
-          <dl class="project-card-meta">
-            <div><dt>Words</dt><dd>{{ project.desired_word_count }}</dd></div>
-            <div><dt>Chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
-            <div><dt>Runs</dt><dd>{{ project.runs|length }}</dd></div>
-            <div><dt>Updated</dt><dd>{{ project.updated_at.strftime('%Y-%m-%d') }}</dd></div>
-          </dl>
-        </a>
+        </article>
       {% endfor %}
     </div>
   {% else %}

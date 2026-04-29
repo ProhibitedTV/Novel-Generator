@@ -27,6 +27,9 @@
         <form method="post" action="/runs/{{ run.id }}/rerun">
           <button type="submit">Run again with same settings</button>
         </form>
+        <form method="post" action="/runs/{{ run.id }}/delete" data-confirm="Delete this run, including its saved chapters, event log, and exported files?">
+          <button class="danger" type="submit">Delete run</button>
+        </form>
       {% endif %}
     </div>
   </div>
@@ -101,6 +104,14 @@
     </div>
   </div>
 
+  {% if run.status.value == "completed" %}
+    {% if all_requested_chapters_completed %}
+      <p class="notice success-notice">This run drafted and summarized all {{ run.requested_chapters }} requested chapter{{ "" if run.requested_chapters == 1 else "s" }} before exporting the manuscript.</p>
+    {% else %}
+      <p class="error-text">This run completed without every requested chapter being fully drafted. Treat the output as incomplete.</p>
+    {% endif %}
+  {% endif %}
+
   {% if run.error_message %}
     <p class="error-text">{{ run.error_message }}</p>
   {% endif %}
@@ -122,6 +133,14 @@
           <code class="detail-value long-value">{{ run.source_run_id }}</code>
         </div>
       {% endif %}
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Requested chapters</span>
+        <span class="detail-value">{{ run.requested_chapters }}</span>
+      </div>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Drafted chapters</span>
+        <span class="detail-value">{{ completed_chapter_count }}</span>
+      </div>
     </div>
   </details>
 </section>

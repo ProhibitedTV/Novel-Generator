@@ -19,6 +19,8 @@ from .models import (
 from .schemas import ProjectCreate, ProjectUpdate, ProviderConfigUpdate, RunCreate
 from .settings import Settings
 
+TERMINAL_RUN_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
+
 
 def ensure_provider_config(session: Session, settings: Settings) -> ProviderConfig:
     config = session.scalar(select(ProviderConfig).where(ProviderConfig.provider_name == "ollama"))
@@ -173,18 +175,18 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
         run.outline = deepcopy(source_run.outline)
         for source_chapter in source_run.chapters:
             cloned = ChapterDraft(
-                run_id=run.id,
+                run=run,
                 chapter_number=source_chapter.chapter_number,
                 title=source_chapter.title,
                 outline_summary=source_chapter.outline_summary,
             )
+            session.add(cloned)
             if source_chapter.chapter_number < payload.resume_from_chapter:
                 cloned.plan = source_chapter.plan
                 cloned.content = source_chapter.content
                 cloned.summary = source_chapter.summary
                 cloned.status = source_chapter.status
                 cloned.word_count = source_chapter.word_count
-            session.add(cloned)
         session.flush()
 
     return run
@@ -220,6 +222,31 @@ def replace_artifacts(session: Session, run: GenerationRun, artifacts: list[Arti
         artifact.run_id = run.id
         session.add(artifact)
     session.flush()
+    session.refresh(run, attribute_names=["artifacts"])
+
+
+def delete_run(session: Session, run: GenerationRun) -> str:
+    run_id = run.id
+    session.delete(run)
+    session.flush()
+    return run_id
+
+
+def delete_terminal_runs_for_project(session: Session, project: Project) -> list[str]:
+    deleted_run_ids: list[str] = []
+    for run in list(project.runs):
+        if run.status in TERMINAL_RUN_STATUSES:
+            deleted_run_ids.append(run.id)
+            session.delete(run)
+    session.flush()
+    return deleted_run_ids
+
+
+def delete_project(session: Session, project: Project) -> list[str]:
+    run_ids = [run.id for run in project.runs]
+    session.delete(project)
+    session.flush()
+    return run_ids
 
 
 def create_chapters_from_outline(session: Session, run: GenerationRun) -> list[ChapterDraft]:
@@ -229,7 +256,7 @@ def create_chapters_from_outline(session: Session, run: GenerationRun) -> list[C
         chapter = existing.get(index)
         if chapter is None:
             chapter = ChapterDraft(
-                run_id=run.id,
+                run=run,
                 chapter_number=index,
                 title=item["title"],
                 outline_summary=item["summary"],
@@ -241,6 +268,7 @@ def create_chapters_from_outline(session: Session, run: GenerationRun) -> list[C
             chapter.title = item["title"]
             chapter.outline_summary = item["summary"]
     session.flush()
+    session.refresh(run, attribute_names=["chapters"])
     return created
 
 

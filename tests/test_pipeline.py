@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from novel_generator.dependencies import get_session_factory
-from novel_generator.models import RunStatus
+from novel_generator.models import ChapterStatus, RunStatus
 from novel_generator.repositories import create_project, create_run, get_run, recover_running_runs
 from novel_generator.schemas import ProjectCreate, RunCreate
 from novel_generator.services.pipeline import process_run_safe
@@ -50,6 +50,9 @@ def test_process_run_safe_completes_and_exports(configured_environment) -> None:
         refreshed = get_run(session, run.id)
         assert refreshed.status.value == "completed"
         assert len(refreshed.chapters) == 2
+        assert all(chapter.status == ChapterStatus.COMPLETED for chapter in refreshed.chapters)
+        assert all(chapter.content for chapter in refreshed.chapters)
+        assert all(chapter.summary for chapter in refreshed.chapters)
         assert len(refreshed.artifacts) == 2
         assert refreshed.summary_context is not None
 

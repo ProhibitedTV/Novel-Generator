@@ -9,10 +9,13 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_app_settings, get_db, get_templates
-from ..models import GenerationRun, Project, RunStatus
+from ..models import ChapterStatus, GenerationRun, Project, RunStatus
 from ..repositories import (
     create_project,
     create_run,
+    delete_project,
+    delete_run,
+    delete_terminal_runs_for_project,
     ensure_provider_config,
     get_project,
     get_run,
@@ -24,6 +27,7 @@ from ..repositories import (
 )
 from ..schemas import ProjectCreate, ProjectUpdate, ProviderCapabilities, ProviderConfigUpdate, RunCreate
 from ..services.ollama import OllamaClient, OllamaError, OllamaTransportError
+from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
 from ..services.state import request_run_cancellation
 from ..settings import Settings
 
@@ -239,8 +243,30 @@ def _sort_runs(project: Project) -> list[GenerationRun]:
     return sorted(project.runs, key=lambda item: item.created_at, reverse=True)
 
 
+def _chapter_completion_count(run: GenerationRun) -> int:
+    return len(
+        [
+            chapter
+            for chapter in run.chapters
+            if chapter.status == ChapterStatus.COMPLETED and chapter.content and chapter.summary
+        ]
+    )
+
+
+def _project_run_stats(project: Project) -> dict[str, Any]:
+    project_runs = _sort_runs(project)
+    terminal_runs = [run for run in project_runs if run.status in TERMINAL_STATUSES]
+    active_runs = [run for run in project_runs if run.status not in TERMINAL_STATUSES]
+    return {
+        "project_runs": project_runs,
+        "terminal_run_count": len(terminal_runs),
+        "active_run_count": len(active_runs),
+        "can_delete_project": not active_runs,
+    }
+
+
 def _home_context(request: Request, db: Session, settings: Settings) -> dict[str, Any]:
-    _, provider_status, _ = _provider_status(settings, db)
+    provider_config, provider_status, _ = _provider_status(settings, db)
     projects = list_projects(db)
     recent_runs = list_recent_runs(db, limit=6)
     ready_for_projects = provider_status.reachable and bool(provider_status.available_models)
@@ -314,10 +340,11 @@ def _project_detail_context(
     open_edit_form: bool = False,
 ) -> dict[str, Any]:
     provider_config, provider_status, _ = _provider_status(settings, db)
+    run_stats = _project_run_stats(project)
     return {
         "active_nav": "projects",
         "project": project,
-        "project_runs": _sort_runs(project),
+        **run_stats,
         "provider_config": provider_config,
         "provider_status": provider_status,
         "provider_guidance": _provider_guidance(provider_config.base_url, provider_config.default_model, provider_status, 1),
@@ -327,6 +354,7 @@ def _project_detail_context(
         "run_errors": run_errors or {},
         "page_error": page_error,
         "open_edit_form": open_edit_form,
+        "terminal_statuses": TERMINAL_STATUSES,
     }
 
 
@@ -580,6 +608,45 @@ def edit_project_ui(
     return _redirect(f"/projects/{project.id}", message="Project defaults updated.")
 
 
+@router.post("/projects/{project_id}/delete")
+def delete_project_ui(
+    project_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    if any(run.status not in TERMINAL_STATUSES for run in project.runs):
+        return _redirect(
+            f"/projects/{project.id}",
+            message="Cancel or finish active runs before deleting this project.",
+        )
+
+    run_ids = delete_project(db, project)
+    db.commit()
+    delete_run_artifacts_dirs(settings.artifacts_dir, run_ids)
+    return _redirect("/projects", message="Project deleted.")
+
+
+@router.post("/projects/{project_id}/runs/cleanup")
+def cleanup_project_runs_ui(
+    project_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    deleted_run_ids = delete_terminal_runs_for_project(db, project)
+    db.commit()
+    delete_run_artifacts_dirs(settings.artifacts_dir, deleted_run_ids)
+    if not deleted_run_ids:
+        return _redirect(f"/projects/{project_id}", message="No finished runs were available to delete.")
+    return _redirect(f"/projects/{project_id}", message=f"Deleted {len(deleted_run_ids)} finished run(s).")
+
+
 @router.post("/projects/{project_id}/runs/new")
 def create_run_ui(
     project_id: str,
@@ -695,6 +762,7 @@ def run_detail(
     run = get_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
+    completed_chapter_count = _chapter_completion_count(run)
     return _render(
         request,
         "run_detail.html",
@@ -705,7 +773,8 @@ def run_detail(
             "show_rerun": run.status in TERMINAL_STATUSES,
             "terminal_statuses": TERMINAL_STATUSES,
             "run_stages": RUN_STAGES,
-            "completed_chapter_count": len([chapter for chapter in run.chapters if chapter.status.value == "completed"]),
+            "completed_chapter_count": completed_chapter_count,
+            "all_requested_chapters_completed": completed_chapter_count == run.requested_chapters,
         },
     )
 
@@ -743,6 +812,25 @@ def rerun_ui(
     record_event(db, new_run, "run_queued", {"message": "Run re-queued with the same settings."})
     db.commit()
     return _redirect(f"/runs/{new_run.id}", message="Run re-queued.")
+
+
+@router.post("/runs/{run_id}/delete")
+def delete_run_ui(
+    run_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+):
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status not in TERMINAL_STATUSES:
+        return _redirect(f"/runs/{run.id}", message="Only finished runs can be deleted.")
+
+    project_id = run.project_id
+    deleted_run_id = delete_run(db, run)
+    db.commit()
+    delete_run_artifacts_dir(settings.artifacts_dir, deleted_run_id)
+    return _redirect(f"/projects/{project_id}", message="Run deleted.")
 
 
 @router.post("/runs/{run_id}/cancel")

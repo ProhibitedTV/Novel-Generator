@@ -57,3 +57,15 @@ def test_ollama_client_raises_on_malformed_chat_payload() -> None:
 
     with pytest.raises(OllamaTransportError):
         client.chat("test-model", [{"role": "user", "content": "Hello"}])
+
+
+def test_ollama_chat_client_disables_read_timeout() -> None:
+    client = OllamaClient(
+        base_url="http://ollama.test",
+        timeout_seconds=120,
+        max_retries=0,
+    )
+
+    with client._make_client(for_chat=True) as http_client:
+        assert http_client.timeout.connect == 120
+        assert http_client.timeout.read is None

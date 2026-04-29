@@ -344,11 +344,16 @@ textarea:focus-visible {
 .detail-list,
 .project-card-main,
 .project-card-meta,
+.project-card-link,
+.run-row-link,
 .run-row-main,
 .run-row-meta,
 .overview-grid,
 .chapter-body,
-.artifact-meta {
+.artifact-meta,
+.row-side,
+.management-card,
+.run-flow {
   display: grid;
   gap: 0.8rem;
   min-width: 0;
@@ -404,9 +409,14 @@ label {
 .project-card,
 .run-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.65fr) minmax(14rem, 1fr);
+  grid-template-columns: minmax(0, 1.65fr) minmax(14rem, auto);
   gap: 1rem;
   align-items: start;
+}
+
+.project-card-link,
+.run-row-link {
+  color: inherit;
 }
 
 .project-card:hover,
@@ -703,6 +713,47 @@ dd {
   color: var(--muted);
 }
 
+.run-flow {
+  margin-top: 0.2rem;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.run-flow-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.run-flow-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.run-flow-item strong,
+.management-card h3 {
+  display: block;
+  margin-bottom: 0.18rem;
+}
+
+.run-flow-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(23, 106, 90, 0.14);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
 .action-panel {
   align-content: start;
 }
@@ -744,6 +795,39 @@ dd {
 .technical-shell {
   margin-top: 1rem;
   padding-top: 0.2rem;
+}
+
+.row-side {
+  align-content: start;
+  justify-items: start;
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.management-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.management-card {
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.danger-panel {
+  border-color: rgba(161, 58, 42, 0.25);
+}
+
+.danger-card {
+  border-color: rgba(161, 58, 42, 0.25);
+  background: rgba(161, 58, 42, 0.07);
 }
 
 .run-stepper {
@@ -948,6 +1032,7 @@ code {
   .run-row,
   .run-overview,
   .metric-grid,
+  .management-grid,
   .quick-action-grid,
   .stats-grid,
   .run-stepper,
@@ -980,7 +1065,8 @@ code {
   .hero-actions,
   .event-topline,
   .model-picker-header,
-  .form-actions {
+  .form-actions,
+  .row-actions {
     align-items: start;
   }
 }

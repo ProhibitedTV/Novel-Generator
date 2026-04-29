@@ -23,6 +23,20 @@ class RunCanceled(Exception):
     pass
 
 
+def _sorted_chapters(run: GenerationRun) -> list:
+    return sorted(run.chapters, key=lambda item: item.chapter_number)
+
+
+def _require_requested_chapters(session: Session, run: GenerationRun) -> list:
+    session.refresh(run, attribute_names=["chapters"])
+    chapters = _sorted_chapters(run)
+    if len(chapters) != run.requested_chapters:
+        raise RuntimeError(
+            f"Run expected {run.requested_chapters} chapter checkpoints, but only {len(chapters)} were available."
+        )
+    return chapters
+
+
 def _sync_summary_context(run: GenerationRun, window: int) -> None:
     run.summary_context = rolling_context(run.chapters, window)
 
@@ -55,7 +69,8 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
         create_chapters_from_outline(session, run)
         session.commit()
 
-    for chapter in sorted(run.chapters, key=lambda item: item.chapter_number):
+    chapters = _require_requested_chapters(session, run)
+    for chapter in chapters:
         if chapter.status == ChapterStatus.COMPLETED and chapter.content and chapter.summary:
             _sync_summary_context(run, settings.chapter_summary_window)
             session.commit()
@@ -114,11 +129,23 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
         )
         session.commit()
 
+    completed_chapters = _require_requested_chapters(session, run)
+    incomplete_chapters = [
+        chapter.chapter_number
+        for chapter in completed_chapters
+        if chapter.status != ChapterStatus.COMPLETED or not chapter.content or not chapter.summary
+    ]
+    if incomplete_chapters:
+        raise RuntimeError(
+            "Run finished without fully drafted chapters for: "
+            + ", ".join(str(chapter_number) for chapter_number in incomplete_chapters)
+        )
+
     run.current_step = "export"
     record_event(session, run, "artifact_export_started", {"message": "Rendering manuscript artifacts."})
     session.commit()
 
-    artifacts = export_run_artifacts(settings.artifacts_dir, project, run, list(run.chapters))
+    artifacts = export_run_artifacts(settings.artifacts_dir, project, run, completed_chapters)
     replace_artifacts(session, run, artifacts)
     run.current_step = "completed"
     run.current_chapter = None
