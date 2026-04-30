@@ -15,11 +15,18 @@
     <div class="page-header-copy">
       <p class="eyebrow">Run</p>
       <h1>{{ project.title }}</h1>
-      <p class="hero-copy">This page keeps the current stage, live events, exports, and chapter-level recovery actions in one place.</p>
+      <p class="hero-copy">This page keeps the current stage, outline approval, live events, editorial QA, exports, and chapter-level recovery actions in one place.</p>
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
-      {% if run.status.value in ["queued", "running"] %}
+      {% if awaiting_outline_approval %}
+        <form method="post" action="/runs/{{ run.id }}/approve-outline">
+          <button type="submit">Approve and continue</button>
+        </form>
+        <form method="post" action="/runs/{{ run.id }}/cancel-and-edit" data-confirm="Cancel this paused run and reopen the project editor so you can adjust the brief or defaults?">
+          <button class="secondary" type="submit">Cancel and edit project</button>
+        </form>
+      {% elif run.status.value in ["queued", "running"] %}
         <form method="post" action="/runs/{{ run.id }}/cancel">
           <button class="danger" type="submit">Cancel run</button>
         </form>
@@ -43,11 +50,11 @@
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Status</span>
-          <span class="badge status-{{ run.status.value }}" data-run-status-label>{{ run.status.value }}</span>
+          <span class="badge status-{{ run.status.value }}" data-run-status-label>{{ run.status.value.replace("_", " ") }}</span>
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Current stage</span>
-          <span class="detail-value" data-run-step-label>{{ run.current_step }}</span>
+          <span class="detail-value" data-run-step-label>{{ run.current_step.replace("_", " ") }}</span>
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Current chapter</span>
@@ -70,6 +77,10 @@
           <span class="detail-label">Finished</span>
           <span class="detail-value">{{ run.completed_at.strftime('%Y-%m-%d %H:%M:%S') if run.completed_at else "-" }}</span>
         </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Pipeline</span>
+          <span class="detail-value">v{{ run.pipeline_version or 1 }}</span>
+        </div>
       </div>
     </div>
   </div>
@@ -77,7 +88,7 @@
   <div class="run-stepper" data-run-stepper>
     {% for stage in run_stages %}
       <article class="run-stage" data-stage="{{ stage.id }}">
-        <span class="run-stage-marker">{{ loop.index if loop.index <= 7 else "!" }}</span>
+        <span class="run-stage-marker">{{ loop.index }}</span>
         <div class="run-stage-copy">
           <h3>{{ stage.label }}</h3>
           <p>{{ stage.description }}</p>
@@ -95,18 +106,20 @@
     <div class="metric-card">
       <span class="detail-label">Completed chapters</span>
       <strong>{{ completed_chapter_count }}</strong>
-      <p class="metric-copy">Saved checkpoints ready for review.</p>
+      <p class="metric-copy">Saved with prose, summary, and continuity update.</p>
     </div>
     <div class="metric-card">
       <span class="detail-label">Artifacts ready</span>
       <strong>{{ run.artifacts|length }}</strong>
-      <p class="metric-copy">Markdown and DOCX exports from this run.</p>
+      <p class="metric-copy">Manuscript exports plus editorial feedback.</p>
     </div>
   </div>
 
-  {% if run.status.value == "completed" %}
+  {% if awaiting_outline_approval %}
+    <p class="notice notice-warning">This run is paused after the story bible and outline review. Approve it to continue drafting, or cancel it and reopen the project editor before the long chapter pass begins.</p>
+  {% elif run.status.value == "completed" %}
     {% if all_requested_chapters_completed %}
-      <p class="notice success-notice">This run drafted and summarized all {{ run.requested_chapters }} requested chapter{{ "" if run.requested_chapters == 1 else "s" }} before exporting the manuscript.</p>
+      <p class="notice notice-success">This run drafted, summarized, and continuity-checked all {{ run.requested_chapters }} requested chapter{{ "" if run.requested_chapters == 1 else "s" }} before editorial QA and export.</p>
     {% else %}
       <p class="error-text">This run completed without every requested chapter being fully drafted. Treat the output as incomplete.</p>
     {% endif %}
@@ -141,9 +154,140 @@
         <span class="detail-label">Drafted chapters</span>
         <span class="detail-value">{{ completed_chapter_count }}</span>
       </div>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Pause after outline</span>
+        <span class="detail-value">{{ "Enabled" if run.pause_after_outline else "Consumed or disabled" }}</span>
+      </div>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Open threads</span>
+        <span class="detail-value">{{ continuity_ledger.open_threads|length if continuity_ledger else 0 }}</span>
+      </div>
     </div>
   </details>
 </section>
+
+{% if story_bible or outline_entries %}
+  <section class="grid two-up">
+    <article class="panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>Story bible</h2>
+          <p>The structured foundation that the chapter prompts use to stay coherent.</p>
+        </div>
+      </div>
+      {% if story_bible %}
+        <div class="story-bible-grid">
+          <div class="detail-item">
+            <span class="detail-label">Logline</span>
+            <p class="chapter-copy">{{ story_bible.logline }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Theme</span>
+            <p class="chapter-copy">{{ story_bible.theme }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Ending promise</span>
+            <p class="chapter-copy">{{ story_bible.ending_promise }}</p>
+          </div>
+        </div>
+
+        {% if story_bible.act_plan %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Act plan</h3>
+            </div>
+            <ul class="bullet-list">
+              {% for item in story_bible.act_plan %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+
+        {% if story_bible.cast %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Cast</h3>
+            </div>
+            <div class="story-card-list">
+              {% for member in story_bible.cast %}
+                <article class="story-card">
+                  <strong>{{ member.name }}</strong>
+                  <p class="field-note">{{ member.role }}</p>
+                  <p class="chapter-copy">Wants: {{ member.desire }}</p>
+                  <p class="chapter-copy">At risk: {{ member.risk }}</p>
+                </article>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        {% if story_bible.world_rules %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>World rules</h3>
+            </div>
+            <ul class="bullet-list">
+              {% for item in story_bible.world_rules %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      {% else %}
+        <p class="empty-state">The story bible will appear here once the run reaches that stage.</p>
+      {% endif %}
+    </article>
+
+    <article class="panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>Structured outline</h2>
+          <p>Each chapter should move the plot, change character state, and set up the ending rather than restating the premise.</p>
+        </div>
+      </div>
+      {% if outline_entries %}
+        <div class="outline-review-list">
+          {% for entry in outline_entries %}
+            <article class="outline-card">
+              <div class="chapter-topline">
+                <div class="chapter-heading">
+                  <p class="eyebrow">Chapter {{ entry.chapter_number }}</p>
+                  <h3>{{ entry.title }}</h3>
+                </div>
+                <span class="meta-chip">{{ entry.act }}</span>
+              </div>
+              <div class="story-bible-grid">
+                <div class="detail-item">
+                  <span class="detail-label">Objective</span>
+                  <p class="chapter-copy">{{ entry.objective }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Conflict turn</span>
+                  <p class="chapter-copy">{{ entry.conflict_turn }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Character turn</span>
+                  <p class="chapter-copy">{{ entry.character_turn }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Reveal</span>
+                  <p class="chapter-copy">{{ entry.reveal }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Ending state</span>
+                  <p class="chapter-copy">{{ entry.ending_state }}</p>
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="empty-state">The structured outline will appear here once the run reaches that stage.</p>
+      {% endif %}
+    </article>
+  </section>
+{% endif %}
 
 <section class="grid two-up">
   <article class="panel">
@@ -175,9 +319,20 @@
       </div>
       <p>{{ run.artifacts|length }} ready</p>
     </div>
-    {% if run.artifacts %}
+
+    {% if qa_artifact %}
+      <a class="artifact-card qa-artifact-card" href="/api/artifacts/{{ qa_artifact.id }}/download">
+        <span class="artifact-kind">editorial feedback</span>
+        <div class="artifact-meta">
+          <strong class="artifact-name long-value">{{ qa_artifact.filename }}</strong>
+          <span class="detail-value">Download the manuscript QA report before deciding what to revise next.</span>
+        </div>
+      </a>
+    {% endif %}
+
+    {% if manuscript_artifacts %}
       <div class="artifact-list">
-        {% for artifact in run.artifacts %}
+        {% for artifact in manuscript_artifacts %}
           <a class="artifact-card" href="/api/artifacts/{{ artifact.id }}/download">
             <span class="artifact-kind">{{ artifact.kind }}</span>
             <div class="artifact-meta">
@@ -187,7 +342,7 @@
           </a>
         {% endfor %}
       </div>
-    {% else %}
+    {% elif not qa_artifact %}
       <p class="empty-state">Artifacts will appear here when the run reaches the export stage.</p>
     {% endif %}
   </article>
@@ -220,6 +375,12 @@
               {% if chapter.summary %}
                 <span class="meta-chip">Summary saved</span>
               {% endif %}
+              {% if chapter.continuity_update %}
+                <span class="meta-chip">Continuity updated</span>
+              {% endif %}
+              {% if chapter.qa_notes %}
+                <span class="meta-chip">Critique stored</span>
+              {% endif %}
               {% if chapter.content %}
                 <span class="meta-chip">Preview ready</span>
               {% endif %}
@@ -231,6 +392,45 @@
             {% if chapter.error_message %}
               <p class="error-text">{{ chapter.error_message }}</p>
             {% endif %}
+
+            {% if chapter.qa_notes %}
+              <details class="chapter-preview-shell">
+                <summary>Editorial notes</summary>
+                <div class="story-bible-grid">
+                  {% if chapter.qa_notes.strengths %}
+                    <div class="detail-item">
+                      <span class="detail-label">Strengths</span>
+                      <ul class="bullet-list">
+                        {% for item in chapter.qa_notes.strengths %}
+                          <li>{{ item }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                  {% if chapter.qa_notes.warnings %}
+                    <div class="detail-item">
+                      <span class="detail-label">Warnings</span>
+                      <ul class="bullet-list">
+                        {% for item in chapter.qa_notes.warnings %}
+                          <li>{{ item }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                  {% if chapter.qa_notes.focus %}
+                    <div class="detail-item">
+                      <span class="detail-label">Revision focus</span>
+                      <ul class="bullet-list">
+                        {% for item in chapter.qa_notes.focus %}
+                          <li>{{ item }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                </div>
+              </details>
+            {% endif %}
+
             {% if chapter.content %}
               <details class="chapter-preview-shell">
                 <summary>Preview chapter text</summary>

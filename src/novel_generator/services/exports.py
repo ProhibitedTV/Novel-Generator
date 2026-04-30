@@ -5,6 +5,7 @@ from pathlib import Path
 from docx import Document
 
 from ..models import Artifact, ChapterDraft, GenerationRun, Project
+from .prompts import sanitize_chapter_content
 
 
 def export_run_artifacts(
@@ -12,6 +13,7 @@ def export_run_artifacts(
     project: Project,
     run: GenerationRun,
     chapters: list[ChapterDraft],
+    qa_report_markdown: str | None = None,
 ) -> list[Artifact]:
     run_dir = artifacts_dir / run.id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -24,7 +26,7 @@ def export_run_artifacts(
     docx_path = run_dir / docx_name
     render_docx(project, chapters, docx_path)
 
-    return [
+    artifacts = [
         Artifact(
             kind="markdown",
             filename=markdown_name,
@@ -38,16 +40,30 @@ def export_run_artifacts(
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ),
     ]
+    if qa_report_markdown is not None:
+        qa_name = "qa-report.md"
+        qa_path = run_dir / qa_name
+        qa_path.write_text(qa_report_markdown, encoding="utf-8")
+        artifacts.append(
+            Artifact(
+                kind="qa-report",
+                filename=qa_name,
+                relative_path=str(qa_path.relative_to(artifacts_dir)),
+                content_type="text/markdown",
+            )
+        )
+    return artifacts
 
 
 def render_markdown(project: Project, chapters: list[ChapterDraft]) -> str:
     lines = [f"# {project.title}", "", project.premise, ""]
     for chapter in chapters:
+        content = sanitize_chapter_content(chapter.content or "")
         lines.extend(
             [
                 f"## Chapter {chapter.chapter_number}: {chapter.title}",
                 "",
-                chapter.content or "",
+                content,
                 "",
             ]
         )
@@ -59,8 +75,9 @@ def render_docx(project: Project, chapters: list[ChapterDraft], destination: Pat
     document.add_heading(project.title, level=0)
     document.add_paragraph(project.premise)
     for chapter in chapters:
+        content = sanitize_chapter_content(chapter.content or "")
         document.add_heading(f"Chapter {chapter.chapter_number}: {chapter.title}", level=1)
-        for paragraph in (chapter.content or "").split("\n\n"):
+        for paragraph in content.split("\n\n"):
             if paragraph.strip():
                 document.add_paragraph(paragraph.strip())
     document.save(destination)

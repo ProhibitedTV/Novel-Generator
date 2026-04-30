@@ -17,6 +17,7 @@ from .models import (
     RunStatus,
 )
 from .schemas import ProjectCreate, ProjectUpdate, ProviderConfigUpdate, RunCreate
+from .services.prompts import outline_summary_from_entry
 from .settings import Settings
 
 TERMINAL_RUN_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
@@ -156,6 +157,8 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
         requested_chapters=requested_chapters,
         min_words_per_chapter=min_words_per_chapter,
         max_words_per_chapter=max_words_per_chapter,
+        pipeline_version=2,
+        pause_after_outline=payload.pause_after_outline,
         status=RunStatus.QUEUED,
         current_step="queued",
         source_run_id=payload.source_run_id,
@@ -170,24 +173,48 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
             raise ValueError("Source run was not found.")
         if source_run.project_id != project.id:
             raise ValueError("Source run must belong to the same project.")
-        if not source_run.outline:
-            raise ValueError("Source run does not have a reusable outline.")
-        run.outline = deepcopy(source_run.outline)
-        for source_chapter in source_run.chapters:
-            cloned = ChapterDraft(
-                run=run,
-                chapter_number=source_chapter.chapter_number,
-                title=source_chapter.title,
-                outline_summary=source_chapter.outline_summary,
-            )
-            session.add(cloned)
-            if source_chapter.chapter_number < payload.resume_from_chapter:
-                cloned.plan = source_chapter.plan
-                cloned.content = source_chapter.content
-                cloned.summary = source_chapter.summary
-                cloned.status = source_chapter.status
-                cloned.word_count = source_chapter.word_count
-        session.flush()
+        if source_run.pipeline_version >= 2:
+            if not source_run.outline:
+                raise ValueError("Source run does not have a reusable outline.")
+            run.pause_after_outline = False
+            run.outline = deepcopy(source_run.outline)
+            run.story_bible = deepcopy(source_run.story_bible)
+            for source_chapter in source_run.chapters:
+                cloned = ChapterDraft(
+                    run=run,
+                    chapter_number=source_chapter.chapter_number,
+                    title=source_chapter.title,
+                    outline_summary=source_chapter.outline_summary,
+                )
+                session.add(cloned)
+                if source_chapter.chapter_number < payload.resume_from_chapter:
+                    cloned.plan = source_chapter.plan
+                    cloned.content = source_chapter.content
+                    cloned.summary = source_chapter.summary
+                    cloned.continuity_update = deepcopy(source_chapter.continuity_update)
+                    cloned.qa_notes = deepcopy(source_chapter.qa_notes)
+                    cloned.status = source_chapter.status
+                    cloned.word_count = source_chapter.word_count
+
+            prior_chapters = [
+                chapter
+                for chapter in source_run.chapters
+                if chapter.chapter_number < payload.resume_from_chapter and chapter.continuity_update
+            ]
+            if prior_chapters:
+                latest = prior_chapters[-1].continuity_update or {}
+                run.continuity_ledger = {
+                    "current_patch_status": latest.get("current_patch_status", ""),
+                    "character_states": deepcopy(latest.get("character_states", {})),
+                    "world_state": latest.get("world_state", ""),
+                    "open_threads": deepcopy(latest.get("open_threads", [])),
+                    "resolved_threads": deepcopy(latest.get("resolved_threads", [])),
+                    "timeline": deepcopy(latest.get("timeline", [])),
+                }
+            session.flush()
+        else:
+            run.source_run_id = None
+            run.resume_from_chapter = None
 
     return run
 
@@ -253,20 +280,21 @@ def create_chapters_from_outline(session: Session, run: GenerationRun) -> list[C
     existing = {chapter.chapter_number: chapter for chapter in run.chapters}
     created: list[ChapterDraft] = []
     for index, item in enumerate(run.outline or [], start=1):
+        outline_summary = outline_summary_from_entry(item)
         chapter = existing.get(index)
         if chapter is None:
             chapter = ChapterDraft(
                 run=run,
                 chapter_number=index,
                 title=item["title"],
-                outline_summary=item["summary"],
+                outline_summary=outline_summary,
                 status=ChapterStatus.PENDING,
             )
             session.add(chapter)
             created.append(chapter)
         else:
             chapter.title = item["title"]
-            chapter.outline_summary = item["summary"]
+            chapter.outline_summary = outline_summary
     session.flush()
     session.refresh(run, attribute_names=["chapters"])
     return created

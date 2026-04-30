@@ -27,19 +27,23 @@ from ..repositories import (
 )
 from ..schemas import ProjectCreate, ProjectUpdate, ProviderCapabilities, ProviderConfigUpdate, RunCreate
 from ..services.ollama import OllamaClient, OllamaError, OllamaTransportError
+from ..services.state import approve_outline_review, request_run_cancellation
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
-from ..services.state import request_run_cancellation
 from ..settings import Settings
 
 router = APIRouter(tags=["ui"])
 
 RUN_STAGES = [
     {"id": "queued", "label": "Queued", "description": "Waiting for the worker to pick up the run."},
-    {"id": "outline", "label": "Outline", "description": "Building the chapter outline and structure."},
-    {"id": "chapter_plan", "label": "Plan chapters", "description": "Turning the outline into concrete chapter beats."},
-    {"id": "chapter_draft", "label": "Draft chapters", "description": "Writing chapter text with the chosen model."},
-    {"id": "chapter_summary", "label": "Summarize", "description": "Saving continuity summaries for later chapters."},
-    {"id": "export", "label": "Export", "description": "Rendering Markdown and DOCX artifacts."},
+    {"id": "story_bible", "label": "Story bible", "description": "Building the book's core promise, cast, and system rules."},
+    {"id": "outline", "label": "Outline", "description": "Generating the chapter-by-chapter structure and ending path."},
+    {"id": "outline_review", "label": "Review outline", "description": "Paused so you can approve the structure before the long draft begins."},
+    {"id": "chapter_plan", "label": "Plan chapter", "description": "Turning the approved outline into concrete scene beats."},
+    {"id": "chapter_draft", "label": "Draft chapter", "description": "Writing prose for the current chapter."},
+    {"id": "chapter_revision", "label": "Revise chapter", "description": "Running one editorial cleanup pass when the critique says it needs it."},
+    {"id": "chapter_summary", "label": "Update continuity", "description": "Saving the chapter summary and run-level continuity ledger."},
+    {"id": "manuscript_qa", "label": "Editorial QA", "description": "Checking the full manuscript for repetition, continuity drift, and ending shape."},
+    {"id": "export", "label": "Export", "description": "Rendering manuscript and QA artifacts."},
     {"id": "completed", "label": "Complete", "description": "Artifacts are ready and the run is done."},
     {"id": "failed", "label": "Failed", "description": "The run stopped because something went wrong."},
     {"id": "canceled", "label": "Canceled", "description": "The run was stopped before it finished."},
@@ -107,6 +111,47 @@ def _field_errors(exc: ValidationError) -> dict[str, str]:
     return errors
 
 
+def _join_lines(values: list[str] | None) -> str:
+    return "\n".join(item for item in (values or []) if str(item).strip())
+
+
+def _story_brief_form_values(story_brief: dict[str, Any] | None = None) -> dict[str, Any]:
+    brief = story_brief or {}
+    return {
+        "story_setting": str(brief.get("setting", "") or ""),
+        "story_tone": str(brief.get("tone", "") or ""),
+        "story_protagonist": str(brief.get("protagonist", "") or ""),
+        "story_supporting_cast": _join_lines(brief.get("supporting_cast", [])),
+        "story_antagonist": str(brief.get("antagonist", "") or ""),
+        "story_core_conflict": str(brief.get("core_conflict", "") or ""),
+        "story_ending_target": str(brief.get("ending_target", "") or ""),
+        "story_world_rules": _join_lines(brief.get("world_rules", [])),
+        "story_must_include": _join_lines(brief.get("must_include", [])),
+        "story_avoid": _join_lines(brief.get("avoid", [])),
+    }
+
+
+def _story_brief_payload(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "setting": values.get("story_setting", ""),
+        "tone": values.get("story_tone", ""),
+        "protagonist": values.get("story_protagonist", ""),
+        "supporting_cast": values.get("story_supporting_cast", ""),
+        "antagonist": values.get("story_antagonist", ""),
+        "core_conflict": values.get("story_core_conflict", ""),
+        "ending_target": values.get("story_ending_target", ""),
+        "world_rules": values.get("story_world_rules", ""),
+        "must_include": values.get("story_must_include", ""),
+        "avoid": values.get("story_avoid", ""),
+    }
+
+
+def _coerce_checkbox(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.lower() not in {"0", "false", "off", ""}
+
+
 def _project_defaults(default_model: str) -> dict[str, Any]:
     return {
         "title": "",
@@ -117,10 +162,15 @@ def _project_defaults(default_model: str) -> dict[str, Any]:
         "max_words_per_chapter": 2200,
         "preferred_model": default_model,
         "notes": "",
+        **_story_brief_form_values(),
     }
 
 
-def _project_form_values(default_model: str, project: Project | None = None, values: dict[str, Any] | None = None) -> dict[str, Any]:
+def _project_form_values(
+    default_model: str,
+    project: Project | None = None,
+    values: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     base = _project_defaults(default_model)
     if project is not None:
         base.update(
@@ -133,6 +183,7 @@ def _project_form_values(default_model: str, project: Project | None = None, val
                 "max_words_per_chapter": project.max_words_per_chapter,
                 "preferred_model": project.preferred_model,
                 "notes": project.notes or "",
+                **_story_brief_form_values(project.story_brief),
             }
         )
     if values:
@@ -147,6 +198,7 @@ def _run_form_values(project: Project, values: dict[str, Any] | None = None) -> 
         "requested_chapters": project.requested_chapters,
         "min_words_per_chapter": project.min_words_per_chapter,
         "max_words_per_chapter": project.max_words_per_chapter,
+        "pause_after_outline": True,
     }
     if values:
         base.update(values)
@@ -241,7 +293,7 @@ def _onboarding_steps(provider_config: Any, provider_status: ProviderCapabilitie
         },
         {
             "title": "Create your first project",
-            "description": "Projects save the premise, chapter targets, and preferred model so future runs are quicker to launch.",
+            "description": "Projects save the premise, chapter targets, preferred model, and story brief so future runs are quicker to launch.",
             "done": bool(projects),
             "action_href": "/projects/new",
             "action_label": "Create project",
@@ -258,7 +310,10 @@ def _chapter_completion_count(run: GenerationRun) -> int:
         [
             chapter
             for chapter in run.chapters
-            if chapter.status == ChapterStatus.COMPLETED and chapter.content and chapter.summary
+            if chapter.status == ChapterStatus.COMPLETED
+            and chapter.content
+            and chapter.summary
+            and chapter.continuity_update
         ]
     )
 
@@ -272,6 +327,15 @@ def _project_run_stats(project: Project) -> dict[str, Any]:
         "terminal_run_count": len(terminal_runs),
         "active_run_count": len(active_runs),
         "can_delete_project": not active_runs,
+    }
+
+
+def _artifact_context(run: GenerationRun) -> dict[str, Any]:
+    qa_artifact = next((artifact for artifact in run.artifacts if artifact.kind == "qa-report"), None)
+    manuscript_artifacts = [artifact for artifact in run.artifacts if artifact.kind != "qa-report"]
+    return {
+        "qa_artifact": qa_artifact,
+        "manuscript_artifacts": manuscript_artifacts,
     }
 
 
@@ -313,7 +377,12 @@ def _projects_context(request: Request, db: Session, settings: Settings) -> dict
         "projects": projects,
         "provider_status": provider_status,
         "provider_config": provider_config,
-        "provider_guidance": _provider_guidance(provider_config.base_url, provider_config.default_model, provider_status, len(projects)),
+        "provider_guidance": _provider_guidance(
+            provider_config.base_url,
+            provider_config.default_model,
+            provider_status,
+            len(projects),
+        ),
     }
 
 
@@ -365,7 +434,7 @@ def _project_detail_context(
         "run_values": _run_form_values(project, values=run_values),
         "run_errors": run_errors or {},
         "page_error": page_error,
-        "open_edit_form": open_edit_form,
+        "open_edit_form": open_edit_form or request.query_params.get("open_edit") == "1",
         "terminal_statuses": TERMINAL_STATUSES,
     }
 
@@ -397,6 +466,20 @@ def _provider_settings_context(
         "form_errors": form_errors or {},
         "page_error": page_error,
     }
+
+
+def _same_settings_payload(run: GenerationRun, *, source_run_id: str | None = None, resume_from_chapter: int | None = None) -> RunCreate:
+    return RunCreate(
+        project_id=run.project_id,
+        model_name=run.model_name,
+        target_word_count=run.target_word_count,
+        requested_chapters=run.requested_chapters,
+        min_words_per_chapter=run.min_words_per_chapter,
+        max_words_per_chapter=run.max_words_per_chapter,
+        pause_after_outline=True,
+        source_run_id=source_run_id,
+        resume_from_chapter=resume_from_chapter,
+    )
 
 
 @router.get("/")
@@ -437,10 +520,20 @@ def create_project_ui(
     max_words_per_chapter: str = Form("2200"),
     preferred_model: str = Form(""),
     notes: str = Form(""),
+    story_setting: str = Form(""),
+    story_tone: str = Form(""),
+    story_protagonist: str = Form(""),
+    story_supporting_cast: str = Form(""),
+    story_antagonist: str = Form(""),
+    story_core_conflict: str = Form(""),
+    story_ending_target: str = Form(""),
+    story_world_rules: str = Form(""),
+    story_must_include: str = Form(""),
+    story_avoid: str = Form(""),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
-    raw_values = {
+    raw_form_values = {
         "title": title,
         "premise": premise,
         "desired_word_count": desired_word_count,
@@ -449,15 +542,36 @@ def create_project_ui(
         "max_words_per_chapter": max_words_per_chapter,
         "preferred_model": preferred_model,
         "notes": notes,
+        "story_setting": story_setting,
+        "story_tone": story_tone,
+        "story_protagonist": story_protagonist,
+        "story_supporting_cast": story_supporting_cast,
+        "story_antagonist": story_antagonist,
+        "story_core_conflict": story_core_conflict,
+        "story_ending_target": story_ending_target,
+        "story_world_rules": story_world_rules,
+        "story_must_include": story_must_include,
+        "story_avoid": story_avoid,
+    }
+    payload_values = {
+        "title": title,
+        "premise": premise,
+        "desired_word_count": desired_word_count,
+        "requested_chapters": requested_chapters,
+        "min_words_per_chapter": min_words_per_chapter,
+        "max_words_per_chapter": max_words_per_chapter,
+        "preferred_model": preferred_model,
+        "notes": notes,
+        "story_brief": _story_brief_payload(raw_form_values),
     }
     provider_config, provider_status, _ = _provider_status(settings, db)
     try:
-        payload = ProjectCreate.model_validate(raw_values)
+        payload = ProjectCreate.model_validate(payload_values)
     except ValidationError as exc:
         return _render(
             request,
             "project_new.html",
-            _project_new_context(request, db, settings, form_values=raw_values, form_errors=_field_errors(exc)),
+            _project_new_context(request, db, settings, form_values=raw_form_values, form_errors=_field_errors(exc)),
             status_code=400,
         )
 
@@ -468,7 +582,7 @@ def create_project_ui(
         return _render(
             request,
             "project_new.html",
-            _project_new_context(request, db, settings, form_values=raw_values, form_errors=errors),
+            _project_new_context(request, db, settings, form_values=raw_form_values, form_errors=errors),
             status_code=400,
         )
 
@@ -562,6 +676,16 @@ def edit_project_ui(
     max_words_per_chapter: str = Form(""),
     preferred_model: str = Form(""),
     notes: str = Form(""),
+    story_setting: str = Form(""),
+    story_tone: str = Form(""),
+    story_protagonist: str = Form(""),
+    story_supporting_cast: str = Form(""),
+    story_antagonist: str = Form(""),
+    story_core_conflict: str = Form(""),
+    story_ending_target: str = Form(""),
+    story_world_rules: str = Form(""),
+    story_must_include: str = Form(""),
+    story_avoid: str = Form(""),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -569,7 +693,7 @@ def edit_project_ui(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found.")
 
-    raw_values = {
+    raw_form_values = {
         "title": title,
         "premise": premise,
         "desired_word_count": desired_word_count,
@@ -578,10 +702,31 @@ def edit_project_ui(
         "max_words_per_chapter": max_words_per_chapter,
         "preferred_model": preferred_model,
         "notes": notes,
+        "story_setting": story_setting,
+        "story_tone": story_tone,
+        "story_protagonist": story_protagonist,
+        "story_supporting_cast": story_supporting_cast,
+        "story_antagonist": story_antagonist,
+        "story_core_conflict": story_core_conflict,
+        "story_ending_target": story_ending_target,
+        "story_world_rules": story_world_rules,
+        "story_must_include": story_must_include,
+        "story_avoid": story_avoid,
+    }
+    payload_values = {
+        "title": title,
+        "premise": premise,
+        "desired_word_count": desired_word_count,
+        "requested_chapters": requested_chapters,
+        "min_words_per_chapter": min_words_per_chapter,
+        "max_words_per_chapter": max_words_per_chapter,
+        "preferred_model": preferred_model,
+        "notes": notes,
+        "story_brief": _story_brief_payload(raw_form_values),
     }
     _, provider_status, _ = _provider_status(settings, db)
     try:
-        validated = ProjectCreate.model_validate(raw_values)
+        validated = ProjectCreate.model_validate(payload_values)
     except ValidationError as exc:
         return _render(
             request,
@@ -591,7 +736,7 @@ def edit_project_ui(
                 project,
                 db,
                 settings,
-                edit_values=raw_values,
+                edit_values=raw_form_values,
                 edit_errors=_field_errors(exc),
                 open_edit_form=True,
             ),
@@ -610,7 +755,7 @@ def edit_project_ui(
                 project,
                 db,
                 settings,
-                edit_values=raw_values,
+                edit_values=raw_form_values,
                 edit_errors=errors,
                 open_edit_form=True,
             ),
@@ -680,6 +825,7 @@ def create_run_ui(
     requested_chapters: str = Form(""),
     min_words_per_chapter: str = Form(""),
     max_words_per_chapter: str = Form(""),
+    pause_after_outline: str | None = Form(None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -693,6 +839,7 @@ def create_run_ui(
         "requested_chapters": requested_chapters,
         "min_words_per_chapter": min_words_per_chapter,
         "max_words_per_chapter": max_words_per_chapter,
+        "pause_after_outline": _coerce_checkbox(pause_after_outline),
     }
     _, provider_status, client = _provider_status(settings, db)
 
@@ -799,7 +946,50 @@ def run_detail(
             "run_stages": RUN_STAGES,
             "completed_chapter_count": completed_chapter_count,
             "all_requested_chapters_completed": completed_chapter_count == run.requested_chapters,
+            "awaiting_outline_approval": run.status == RunStatus.AWAITING_APPROVAL,
+            "outline_entries": list(run.outline or []),
+            "story_bible": run.story_bible or {},
+            "continuity_ledger": run.continuity_ledger or {},
+            **_artifact_context(run),
         },
+    )
+
+
+@router.post("/runs/{run_id}/approve-outline")
+def approve_outline_ui(run_id: str, db: Session = Depends(get_db)):
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    try:
+        approve_outline_review(db, run)
+    except ValueError as exc:
+        return _redirect(f"/runs/{run_id}", message=str(exc), message_tone="warning")
+    db.commit()
+    return _redirect(
+        f"/runs/{run.id}",
+        message="Outline approved. The worker can continue drafting the manuscript now.",
+        message_tone="success",
+    )
+
+
+@router.post("/runs/{run_id}/cancel-and-edit")
+def cancel_and_edit_run_ui(run_id: str, db: Session = Depends(get_db)):
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status != RunStatus.AWAITING_APPROVAL:
+        return _redirect(
+            f"/runs/{run.id}",
+            message="Only runs waiting for outline approval can be sent back for project edits.",
+            message_tone="warning",
+        )
+    request_run_cancellation(db, run)
+    db.commit()
+    return _redirect(
+        f"/projects/{run.project_id}",
+        message="Outline review canceled. The project edit form is open so you can adjust the brief or defaults.",
+        message_tone="warning",
+        open_edit="1",
     )
 
 
@@ -825,14 +1015,7 @@ def rerun_ui(
     except (OllamaError, OllamaTransportError) as exc:
         return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="error")
 
-    payload = RunCreate(
-        project_id=run.project_id,
-        model_name=run.model_name,
-        target_word_count=run.target_word_count,
-        requested_chapters=run.requested_chapters,
-        min_words_per_chapter=run.min_words_per_chapter,
-        max_words_per_chapter=run.max_words_per_chapter,
-    )
+    payload = _same_settings_payload(run)
     try:
         new_run = create_run(db, run.project, payload)
     except ValueError as exc:
@@ -892,16 +1075,7 @@ def regenerate_chapter_ui(
         client.ensure_model(run.model_name)
     except (OllamaError, OllamaTransportError) as exc:
         return _redirect(f"/runs/{run_id}", message=str(exc), message_tone="error")
-    payload = RunCreate(
-        project_id=run.project_id,
-        model_name=run.model_name,
-        target_word_count=run.target_word_count,
-        requested_chapters=run.requested_chapters,
-        min_words_per_chapter=run.min_words_per_chapter,
-        max_words_per_chapter=run.max_words_per_chapter,
-        source_run_id=run.id,
-        resume_from_chapter=chapter_number,
-    )
+    payload = _same_settings_payload(run, source_run_id=run.id, resume_from_chapter=chapter_number)
     try:
         new_run = create_run(db, run.project, payload)
     except ValueError as exc:

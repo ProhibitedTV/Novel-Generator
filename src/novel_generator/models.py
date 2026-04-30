@@ -17,6 +17,7 @@ def _uuid() -> str:
 class RunStatus(str, enum.Enum):
     QUEUED = "queued"
     RUNNING = "running"
+    AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -40,6 +41,7 @@ class Project(Base):
     max_words_per_chapter: Mapped[int] = mapped_column(Integer)
     preferred_model: Mapped[str] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    story_brief: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -80,10 +82,14 @@ class GenerationRun(Base):
     requested_chapters: Mapped[int] = mapped_column(Integer)
     min_words_per_chapter: Mapped[int] = mapped_column(Integer)
     max_words_per_chapter: Mapped[int] = mapped_column(Integer)
+    pipeline_version: Mapped[int] = mapped_column(Integer, default=1)
+    pause_after_outline: Mapped[bool] = mapped_column(Boolean, default=True)
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.QUEUED)
     current_step: Mapped[str] = mapped_column(String(255), default="queued")
     current_chapter: Mapped[int | None] = mapped_column(Integer, nullable=True)
     outline: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    story_bible: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    continuity_ledger: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     summary_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -120,6 +126,8 @@ class ChapterDraft(Base):
     plan: Mapped[str | None] = mapped_column(Text, nullable=True)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    continuity_update: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    qa_notes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[ChapterStatus] = mapped_column(Enum(ChapterStatus), default=ChapterStatus.PENDING)
     word_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -5,8 +5,8 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import ValidationError
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_app_settings, get_db, get_session_factory
@@ -36,8 +36,8 @@ from ..schemas import (
     RunCreate,
 )
 from ..services.ollama import OllamaClient, OllamaError, OllamaTransportError
+from ..services.state import approve_outline_review, request_run_cancellation
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
-from ..services.state import request_run_cancellation
 from ..settings import Settings
 
 router = APIRouter(tags=["api"])
@@ -65,10 +65,23 @@ def _validated_project_update(project, payload: ProjectUpdate) -> ProjectUpdate:
         "max_words_per_chapter": project.max_words_per_chapter,
         "preferred_model": project.preferred_model,
         "notes": project.notes,
+        "story_brief": project.story_brief or {},
     }
     merged.update(payload.model_dump(exclude_unset=True))
     validated = ProjectCreate.model_validate(merged)
     return ProjectUpdate(**validated.model_dump())
+
+
+def _same_settings_payload(run, *, pause_after_outline: bool = True) -> RunCreate:
+    return RunCreate(
+        project_id=run.project_id,
+        model_name=run.model_name,
+        target_word_count=run.target_word_count,
+        requested_chapters=run.requested_chapters,
+        min_words_per_chapter=run.min_words_per_chapter,
+        max_words_per_chapter=run.max_words_per_chapter,
+        pause_after_outline=pause_after_outline,
+    )
 
 
 @router.get("/health")
@@ -117,10 +130,7 @@ def update_ollama_config(
 
 
 @router.post("/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
-def api_create_project(
-    payload: ProjectCreate,
-    db: Session = Depends(get_db),
-) -> ProjectRead:
+def api_create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> ProjectRead:
     project = create_project(db, payload)
     db.commit()
     project = get_project(db, project.id)
@@ -239,6 +249,20 @@ def api_cancel_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunR
     return GenerationRunRead.model_validate(run)
 
 
+@router.post("/runs/{run_id}/approve-outline", response_model=GenerationRunRead)
+def api_approve_outline(run_id: str, db: Session = Depends(get_db)) -> GenerationRunRead:
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    try:
+        approve_outline_review(db, run)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    db.commit()
+    run = get_run(db, run.id)
+    return GenerationRunRead.model_validate(run)
+
+
 @router.delete("/runs/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
 def api_delete_run(
     run_id: str,
@@ -277,14 +301,7 @@ def api_rerun(
     except OllamaError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    payload = RunCreate(
-        project_id=run.project_id,
-        model_name=run.model_name,
-        target_word_count=run.target_word_count,
-        requested_chapters=run.requested_chapters,
-        min_words_per_chapter=run.min_words_per_chapter,
-        max_words_per_chapter=run.max_words_per_chapter,
-    )
+    payload = _same_settings_payload(run, pause_after_outline=True)
     new_run = create_run(db, run.project, payload)
     record_event(db, new_run, "run_queued", {"message": "Run re-queued with the same settings."})
     db.commit()
@@ -318,7 +335,7 @@ async def api_run_events(run_id: str) -> StreamingResponse:
                     }
                     yield f"id: {event.sequence}\ndata: {json.dumps(payload)}\n\n"
 
-                terminal = run.status in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
+                terminal = run.status in TERMINAL_RUN_STATUSES
                 if terminal and not events:
                     final_payload = {
                         "run_status": run.status.value,

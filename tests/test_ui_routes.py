@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from novel_generator.dependencies import get_session_factory
-from novel_generator.models import RunStatus
+from novel_generator.models import Artifact, RunStatus
 from novel_generator.repositories import create_project, create_run, get_project, get_run
 from novel_generator.schemas import ProjectCreate, ProviderCapabilities, RunCreate
 from novel_generator.services.ollama import OllamaClient
@@ -39,6 +39,11 @@ def seed_project(title: str = "Seed Project") -> str:
                 min_words_per_chapter=800,
                 max_words_per_chapter=1200,
                 preferred_model="test-model",
+                story_brief={
+                    "setting": "A brittle station-city",
+                    "tone": "tense sci-fi",
+                    "protagonist": "A weary systems engineer",
+                },
             ),
         )
         session.commit()
@@ -58,6 +63,7 @@ def seed_project_and_run() -> tuple[str, str]:
                 min_words_per_chapter=800,
                 max_words_per_chapter=1200,
                 preferred_model="test-model",
+                story_brief={"setting": "A brittle station-city", "tone": "tense sci-fi"},
             ),
         )
         run = create_run(
@@ -109,7 +115,7 @@ def test_home_connected_state_with_existing_projects_and_runs(client, monkeypatc
     assert "Get ready in four steps" not in response.text
 
 
-def test_project_new_page_renders_model_picker_hooks(client, monkeypatch) -> None:
+def test_project_new_page_renders_story_brief_and_model_picker_hooks(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
 
     response = client.get("/projects/new")
@@ -117,6 +123,7 @@ def test_project_new_page_renders_model_picker_hooks(client, monkeypatch) -> Non
     assert response.status_code == 200
     assert 'data-model-input' in response.text
     assert 'data-model-choice' in response.text
+    assert 'name="story_setting"' in response.text
     assert "What happens after this" in response.text
     assert "Setup progress" in response.text
 
@@ -130,7 +137,7 @@ def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:
     assert 'class="notice notice-warning"' in response.text
 
 
-def test_project_edit_validation_renders_inline_errors(client, monkeypatch) -> None:
+def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
     project_id = seed_project()
 
@@ -145,12 +152,23 @@ def test_project_edit_validation_renders_inline_errors(client, monkeypatch) -> N
             "max_words_per_chapter": "800",
             "preferred_model": "test-model",
             "notes": "",
+            "story_setting": "Orbital city",
+            "story_tone": "claustrophobic",
+            "story_protagonist": "Nora",
+            "story_supporting_cast": "Jun\nLiora",
+            "story_antagonist": "Watcher lattice",
+            "story_core_conflict": "Safety versus consent",
+            "story_ending_target": "One ending only",
+            "story_world_rules": "Memories are indexed in light",
+            "story_must_include": "A betrayal",
+            "story_avoid": "Looping chapter restarts",
         },
     )
 
     assert response.status_code == 400
     assert "Max words per chapter must be greater than or equal to min words per chapter." in response.text
-    assert 'value="800"' in response.text
+    assert 'value="Orbital city"' in response.text
+    assert "Looping chapter restarts" in response.text
 
 
 def test_provider_settings_validation_and_live_actions_render(client, monkeypatch) -> None:
@@ -194,6 +212,75 @@ def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> 
     assert 'data-run-detail' in response.text
     assert 'data-run-stepper' in response.text
     assert 'data-event-log' in response.text
+
+
+def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.AWAITING_APPROVAL
+        run.current_step = "outline_review"
+        run.story_bible = {
+            "logline": "A trapped engineer finds a forbidden patch.",
+            "theme": "Safety without consent is still captivity.",
+            "act_plan": ["Setup", "Escalation", "Ending"],
+            "cast": [],
+            "world_rules": ["The lattice edits memory."],
+            "core_system_rules": ["Only signed patches can propagate."],
+            "ending_promise": "One irreversible choice ends the crisis.",
+        }
+        run.outline = [
+            {
+                "chapter_number": 1,
+                "act": "Act I",
+                "title": "Signal",
+                "objective": "Find the forbidden patch.",
+                "conflict_turn": "The system locks Nora out.",
+                "character_turn": "Nora stops hiding what she knows.",
+                "reveal": "The patch carries her own signature.",
+                "ending_state": "Nora commits to tracing the patch.",
+            }
+        ]
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "Approve and continue" in response.text
+    assert "Cancel and edit project" in response.text
+    assert "Story bible" in response.text
+    assert "Structured outline" in response.text
+
+
+def test_run_detail_surfaces_qa_report_artifact(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.COMPLETED
+        run.current_step = "completed"
+        run.artifacts.append(
+            Artifact(
+                kind="qa-report",
+                filename="qa-report.md",
+                relative_path="run-id/qa-report.md",
+                content_type="text/markdown",
+            )
+        )
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "editorial feedback" in response.text
+    assert "qa-report.md" in response.text
 
 
 def test_project_detail_renders_cleanup_controls_for_finished_runs(client, monkeypatch) -> None:

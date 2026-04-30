@@ -275,11 +275,27 @@ function setupRunDetail() {
   const stepNode = runDetail.querySelector("[data-run-step-label]");
   const chapterNode = runDetail.querySelector("[data-run-chapter-label]");
   const stepper = runDetail.querySelector("[data-run-stepper]");
-  const stageOrder = ["queued", "outline", "chapter_plan", "chapter_draft", "chapter_summary", "export", "completed"];
+  const stageOrder = [
+    "queued",
+    "story_bible",
+    "outline",
+    "outline_review",
+    "chapter_plan",
+    "chapter_draft",
+    "chapter_revision",
+    "chapter_summary",
+    "manuscript_qa",
+    "export",
+    "completed",
+  ];
   const terminalStatuses = new Set(["completed", "failed", "canceled"]);
+  const reviewStatuses = new Set(["awaiting_approval"]);
   let lastNonTerminalStep = normalizeStage(runDetail.dataset.runStep || "", runDetail.dataset.runStatus || "");
 
   function normalizeStage(step, status) {
+    if (status === "awaiting_approval") {
+      return "outline_review";
+    }
     if (status === "completed" || status === "failed" || status === "canceled") {
       return status;
     }
@@ -300,11 +316,11 @@ function setupRunDetail() {
     runDetail.dataset.runCurrentChapter = currentChapter || "";
 
     if (statusNode) {
-      statusNode.textContent = status;
+      statusNode.textContent = String(status).replace(/_/g, " ");
       statusNode.className = `badge status-${status}`;
     }
     if (stepNode) {
-      stepNode.textContent = step || "-";
+      stepNode.textContent = step ? String(step).replace(/_/g, " ") : "-";
     }
     if (chapterNode) {
       chapterNode.textContent = currentChapter || "-";
@@ -336,6 +352,18 @@ function setupRunDetail() {
         }
         if (stageId === status) {
           stageNode.classList.add("is-current", "is-terminal");
+        }
+        return;
+      }
+
+      if (status === "awaiting_approval") {
+        const currentIndex = stageOrder.indexOf("outline_review");
+        const stageIndex = stageOrder.indexOf(stageId);
+        if (stageIndex >= 0 && stageIndex < currentIndex) {
+          stageNode.classList.add("is-complete");
+        }
+        if (stageId === "outline_review") {
+          stageNode.classList.add("is-current");
         }
         return;
       }
@@ -384,7 +412,7 @@ function setupRunDetail() {
 
   updateStatus(runDetail.dataset.runStatus || "queued", runDetail.dataset.runStep || "queued", runDetail.dataset.runCurrentChapter || "");
 
-  if (!runId || terminalStatuses.has(runDetail.dataset.runStatus || "")) {
+  if (!runId || terminalStatuses.has(runDetail.dataset.runStatus || "") || reviewStatuses.has(runDetail.dataset.runStatus || "")) {
     return;
   }
 
@@ -394,6 +422,10 @@ function setupRunDetail() {
     const payload = JSON.parse(event.data);
     appendEvent(payload);
     updateStatus(payload.run_status || "queued", payload.current_step || "queued", payload.current_chapter || "");
+    if (reviewStatuses.has(payload.run_status || "")) {
+      source.close();
+      window.setTimeout(() => window.location.reload(), 800);
+    }
   };
 
   source.addEventListener("terminal", (event) => {

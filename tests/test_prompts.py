@@ -1,51 +1,103 @@
 from __future__ import annotations
 
-from novel_generator.models import ChapterDraft, ChapterStatus, GenerationRun, Project, RunStatus
-from novel_generator.services.prompts import build_outline_messages, parse_outline, rolling_context
+from novel_generator.models import ChapterDraft, ChapterStatus
+from novel_generator.services.prompts import (
+    parse_outline,
+    parse_story_bible,
+    rolling_context,
+    sanitize_chapter_content,
+)
 
 
-def _project() -> Project:
-    return Project(
-        title="The Glass Orchard",
-        premise="A disgraced archivist finds a living map under a failing city.",
-        desired_word_count=40000,
-        requested_chapters=3,
-        min_words_per_chapter=1000,
-        max_words_per_chapter=1800,
-        preferred_model="test-model",
+def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
+    parsed = parse_story_bible(
+        """```json
+        {
+          "logline": "An archivist finds a living map under a failing city.",
+          "theme": "Memory without agency becomes a prison.",
+          "act_plan": ["Discovery", "Descent", "Confrontation"],
+          "cast": [
+            {"name": "Iris", "role": "Archivist", "desire": "Restore the city", "risk": "Becoming its servant"}
+          ],
+          "world_rules": ["The city records memory in living stone."],
+          "core_system_rules": ["Maps can rewrite routes and memories."],
+          "ending_promise": "The city survives only if Iris gives up control."
+        }
+        ```"""
     )
 
+    assert parsed.logline.startswith("An archivist")
+    assert parsed.cast[0].name == "Iris"
+    assert parsed.ending_promise.endswith("control.")
 
-def _run() -> GenerationRun:
-    return GenerationRun(
-        project_id="project-1",
-        model_name="test-model",
-        target_word_count=40000,
-        requested_chapters=3,
-        min_words_per_chapter=1000,
-        max_words_per_chapter=1800,
-        status=RunStatus.QUEUED,
-        current_step="queued",
+
+def test_outline_parser_enforces_exact_count_and_keys() -> None:
+    parsed = parse_outline(
+        """
+        {
+          "chapters": [
+            {
+              "chapter_number": 1,
+              "act": "Act I",
+              "title": "Arrival",
+              "objective": "Recover the hidden map.",
+              "conflict_turn": "The archive locks Iris inside.",
+              "character_turn": "Iris stops hiding how desperate she is.",
+              "reveal": "The map recognizes Iris by name.",
+              "ending_state": "Iris escapes with proof the map is alive."
+            },
+            {
+              "chapter_number": 2,
+              "act": "Act I",
+              "title": "Descent",
+              "objective": "Trace the map beneath the city.",
+              "conflict_turn": "The tunnels begin rewriting the route.",
+              "character_turn": "Iris chooses trust over isolation.",
+              "reveal": "The city has been steering her for years.",
+              "ending_state": "Iris commits to the undercity mission."
+            }
+          ]
+        }
+        """,
+        requested_chapters=2,
     )
 
-
-def test_outline_prompt_mentions_constraints() -> None:
-    project = _project()
-    run = _run()
-
-    messages = build_outline_messages(project, run)
-
-    assert "Requested chapters: 3" in messages[1]["content"]
-    assert "Title" in messages[1]["content"]
-
-
-def test_parse_outline_fills_missing_entries() -> None:
-    parsed = parse_outline("Chapter 1: Arrival | The map awakens.", requested_chapters=3)
-
-    assert len(parsed) == 3
+    assert len(parsed) == 2
     assert parsed[0]["title"] == "Arrival"
-    assert parsed[0]["summary"] == "The map awakens."
-    assert parsed[2]["title"] == "Chapter 3"
+    assert parsed[1]["ending_state"] == "Iris commits to the undercity mission."
+
+
+def test_outline_parser_rejects_wrong_chapter_count() -> None:
+    try:
+        parse_outline(
+            """
+            {
+              "chapters": [
+                {
+                  "chapter_number": 1,
+                  "act": "Act I",
+                  "title": "Only Chapter",
+                  "objective": "Start the story.",
+                  "conflict_turn": "Trouble arrives.",
+                  "character_turn": "The hero commits.",
+                  "reveal": "The threat is personal.",
+                  "ending_state": "The mission begins."
+                }
+              ]
+            }
+            """,
+            requested_chapters=2,
+        )
+    except ValueError as exc:
+        assert "2 were required" in str(exc)
+    else:
+        raise AssertionError("Expected the outline parser to reject the wrong chapter count.")
+
+
+def test_sanitize_chapter_content_removes_duplicate_heading() -> None:
+    cleaned = sanitize_chapter_content("Chapter 7: Descent\n\nThe real prose starts here.")
+
+    assert cleaned == "The real prose starts here."
 
 
 def test_rolling_context_uses_recent_completed_chapters() -> None:

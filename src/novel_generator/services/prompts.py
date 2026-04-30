@@ -1,61 +1,126 @@
 from __future__ import annotations
 
+import json
 import re
+from typing import Any
+
+from pydantic import TypeAdapter, ValidationError
 
 from ..models import ChapterDraft, GenerationRun, Project
+from ..schemas import (
+    ChapterContinuityUpdate,
+    ChapterCritique,
+    ChapterPlan,
+    ContinuityLedger,
+    ManuscriptQaReport,
+    StoryBible,
+    StructuredOutlineEntry,
+)
 
 
-def build_outline_messages(project: Project, run: GenerationRun) -> list[dict[str, str]]:
+def _story_brief_lines(project: Project) -> str:
+    brief = project.story_brief or {}
+    lines = [
+        f"Premise: {project.premise}",
+        f"Notes: {project.notes or 'None provided.'}",
+        f"Setting: {brief.get('setting') or 'Not specified.'}",
+        f"Tone: {brief.get('tone') or 'Not specified.'}",
+        f"Protagonist: {brief.get('protagonist') or 'Not specified.'}",
+        f"Supporting cast: {', '.join(brief.get('supporting_cast', [])) or 'Not specified.'}",
+        f"Antagonist: {brief.get('antagonist') or 'Not specified.'}",
+        f"Core conflict: {brief.get('core_conflict') or 'Not specified.'}",
+        f"Ending target: {brief.get('ending_target') or 'Not specified.'}",
+        f"World rules: {', '.join(brief.get('world_rules', [])) or 'Not specified.'}",
+        f"Must include: {', '.join(brief.get('must_include', [])) or 'Not specified.'}",
+        f"Avoid: {', '.join(brief.get('avoid', [])) or 'Not specified.'}",
+    ]
+    return "\n".join(lines)
+
+
+def outline_summary_from_entry(entry: StructuredOutlineEntry | dict[str, Any]) -> str:
+    item = entry if isinstance(entry, dict) else entry.model_dump()
+    return (
+        f"{item.get('objective', '').strip()} "
+        f"Conflict turn: {item.get('conflict_turn', '').strip()} "
+        f"Reveal: {item.get('reveal', '').strip()} "
+        f"Ending state: {item.get('ending_state', '').strip()}"
+    ).strip()
+
+
+def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
             "content": (
-                "You are a meticulous fiction outliner. Return compact, practical planning output "
-                "that helps a later drafting step write a coherent novel."
+                "You are a senior developmental editor designing a coherent science-fiction novel. "
+                "Return valid JSON only with no markdown fences, commentary, or prose outside the JSON object."
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Create an outline for a novel titled '{project.title}'. Premise: {project.premise}\n"
+                f"Design a story bible for the novel '{project.title}'.\n"
                 f"Total target words: {run.target_word_count}. Requested chapters: {run.requested_chapters}.\n"
-                "Return exactly one line per chapter in this format:\n"
-                "Chapter N: Title | One-sentence summary"
+                f"{_story_brief_lines(project)}\n\n"
+                "Return a JSON object with exactly these keys:\n"
+                "{\n"
+                '  "logline": "string",\n'
+                '  "theme": "string",\n'
+                '  "act_plan": ["Act I purpose", "Act II purpose", "Act III purpose"],\n'
+                '  "cast": [{"name": "string", "role": "string", "desire": "string", "risk": "string"}],\n'
+                '  "world_rules": ["rule 1", "rule 2"],\n'
+                '  "core_system_rules": ["system rule 1", "system rule 2"],\n'
+                '  "ending_promise": "string"\n'
+                "}\n\n"
+                "Requirements:\n"
+                "- make the protagonist, antagonist, and supporting cast distinct\n"
+                "- frame one central external conflict for the book\n"
+                "- promise one primary ending, not multiple competing finales\n"
+                "- keep the tone and world rules specific enough to guide later chapters"
             ),
         },
     ]
 
 
-def parse_outline(text: str, requested_chapters: int) -> list[dict[str, str]]:
-    lines = [line.strip("-* \t") for line in text.splitlines() if line.strip()]
-    outline: list[dict[str, str]] = []
-    for index, line in enumerate(lines, start=1):
-        cleaned = re.sub(r"^\s*(chapter\s*)?\d+[\.\:\-\)]\s*", "", line, flags=re.IGNORECASE).strip()
-        if not cleaned:
-            continue
-        title = f"Chapter {index}"
-        summary = cleaned
-        for separator in ("|", " - ", ": "):
-            if separator in cleaned:
-                left, right = cleaned.split(separator, 1)
-                title = left.strip() or title
-                summary = right.strip() or summary
-                break
-        else:
-            title = cleaned[:60].strip() or title
-        outline.append({"title": title, "summary": summary})
-        if len(outline) == requested_chapters:
-            break
-
-    while len(outline) < requested_chapters:
-        chapter_number = len(outline) + 1
-        outline.append(
-            {
-                "title": f"Chapter {chapter_number}",
-                "summary": "Advance the central conflict while deepening the cast and stakes.",
-            }
-        )
-    return outline
+def build_outline_messages(project: Project, run: GenerationRun, story_bible: StoryBible | dict[str, Any]) -> list[dict[str, str]]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a meticulous fiction outliner. Return valid JSON only and make each chapter advance the plot. "
+                "Do not repeat the inciting incident, and do not create multiple endings for the book."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Create a {run.requested_chapters}-chapter outline for '{project.title}'.\n"
+                f"{_story_brief_lines(project)}\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                "Return a JSON object in this shape:\n"
+                "{\n"
+                '  "chapters": [\n'
+                "    {\n"
+                '      "chapter_number": 1,\n'
+                '      "act": "Act I",\n'
+                '      "title": "string",\n'
+                '      "objective": "string",\n'
+                '      "conflict_turn": "string",\n'
+                '      "character_turn": "string",\n'
+                '      "reveal": "string",\n'
+                '      "ending_state": "string"\n'
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+                "Rules:\n"
+                f"- return exactly {run.requested_chapters} chapters numbered 1 through {run.requested_chapters}\n"
+                "- chapter 1 should contain the true inciting incident once\n"
+                "- each later chapter must change the external situation and at least one character state\n"
+                "- preserve one clean climax and one primary ending in the final chapter"
+            ),
+        },
+    ]
 
 
 def rolling_context(chapters: list[ChapterDraft], window: int) -> str:
@@ -73,22 +138,43 @@ def build_chapter_plan_messages(
     project: Project,
     run: GenerationRun,
     chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
     prior_context: str,
 ) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     return [
         {
             "role": "system",
-            "content": "You plan fiction scenes. Return concise bullet points only.",
+            "content": (
+                "You plan fiction scenes. Return valid JSON only. Every chapter plan must visibly advance the story and "
+                "must not simply restate the book premise."
+            ),
         },
         {
             "role": "user",
             "content": (
-                f"Novel premise: {project.premise}\n"
-                f"Current chapter: {chapter.chapter_number} - {chapter.title}\n"
-                f"Chapter purpose: {chapter.outline_summary}\n"
-                f"Target chapter word range: {run.min_words_per_chapter}-{run.max_words_per_chapter}\n"
-                f"Recent chapter context:\n{prior_context}\n\n"
-                "Write 4-6 bullet points that describe the key beats, character turns, and cliffhanger or landing."
+                f"Novel title: {project.title}\n"
+                f"Chapter target: {run.min_words_per_chapter}-{run.max_words_per_chapter} words\n"
+                f"Recent prose summary:\n{prior_context}\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Current chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                "Return a JSON object with exactly these keys:\n"
+                "{\n"
+                '  "opening_state": "string",\n'
+                '  "character_goal": "string",\n'
+                '  "scene_beats": ["beat 1", "beat 2", "beat 3", "beat 4"],\n'
+                '  "conflict_turn": "string",\n'
+                '  "ending_hook": "string"\n'
+                "}\n\n"
+                "Rules:\n"
+                "- include 4 to 6 concrete scene beats\n"
+                "- at least one beat must materially worsen or transform the conflict\n"
+                "- the ending hook must lead into the next chapter state"
             ),
         },
     ]
@@ -98,44 +184,339 @@ def build_chapter_draft_messages(
     project: Project,
     run: GenerationRun,
     chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
     prior_context: str,
+    plan: ChapterPlan | dict[str, Any],
 ) -> list[dict[str, str]]:
-    plan = chapter.plan or "Use the outline summary to guide the chapter."
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
     return [
         {
             "role": "system",
             "content": (
-                "You write vivid, coherent fiction chapters. Keep continuity strong, avoid repetition, "
-                "and do not include commentary outside the prose."
+                "You write vivid, coherent fiction chapters. Return prose only with no markdown fences and no chapter heading. "
+                "Advance the story, vary sentence openings, and avoid repeated abstract phrasing."
             ),
         },
         {
             "role": "user",
             "content": (
                 f"Title: {project.title}\n"
-                f"Premise: {project.premise}\n"
                 f"Write chapter {chapter.chapter_number} titled '{chapter.title}'.\n"
-                f"Chapter goal: {chapter.outline_summary}\n"
-                f"Target word range: {run.min_words_per_chapter}-{run.max_words_per_chapter}\n"
-                f"Continuity notes:\n{prior_context}\n\n"
-                f"Beat plan:\n{plan}\n\n"
-                "Return the chapter prose only. Include a chapter heading on the first line."
+                f"Target word range: {run.min_words_per_chapter}-{run.max_words_per_chapter}\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Recent prose summary:\n{prior_context}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
+                "Hard rules:\n"
+                "- do not include a chapter heading or title line\n"
+                "- do not repeat the inciting incident unless the situation has materially changed\n"
+                "- the chapter must change the external situation and at least one character state\n"
+                "- end in the exact story state promised by the outline's ending_state\n"
+                "- keep each named character's voice and priorities distinct\n\n"
+                "Return the chapter prose only."
             ),
         },
     ]
 
 
-def build_summary_messages(chapter: ChapterDraft) -> list[dict[str, str]]:
+def build_chapter_critique_messages(
+    project: Project,
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     return [
         {
             "role": "system",
-            "content": "You summarize fiction chapters for continuity memory.",
+            "content": (
+                "You are a developmental fiction editor. Return valid JSON only with blunt but useful revision feedback."
+            ),
         },
         {
             "role": "user",
             "content": (
-                f"Summarize chapter {chapter.chapter_number} in 3-5 sentences.\n\n"
+                f"Review chapter {chapter.chapter_number} of '{project.title}'.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Continuity ledger before update:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Chapter draft:\n{chapter.content or ''}\n\n"
+                "Return a JSON object with exactly these keys:\n"
+                "{\n"
+                '  "strengths": ["string"],\n'
+                '  "warnings": ["string"],\n'
+                '  "revision_required": true,\n'
+                '  "focus": ["string"]\n'
+                "}\n\n"
+                "Set revision_required to true if the chapter repeats prior beats, misses the outline turn, muddies continuity, "
+                "or ends in the wrong story state."
+            ),
+        },
+    ]
+
+
+def build_chapter_revision_messages(
+    project: Project,
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+    plan: ChapterPlan | dict[str, Any],
+    critique: ChapterCritique | dict[str, Any],
+) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
+    notes = critique if isinstance(critique, dict) else critique.model_dump()
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You revise fiction chapters. Return prose only with no chapter heading and incorporate the critique faithfully."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Revise chapter {chapter.chapter_number} of '{project.title}'.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
+                f"Critique to fix:\n{json.dumps(notes, indent=2)}\n\n"
+                f"Current draft:\n{chapter.content or ''}\n\n"
+                "Return revised chapter prose only. Preserve what works, fix the warnings, keep the chapter's ending state aligned to the outline, "
+                "and do not add a heading."
+            ),
+        },
+    ]
+
+
+def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutlineEntry | dict[str, Any]) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    return [
+        {
+            "role": "system",
+            "content": "You summarize fiction chapters for continuity memory. Return plain text only.",
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Summarize chapter {chapter.chapter_number} in 3 to 5 sentences.\n"
+                f"Make sure the summary captures the external change, the character turn, and the new ending state.\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 f"{chapter.content or ''}"
             ),
         },
     ]
+
+
+def build_continuity_update_messages(
+    project: Project,
+    chapter: ChapterDraft,
+    current_ledger: ContinuityLedger | dict[str, Any],
+) -> list[dict[str, str]]:
+    ledger = current_ledger if isinstance(current_ledger, dict) else current_ledger.model_dump()
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You maintain a continuity ledger for a novel. Return valid JSON only with the fully updated ledger after this chapter."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Update the continuity ledger for chapter {chapter.chapter_number} of '{project.title}'.\n\n"
+                f"Current ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Chapter summary:\n{chapter.summary or ''}\n\n"
+                "Return a JSON object with exactly these keys:\n"
+                "{\n"
+                '  "chapter_outcome": "string",\n'
+                '  "current_patch_status": "string",\n'
+                '  "character_states": {"Character": "state"},\n'
+                '  "world_state": "string",\n'
+                '  "open_threads": ["string"],\n'
+                '  "resolved_threads": ["string"],\n'
+                '  "timeline_entry": "string",\n'
+                '  "timeline": ["string"]\n'
+                "}\n\n"
+                "Rules:\n"
+                "- keep unresolved threads alive unless the chapter truly resolves them\n"
+                "- update character states only where the chapter created a real change\n"
+                "- append a concise timeline entry for this chapter"
+            ),
+        },
+    ]
+
+
+def build_manuscript_qa_messages(
+    project: Project,
+    story_bible: StoryBible | dict[str, Any],
+    lint_findings: list[str],
+    chapters: list[ChapterDraft],
+) -> list[dict[str, str]]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    chapter_payload = [
+        {
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "summary": chapter.summary or "",
+            "word_count": chapter.word_count,
+        }
+        for chapter in chapters
+    ]
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are an editorial QA reviewer for AI-generated fiction. Return valid JSON only with concise, actionable assessment."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Review the manuscript for '{project.title}'.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Deterministic lint findings:\n{json.dumps(lint_findings, indent=2)}\n\n"
+                f"Chapter summaries:\n{json.dumps(chapter_payload, indent=2)}\n\n"
+                "Return a JSON object with exactly these keys:\n"
+                "{\n"
+                '  "overall_verdict": "string",\n'
+                '  "strengths": ["string"],\n'
+                '  "warnings": ["string"],\n'
+                '  "continuity_risks": ["string"],\n'
+                '  "repetition_risks": ["string"],\n'
+                '  "ending_coherence_notes": ["string"],\n'
+                '  "lint_findings": ["string"]\n'
+                "}\n\n"
+                "Be specific about repeated setups, duplicated endings, continuity instability, and whether the manuscript delivers on the ending promise."
+            ),
+        },
+    ]
+
+
+def build_json_repair_messages(raw_text: str, label: str) -> list[dict[str, str]]:
+    return [
+        {
+            "role": "system",
+            "content": "Repair malformed JSON. Return valid JSON only with no markdown fences or commentary.",
+        },
+        {
+            "role": "user",
+            "content": (
+                f"The following {label} output should have been valid JSON but is malformed.\n"
+                "Repair it into valid JSON while preserving the original meaning as closely as possible.\n\n"
+                f"{raw_text}"
+            ),
+        },
+    ]
+
+
+def extract_json_payload(text: str) -> Any:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        cleaned = cleaned.strip()
+
+    candidates = [cleaned]
+    for opening, closing in (("{", "}"), ("[", "]")):
+        start = cleaned.find(opening)
+        end = cleaned.rfind(closing)
+        if start != -1 and end != -1 and end > start:
+            candidates.append(cleaned[start : end + 1])
+
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        for index, char in enumerate(candidate):
+            if char not in "[{":
+                continue
+            try:
+                payload, _ = decoder.raw_decode(candidate[index:])
+                return payload
+            except json.JSONDecodeError:
+                continue
+    raise ValueError("Structured model output was not valid JSON.")
+
+
+def parse_story_bible(text: str) -> StoryBible:
+    payload = extract_json_payload(text)
+    if isinstance(payload, dict) and "story_bible" in payload:
+        payload = payload["story_bible"]
+    return StoryBible.model_validate(payload)
+
+
+def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
+    payload = extract_json_payload(text)
+    if isinstance(payload, dict):
+        payload = payload.get("chapters", payload)
+    try:
+        outline = TypeAdapter(list[StructuredOutlineEntry]).validate_python(payload)
+    except ValidationError as exc:
+        raise ValueError(f"Outline JSON was invalid: {exc}") from exc
+
+    if len(outline) != requested_chapters:
+        raise ValueError(
+            f"Outline returned {len(outline)} chapters, but {requested_chapters} were required."
+        )
+
+    expected_numbers = list(range(1, requested_chapters + 1))
+    actual_numbers = [item.chapter_number for item in outline]
+    if actual_numbers != expected_numbers:
+        raise ValueError("Outline chapter numbers must run sequentially from 1 to the requested chapter count.")
+
+    return [item.model_dump() for item in outline]
+
+
+def parse_chapter_plan(text: str) -> ChapterPlan:
+    payload = extract_json_payload(text)
+    if isinstance(payload, dict) and "plan" in payload:
+        payload = payload["plan"]
+    return ChapterPlan.model_validate(payload)
+
+
+def parse_chapter_critique(text: str) -> ChapterCritique:
+    payload = extract_json_payload(text)
+    if isinstance(payload, dict) and "critique" in payload:
+        payload = payload["critique"]
+    return ChapterCritique.model_validate(payload)
+
+
+def parse_continuity_update(text: str) -> ChapterContinuityUpdate:
+    payload = extract_json_payload(text)
+    if isinstance(payload, dict) and "continuity_update" in payload:
+        payload = payload["continuity_update"]
+    return ChapterContinuityUpdate.model_validate(payload)
+
+
+def parse_manuscript_qa_report(text: str) -> ManuscriptQaReport:
+    payload = extract_json_payload(text)
+    if isinstance(payload, dict) and "qa_report" in payload:
+        payload = payload["qa_report"]
+    return ManuscriptQaReport.model_validate(payload)
+
+
+def sanitize_chapter_content(content: str) -> str:
+    cleaned = content.strip()
+    cleaned = re.sub(
+        r"^\s*chapter\s+\d+\s*[:\-\u2014]?\s*[^\n]*\n+",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    return cleaned.strip()

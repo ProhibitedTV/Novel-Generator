@@ -8,7 +8,7 @@
     <div class="page-header-copy">
       <p class="eyebrow">New project</p>
       <h1>Create a reusable story setup.</h1>
-      <p class="hero-copy">Projects keep the premise, model, and run defaults together so your first queue action is confident and your next one is faster.</p>
+      <p class="hero-copy">Projects keep the premise, story brief, model, and run defaults together so your first queue action is confident and your next one is faster.</p>
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/projects">Back to projects</a>
@@ -38,7 +38,7 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Project details</h2>
-        <p>Start with the premise and a verified model. The numeric settings stay as easy defaults for the first run.</p>
+        <p>Start with the premise and a verified model, then add a brief strong enough to keep long runs from wandering.</p>
       </div>
     </div>
 
@@ -58,6 +58,60 @@
         <textarea class="{{ 'input-invalid' if form_errors.premise }}" name="premise" rows="5" required placeholder="A disgraced archivist uncovers a living map hidden beneath a dying city.">{{ form_values.premise }}</textarea>
       </label>
       {% if form_errors.premise %}<p class="field-error">{{ form_errors.premise }}</p>{% endif %}
+
+      <div class="form-section story-brief-shell">
+        <div class="section-header-copy">
+          <h3>Story brief</h3>
+          <p>Optional, but high-leverage. These signals help the structured outline and continuity ledger produce a sharper first draft.</p>
+        </div>
+        <div class="grid compact">
+          <label>
+            Setting
+            <input type="text" name="story_setting" value="{{ form_values.story_setting }}" placeholder="Orbital archive city on the edge of collapse">
+          </label>
+          <label>
+            Tone
+            <input type="text" name="story_tone" value="{{ form_values.story_tone }}" placeholder="Luminous, tense, morally complex sci-fi">
+          </label>
+          <label>
+            Protagonist
+            <input type="text" name="story_protagonist" value="{{ form_values.story_protagonist }}" placeholder="Mara, a firmware engineer haunted by missing memories">
+          </label>
+          <label>
+            Antagonist
+            <input type="text" name="story_antagonist" value="{{ form_values.story_antagonist }}" placeholder="A council faction using peace patches to preserve order">
+          </label>
+        </div>
+
+        <label>
+          Core conflict
+          <textarea name="story_core_conflict" rows="3" placeholder="What hard choice keeps pressuring the book?">{{ form_values.story_core_conflict }}</textarea>
+        </label>
+
+        <label>
+          Ending target
+          <textarea name="story_ending_target" rows="3" placeholder="Describe the real ending you want the outline to build toward.">{{ form_values.story_ending_target }}</textarea>
+        </label>
+
+        <div class="grid compact">
+          <label>
+            Supporting cast
+            <textarea name="story_supporting_cast" rows="5" placeholder="One character per line">{{ form_values.story_supporting_cast }}</textarea>
+          </label>
+          <label>
+            World rules
+            <textarea name="story_world_rules" rows="5" placeholder="One rule or constraint per line">{{ form_values.story_world_rules }}</textarea>
+          </label>
+          <label>
+            Must include
+            <textarea name="story_must_include" rows="5" placeholder="Images, scenes, reveals, or themes you want to keep">{{ form_values.story_must_include }}</textarea>
+          </label>
+          <label>
+            Avoid
+            <textarea name="story_avoid" rows="5" placeholder="Cliches, plot moves, or tonal misses to steer away from">{{ form_values.story_avoid }}</textarea>
+          </label>
+        </div>
+      </div>
 
       <div class="form-section">
         <div class="section-header-copy">
@@ -135,7 +189,7 @@
 
       <label>
         Notes
-        <textarea name="notes" rows="4" placeholder="Optional worldbuilding, tone, POV, or continuity reminders.">{{ form_values.notes }}</textarea>
+        <textarea name="notes" rows="4" placeholder="Optional worldbuilding, POV, continuity reminders, or revision notes.">{{ form_values.notes }}</textarea>
       </label>
 
       <div class="form-actions">
@@ -185,21 +239,21 @@
             <span class="mini-step-marker">1</span>
             <div>
               <strong>Save the project defaults</strong>
-              <p class="field-note">This keeps your premise, chapter targets, and preferred model together for later runs.</p>
+              <p class="field-note">This keeps your premise, story brief, chapter targets, and preferred model together for later runs.</p>
             </div>
           </li>
           <li class="mini-step">
             <span class="mini-step-marker">2</span>
             <div>
               <strong>Queue a full draft run</strong>
-              <p class="field-note">The worker should outline the book, draft every requested chapter, save summaries, then export artifacts.</p>
+              <p class="field-note">By default the run pauses after the story bible and outline so you can stop a weak structure before spending hours on chapters.</p>
             </div>
           </li>
           <li class="mini-step">
             <span class="mini-step-marker">3</span>
             <div>
-              <strong>Manage finished runs later</strong>
-              <p class="field-note">Project pages keep rerun, cleanup, and deletion controls nearby once you start accumulating drafts.</p>
+              <strong>Approve, draft, and review</strong>
+              <p class="field-note">Once approved, the worker drafts every chapter, performs editorial QA, and exports the manuscript plus a QA report.</p>
             </div>
           </li>
         </ol>

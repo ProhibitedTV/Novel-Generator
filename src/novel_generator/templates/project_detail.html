@@ -91,6 +91,11 @@
               {% endfor %}
             </ul>
           {% endif %}
+
+          <label>
+            Notes
+            <textarea name="notes" rows="4">{{ edit_values.notes }}</textarea>
+          </label>
         </div>
 
         <div class="form-section">
@@ -119,10 +124,59 @@
           </div>
           {% if edit_errors.min_words_per_chapter %}<p class="field-error">{{ edit_errors.min_words_per_chapter }}</p>{% endif %}
           {% if edit_errors.max_words_per_chapter %}<p class="field-error">{{ edit_errors.max_words_per_chapter }}</p>{% endif %}
+        </div>
+      </div>
 
+      <div class="form-section story-brief-shell">
+        <div class="section-header-copy">
+          <h3>Story brief</h3>
+          <p>These structured notes give the v2 pipeline better material for the story bible, outline, continuity ledger, and ending control.</p>
+        </div>
+        <div class="grid compact">
           <label>
-            Notes
-            <textarea name="notes" rows="4">{{ edit_values.notes }}</textarea>
+            Setting
+            <input type="text" name="story_setting" value="{{ edit_values.story_setting }}">
+          </label>
+          <label>
+            Tone
+            <input type="text" name="story_tone" value="{{ edit_values.story_tone }}">
+          </label>
+          <label>
+            Protagonist
+            <input type="text" name="story_protagonist" value="{{ edit_values.story_protagonist }}">
+          </label>
+          <label>
+            Antagonist
+            <input type="text" name="story_antagonist" value="{{ edit_values.story_antagonist }}">
+          </label>
+        </div>
+
+        <label>
+          Core conflict
+          <textarea name="story_core_conflict" rows="3">{{ edit_values.story_core_conflict }}</textarea>
+        </label>
+
+        <label>
+          Ending target
+          <textarea name="story_ending_target" rows="3">{{ edit_values.story_ending_target }}</textarea>
+        </label>
+
+        <div class="grid compact">
+          <label>
+            Supporting cast
+            <textarea name="story_supporting_cast" rows="5">{{ edit_values.story_supporting_cast }}</textarea>
+          </label>
+          <label>
+            World rules
+            <textarea name="story_world_rules" rows="5">{{ edit_values.story_world_rules }}</textarea>
+          </label>
+          <label>
+            Must include
+            <textarea name="story_must_include" rows="5">{{ edit_values.story_must_include }}</textarea>
+          </label>
+          <label>
+            Avoid
+            <textarea name="story_avoid" rows="5">{{ edit_values.story_avoid }}</textarea>
           </label>
         </div>
       </div>
@@ -139,7 +193,7 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Queue a run</h2>
-        <p>Use the project defaults as a starting point, then adjust only what matters for this run.</p>
+        <p>Use the project defaults as a starting point, then decide whether you want a deliberate outline review stop before the long draft begins.</p>
       </div>
     </div>
 
@@ -217,8 +271,20 @@
         {% if run_errors.max_words_per_chapter %}<p class="field-error">{{ run_errors.max_words_per_chapter }}</p>{% endif %}
       </div>
 
+      <label class="toggle-card">
+        <span class="toggle-input">
+          <input type="checkbox" name="pause_after_outline" value="1" {% if run_values.pause_after_outline %}checked{% endif %}>
+          <strong>Pause after outline review</strong>
+        </span>
+        <span class="field-note">Recommended. The run stops after the story bible and structured outline so you can reject a weak plan before the expensive chapter pass.</span>
+      </label>
+
       <div class="inline-note inline-note-success">
-        Queueing this asks the worker to outline the book, draft all {{ run_values.requested_chapters }} requested chapter{{ "" if run_values.requested_chapters == 1 else "s" }}, save continuity summaries, and export artifacts only after drafting is complete.
+        {% if run_values.pause_after_outline %}
+          This run will build the story bible, generate the full outline, wait for your approval, then draft every requested chapter, run editorial QA, and export artifacts.
+        {% else %}
+          This run will move straight from story bible and outline generation into full drafting, editorial QA, and export without pausing.
+        {% endif %}
       </div>
 
       <div class="form-actions">
@@ -239,36 +305,36 @@
     </div>
     <div class="run-flow">
       <div class="section-header-copy">
-        <h3>What a run produces</h3>
-        <p>A healthy run should finish every requested chapter before the manuscript export step begins.</p>
+        <h3>What a v2 run produces</h3>
+        <p>A healthy run should finish every requested chapter, run editorial QA, and export a manuscript plus QA report.</p>
       </div>
       <ol class="run-flow-list">
         <li class="run-flow-item">
           <span class="run-flow-number">1</span>
           <div>
-            <strong>Outline the full book</strong>
-            <p class="field-note">Create a chapter-by-chapter structure sized for {{ run_values.requested_chapters }} requested chapter{{ "" if run_values.requested_chapters == 1 else "s" }}.</p>
+            <strong>Build a story bible</strong>
+            <p class="field-note">The model turns your premise and story brief into theme, cast, world rules, and an ending promise.</p>
           </div>
         </li>
         <li class="run-flow-item">
           <span class="run-flow-number">2</span>
           <div>
-            <strong>Draft every chapter</strong>
-            <p class="field-note">Each chapter gets a beat plan, drafted prose, and a checkpoint in the database.</p>
+            <strong>Generate a structured outline</strong>
+            <p class="field-note">Each chapter gets an objective, conflict turn, reveal, and ending state.</p>
           </div>
         </li>
         <li class="run-flow-item">
           <span class="run-flow-number">3</span>
           <div>
-            <strong>Save continuity summaries</strong>
-            <p class="field-note">Those summaries feed later chapters so reruns and regeneration stay coherent.</p>
+            <strong>Draft and revise every chapter</strong>
+            <p class="field-note">Each chapter gets a plan, prose, one critique pass, and a continuity update checkpoint.</p>
           </div>
         </li>
         <li class="run-flow-item">
           <span class="run-flow-number">4</span>
           <div>
-            <strong>Export only after drafting is complete</strong>
-            <p class="field-note">If the worker cannot finish every chapter, the run should fail instead of claiming success.</p>
+            <strong>Run editorial QA before export</strong>
+            <p class="field-note">The QA report calls out repetition, continuity drift, and ending issues instead of silently shipping them.</p>
           </div>
         </li>
       </ol>
@@ -313,13 +379,13 @@
           <a class="run-row-link" href="/runs/{{ run.id }}">
             <div class="run-row-main">
               <div class="run-row-top">
-                <span class="badge status-{{ run.status.value }}">{{ run.status.value }}</span>
+                <span class="badge status-{{ run.status.value }}">{{ run.status.value.replace("_", " ") }}</span>
                 <span class="run-row-title long-value">{{ run.model_name }}</span>
               </div>
               <div class="meta-chip-row">
                 <span class="meta-chip">{{ run.requested_chapters }} chapters requested</span>
-                <span class="meta-chip">{{ run.current_step }}</span>
-                <span class="meta-chip">{{ run.chapters|length }} checkpoint{{ "" if run.chapters|length == 1 else "s" }}</span>
+                <span class="meta-chip">{{ run.current_step.replace("_", " ") }}</span>
+                <span class="meta-chip">v{{ run.pipeline_version or 1 }}</span>
               </div>
             </div>
             <div class="run-row-meta">
