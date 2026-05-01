@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -166,6 +167,32 @@ class ChapterCritique(BaseModel):
     blocking_issues: list[str] = Field(default_factory=list)
     soft_warnings: list[str] = Field(default_factory=list)
     repair_scope: str = "none"
+
+    @field_validator(
+        "forward_motion_score",
+        "ending_concreteness_score",
+        "cost_consequence_realism_score",
+        "side_character_independence_score",
+        "proper_noun_continuity_score",
+        "repetition_risk_score",
+        mode="before",
+    )
+    @classmethod
+    def normalize_scores(cls, value: Any) -> int:
+        if value is None or value == "":
+            return 0
+
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return 0
+
+        numeric = float(value)
+        if numeric > 10:
+            numeric = numeric / 10 if numeric <= 100 else 10
+
+        normalized = int(math.floor(numeric + 0.5))
+        return max(0, min(10, normalized))
 
 
 class ManuscriptQaReport(BaseModel):

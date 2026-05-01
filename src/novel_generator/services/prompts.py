@@ -400,6 +400,7 @@ def build_chapter_critique_messages(
                 "- set revision_required to true if the chapter has an abstract ending, a zero-cost major solution, a repeated premise beat, a side character who only helps or warns, or a proper-noun inconsistency\n"
                 "- use repair_scope 'targeted_scene_and_ending' for ending, cost, repetition-fatigue, or side-character pressure problems\n"
                 "- use repair_scope 'full_chapter' only when continuity or premise repetition is severe\n"
+                "- all score fields must be whole numbers from 0 to 10, not percentages\n"
                 "- forward_motion_score, ending_concreteness_score, cost_consequence_realism_score, side_character_independence_score, and proper_noun_continuity_score should be higher when the draft is stronger\n"
                 "- repetition_risk_score should be higher when repetition risk is worse"
             ),
@@ -640,10 +641,35 @@ def parse_story_bible(text: str) -> StoryBible:
     return StoryBible.model_validate(payload)
 
 
-def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
-    payload = extract_json_payload(text)
+def _normalize_outline_payload(payload: Any) -> Any:
     if isinstance(payload, dict):
-        payload = payload.get("chapters", payload)
+        for key in ("chapters", "outline", "chapter_outline"):
+            if key in payload:
+                payload = payload[key]
+                break
+
+    if isinstance(payload, dict):
+        chapter_field_names = {
+            "chapter_number",
+            "act",
+            "title",
+            "objective",
+            "conflict_turn",
+            "character_turn",
+            "reveal",
+            "ending_state",
+        }
+        if chapter_field_names & set(payload.keys()):
+            return [payload]
+
+        if payload and all(str(key).strip().isdigit() for key in payload.keys()):
+            return [payload[key] for key in sorted(payload.keys(), key=lambda item: int(str(item).strip()))]
+
+    return payload
+
+
+def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
+    payload = _normalize_outline_payload(extract_json_payload(text))
     try:
         outline = TypeAdapter(list[StructuredOutlineEntry]).validate_python(payload)
     except ValidationError as exc:

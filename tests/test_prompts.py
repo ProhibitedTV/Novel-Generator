@@ -141,6 +141,92 @@ def test_outline_parser_rejects_wrong_chapter_count() -> None:
         raise AssertionError("Expected the outline parser to reject the wrong chapter count.")
 
 
+def test_outline_parser_accepts_single_chapter_object_shape() -> None:
+    parsed = parse_outline(
+        """
+        {
+          "chapters": {
+            "chapter_number": 1,
+            "act": "Act I",
+            "title": "Signal",
+            "objective": "Trace the forbidden patch.",
+            "conflict_turn": "The system locks Nora out.",
+            "character_turn": "Nora stops hiding what she knows.",
+            "reveal": "The patch is signed with her key.",
+            "ending_state": "Nora commits to chasing the source.",
+            "outcome_type": "reversal",
+            "primary_obstacle": "Authority lockdowns close around Nora.",
+            "cost_if_success": "Nora burns her admin credentials.",
+            "side_character_friction": "Jun wants to destroy the evidence instead of trace it.",
+            "concrete_ending_hook": {
+              "trigger": "A drone reaches the hatch.",
+              "visible_object_or_actor": "Its lens turns blue.",
+              "next_problem": "It speaks in Nora's own voice."
+            }
+          }
+        }
+        """,
+        requested_chapters=1,
+    )
+
+    assert len(parsed) == 1
+    assert parsed[0]["chapter_number"] == 1
+    assert parsed[0]["title"] == "Signal"
+
+
+def test_outline_parser_accepts_number_keyed_chapter_dict() -> None:
+    parsed = parse_outline(
+        """
+        {
+          "outline": {
+            "1": {
+              "chapter_number": 1,
+              "act": "Act I",
+              "title": "Signal",
+              "objective": "Trace the forbidden patch.",
+              "conflict_turn": "The system locks Nora out.",
+              "character_turn": "Nora stops hiding what she knows.",
+              "reveal": "The patch is signed with her key.",
+              "ending_state": "Nora commits to chasing the source.",
+              "outcome_type": "setback",
+              "primary_obstacle": "Authority lockdowns close around Nora.",
+              "cost_if_success": "Nora burns her admin credentials.",
+              "side_character_friction": "Jun wants to destroy the evidence instead of trace it.",
+              "concrete_ending_hook": {
+                "trigger": "A drone reaches the hatch.",
+                "visible_object_or_actor": "Its lens turns blue.",
+                "next_problem": "It speaks in Nora's own voice."
+              }
+            },
+            "2": {
+              "chapter_number": 2,
+              "act": "Act I",
+              "title": "Watchdog",
+              "objective": "Prove the patch is manipulating compliance.",
+              "conflict_turn": "The audit trail burns Jun's access.",
+              "character_turn": "Nora accepts Jun may walk away.",
+              "reveal": "The patch forks through a hidden watchdog.",
+              "ending_state": "Nora now has one dangerous source node to chase.",
+              "outcome_type": "reversal",
+              "primary_obstacle": "The watchdog falsifies its own logs.",
+              "cost_if_success": "Jun loses trusted access to the archive.",
+              "side_character_friction": "Jun refuses to risk civilians for proof.",
+              "concrete_ending_hook": {
+                "trigger": "The source node wakes.",
+                "visible_object_or_actor": "Its console floods blue.",
+                "next_problem": "Authority now knows Nora is inside."
+              }
+            }
+          }
+        }
+        """,
+        requested_chapters=2,
+    )
+
+    assert len(parsed) == 2
+    assert parsed[1]["title"] == "Watchdog"
+
+
 def test_sanitize_chapter_content_removes_duplicate_heading() -> None:
     cleaned = sanitize_chapter_content("Chapter 7: Descent\n\nThe real prose starts here.")
 
@@ -204,6 +290,35 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert plan.price_paid.startswith("Iris permanently burns")
     assert critique.repair_scope == "targeted_scene_and_ending"
     assert continuity.new_entities_introduced[0].name == "Shaft Elevator"
+
+
+def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
+    critique = parse_chapter_critique(
+        """
+        {
+          "strengths": ["The chapter escalates cleanly."],
+          "warnings": [],
+          "revision_required": false,
+          "focus": [],
+          "forward_motion_score": 70,
+          "ending_concreteness_score": 40,
+          "cost_consequence_realism_score": 65,
+          "side_character_independence_score": 55,
+          "proper_noun_continuity_score": 80,
+          "repetition_risk_score": 30,
+          "blocking_issues": [],
+          "soft_warnings": [],
+          "repair_scope": "none"
+        }
+        """
+    )
+
+    assert critique.forward_motion_score == 7
+    assert critique.ending_concreteness_score == 4
+    assert critique.cost_consequence_realism_score == 7
+    assert critique.side_character_independence_score == 6
+    assert critique.proper_noun_continuity_score == 8
+    assert critique.repetition_risk_score == 3
 
 
 def test_rolling_context_uses_recent_completed_chapters() -> None:
