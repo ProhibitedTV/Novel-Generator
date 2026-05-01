@@ -222,6 +222,39 @@
           </div>
         {% endif %}
 
+        {% if story_bible.character_agendas %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Character agendas</h3>
+            </div>
+            <div class="story-card-list">
+              {% for agenda in story_bible.character_agendas %}
+                <article class="story-card">
+                  <strong>{{ agenda.name }}</strong>
+                  <p class="chapter-copy">Want: {{ agenda.want }}</p>
+                  <p class="chapter-copy">Fear: {{ agenda.fear }}</p>
+                  <p class="chapter-copy">Line in the sand: {{ agenda.line_in_sand }}</p>
+                  <p class="chapter-copy">Core conflict stance: {{ agenda.stance_on_core_conflict }}</p>
+                  <p class="chapter-copy">Relationship to protagonist: {{ agenda.relationship_to_protagonist }}</p>
+                </article>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        {% if story_bible.conflict_ladder %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Conflict ladder</h3>
+            </div>
+            <ul class="bullet-list">
+              {% for item in story_bible.conflict_ladder %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+
         {% if story_bible.world_rules %}
           <div class="support-block">
             <div class="section-header-copy">
@@ -232,6 +265,51 @@
                 <li>{{ item }}</li>
               {% endfor %}
             </ul>
+          </div>
+        {% endif %}
+
+        {% if story_bible.core_system_rules %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Core system rules</h3>
+            </div>
+            <ul class="bullet-list">
+              {% for item in story_bible.core_system_rules %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+
+        {% if story_bible.prose_guardrails %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Prose guardrails</h3>
+            </div>
+            <ul class="bullet-list">
+              {% for item in story_bible.prose_guardrails %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+
+        {% if story_bible.canon_registry %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Canon registry</h3>
+            </div>
+            <div class="story-card-list">
+              {% for entity in story_bible.canon_registry %}
+                <article class="story-card">
+                  <strong>{{ entity.name }}</strong>
+                  <p class="field-note">{{ entity.kind }}{% if entity.role %} · {{ entity.role }}{% endif %}</p>
+                  {% if entity.aliases %}
+                    <p class="chapter-copy">Aliases: {{ entity.aliases | join(", ") }}</p>
+                  {% endif %}
+                </article>
+              {% endfor %}
+            </div>
           </div>
         {% endif %}
       {% else %}
@@ -267,6 +345,14 @@
                   <p class="chapter-copy">{{ entry.conflict_turn }}</p>
                 </div>
                 <div class="detail-item">
+                  <span class="detail-label">Outcome type</span>
+                  <p class="chapter-copy">{{ entry.outcome_type or "-" }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Primary obstacle</span>
+                  <p class="chapter-copy">{{ entry.primary_obstacle or "-" }}</p>
+                </div>
+                <div class="detail-item">
                   <span class="detail-label">Character turn</span>
                   <p class="chapter-copy">{{ entry.character_turn }}</p>
                 </div>
@@ -277,6 +363,26 @@
                 <div class="detail-item">
                   <span class="detail-label">Ending state</span>
                   <p class="chapter-copy">{{ entry.ending_state }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Cost if success</span>
+                  <p class="chapter-copy">{{ entry.cost_if_success or "-" }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Side-character friction</span>
+                  <p class="chapter-copy">{{ entry.side_character_friction or "-" }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Concrete ending hook</span>
+                  <p class="chapter-copy">
+                    {% if entry.concrete_ending_hook %}
+                      Trigger: {{ entry.concrete_ending_hook.trigger or "-" }}<br>
+                      Visible actor or object: {{ entry.concrete_ending_hook.visible_object_or_actor or "-" }}<br>
+                      Next problem: {{ entry.concrete_ending_hook.next_problem or "-" }}
+                    {% else %}
+                      -
+                    {% endif %}
+                  </p>
                 </div>
               </div>
             </article>
@@ -397,6 +503,17 @@
               <details class="chapter-preview-shell">
                 <summary>Editorial notes</summary>
                 <div class="story-bible-grid">
+                  <div class="detail-item">
+                    <span class="detail-label">Scores</span>
+                    <ul class="bullet-list">
+                      <li>Forward motion: {{ chapter.qa_notes.forward_motion_score or 0 }}/10</li>
+                      <li>Ending concreteness: {{ chapter.qa_notes.ending_concreteness_score or 0 }}/10</li>
+                      <li>Cost realism: {{ chapter.qa_notes.cost_consequence_realism_score or 0 }}/10</li>
+                      <li>Side-character independence: {{ chapter.qa_notes.side_character_independence_score or 0 }}/10</li>
+                      <li>Proper-noun continuity: {{ chapter.qa_notes.proper_noun_continuity_score or 0 }}/10</li>
+                      <li>Repetition risk: {{ chapter.qa_notes.repetition_risk_score or 0 }}/10</li>
+                    </ul>
+                  </div>
                   {% if chapter.qa_notes.strengths %}
                     <div class="detail-item">
                       <span class="detail-label">Strengths</span>
@@ -417,6 +534,26 @@
                       </ul>
                     </div>
                   {% endif %}
+                  {% if chapter.qa_notes.blocking_issues %}
+                    <div class="detail-item">
+                      <span class="detail-label">Blocking issues</span>
+                      <ul class="bullet-list">
+                        {% for item in chapter.qa_notes.blocking_issues %}
+                          <li>{{ item }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                  {% if chapter.qa_notes.soft_warnings %}
+                    <div class="detail-item">
+                      <span class="detail-label">Soft warnings</span>
+                      <ul class="bullet-list">
+                        {% for item in chapter.qa_notes.soft_warnings %}
+                          <li>{{ item }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
                   {% if chapter.qa_notes.focus %}
                     <div class="detail-item">
                       <span class="detail-label">Revision focus</span>
@@ -427,6 +564,10 @@
                       </ul>
                     </div>
                   {% endif %}
+                  <div class="detail-item">
+                    <span class="detail-label">Repair scope</span>
+                    <p class="chapter-copy">{{ chapter.qa_notes.repair_scope or "none" }}</p>
+                  </div>
                 </div>
               </details>
             {% endif %}

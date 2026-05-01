@@ -1,20 +1,141 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass, field
 import re
+from typing import Any
 
 from ..models import ChapterDraft
-from ..schemas import ManuscriptQaReport
+from ..schemas import (
+    CanonicalEntity,
+    ChapterPlan,
+    ContinuityLedger,
+    ManuscriptQaReport,
+    StoryBible,
+    StructuredOutlineEntry,
+)
 
 
 STOCK_PHRASES = [
     "the weight of",
     "raw emotions",
     "the colony breathed",
-    "safety net",
-    "violet ribbon",
+    "engineered peace",
+    "wild emotions",
+    "the future of the colony",
     "mara stared",
 ]
+
+ABSTRACT_ENDING_PATTERNS = [
+    r"the next step would decide",
+    r"the choice would define",
+    r"the future rested",
+    r"the truth was waiting",
+    r"would shape humanity",
+    r"would define the next chapter",
+    r"would decide the colony['’]s future",
+    r"the colony['’]s future rested",
+    r"she had begun her journey",
+    r"the colony breathed",
+]
+
+TECH_SOLUTION_KEYWORDS = [
+    "hack",
+    "decrypt",
+    "spoof",
+    "reroute",
+    "override",
+    "backdoor",
+    "bruteforce",
+    "brute force",
+    "script",
+]
+
+COST_KEYWORDS = [
+    "burned",
+    "locked out",
+    "lost access",
+    "exposed",
+    "exposure",
+    "corrupted",
+    "corruption",
+    "injured",
+    "bleeding",
+    "delay",
+    "late",
+    "alarms",
+    "alarm",
+    "collateral",
+    "damage",
+    "fallout",
+    "betrayed",
+    "rupture",
+    "argument",
+    "sacrifice",
+    "cost",
+    "price",
+]
+
+CONCRETE_ENDING_CUES = [
+    "said",
+    "door",
+    "alarm",
+    "drone",
+    "footstep",
+    "console",
+    "screen",
+    "lens",
+    "voice",
+    "sirens",
+    "comm",
+    "signal",
+    "arrived",
+    "opened",
+    "blinked",
+    "turned",
+]
+
+COMMON_PROPER_NOUN_IGNORES = {
+    "a",
+    "an",
+    "and",
+    "after",
+    "before",
+    "but",
+    "chapter",
+    "he",
+    "her",
+    "his",
+    "i",
+    "if",
+    "in",
+    "it",
+    "later",
+    "no",
+    "she",
+    "that",
+    "the",
+    "their",
+    "then",
+    "there",
+    "they",
+    "this",
+    "we",
+    "when",
+    "yes",
+}
+
+
+@dataclass
+class ChapterLintResult:
+    blocking_issues: list[str] = field(default_factory=list)
+    soft_warnings: list[str] = field(default_factory=list)
+    repair_scope: str = "none"
+    needs_repair: bool = False
+    canonical_collision: bool = False
+
+    def combined_findings(self) -> list[str]:
+        return [*self.blocking_issues, *self.soft_warnings]
 
 
 def _normalized_words(text: str) -> list[str]:
@@ -23,6 +144,248 @@ def _normalized_words(text: str) -> list[str]:
 
 def _opening_signature(content: str, words: int = 24) -> str:
     return " ".join(_normalized_words(content)[:words])
+
+
+def _normalize_entity_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _meaningful_terms(text: str) -> set[str]:
+    return {term for term in re.findall(r"[a-z0-9][a-z0-9\-']+", text.lower()) if len(term) > 2}
+
+
+def _entity_payload(entity: CanonicalEntity | dict[str, Any]) -> CanonicalEntity:
+    return entity if isinstance(entity, CanonicalEntity) else CanonicalEntity.model_validate(entity)
+
+
+def _canon_terms(entity: CanonicalEntity | dict[str, Any]) -> list[str]:
+    payload = _entity_payload(entity)
+    return [payload.name, *payload.aliases]
+
+
+def _approved_proper_nouns(
+    story_bible: StoryBible | dict[str, Any],
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    plan: ChapterPlan | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+) -> set[str]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+
+    approved: set[str] = set()
+    for entity in [*(bible.get("canon_registry") or []), *(ledger.get("active_entities") or [])]:
+        for term in _canon_terms(entity):
+            if term:
+                approved.add(_normalize_entity_key(term))
+
+    approved_sources = [
+        entry,
+        chapter_plan,
+        bible.get("cast") or [],
+        bible.get("character_agendas") or [],
+    ]
+    for source in approved_sources:
+        text = str(source)
+        for match in re.findall(r"\b[A-Z][A-Za-z0-9]*(?:[- ][A-Z0-9][A-Za-z0-9-]*)*\b", text):
+            normalized = _normalize_entity_key(match)
+            if normalized:
+                approved.add(normalized)
+    return approved
+
+
+def _proper_noun_candidates(text: str) -> set[str]:
+    candidates: set[str] = set()
+    multi_token = re.findall(r"\b[A-Z][A-Za-z0-9]*(?:[- ][A-Z0-9][A-Za-z0-9-]*)+\b", text)
+    for match in multi_token:
+        normalized = _normalize_entity_key(match)
+        if normalized:
+            candidates.add(normalized)
+
+    singles = Counter(re.findall(r"\b[A-Z][A-Za-z0-9-]{2,}\b", text))
+    for match, count in singles.items():
+        lowered = match.lower()
+        if count < 2 or lowered in COMMON_PROPER_NOUN_IGNORES:
+            continue
+        normalized = _normalize_entity_key(match)
+        if normalized:
+            candidates.add(normalized)
+    return candidates
+
+
+def detect_canonical_entity_collisions(
+    existing_entities: list[CanonicalEntity | dict[str, Any]],
+    new_entities: list[CanonicalEntity | dict[str, Any]],
+) -> list[str]:
+    collisions: list[str] = []
+    lookup: dict[str, tuple[str, str]] = {}
+
+    def register(entity: CanonicalEntity | dict[str, Any], allow_existing: bool) -> None:
+        payload = _entity_payload(entity)
+        canonical_key = _normalize_entity_key(payload.name)
+        for term in [payload.name, *payload.aliases]:
+            key = _normalize_entity_key(term)
+            if not key:
+                continue
+            owner = lookup.get(key)
+            if owner and owner[0] != canonical_key:
+                collisions.append(
+                    f"Canonical entity collision: '{term}' conflicts with existing entity '{owner[1]}'."
+                )
+            if allow_existing or key not in lookup:
+                lookup[key] = (canonical_key, payload.name)
+
+    for entity in existing_entities:
+        register(entity, allow_existing=True)
+    for entity in new_entities:
+        register(entity, allow_existing=False)
+
+    return list(dict.fromkeys(collisions))
+
+
+def merge_canonical_entities(
+    existing_entities: list[CanonicalEntity | dict[str, Any]],
+    new_entities: list[CanonicalEntity | dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, CanonicalEntity] = {}
+    for entity in [*existing_entities, *new_entities]:
+        payload = _entity_payload(entity)
+        key = _normalize_entity_key(payload.name)
+        current = merged.get(key)
+        if current is None:
+            merged[key] = payload
+            continue
+        aliases = sorted({*current.aliases, *payload.aliases})
+        merged[key] = current.model_copy(
+            update={
+                "kind": current.kind or payload.kind,
+                "role": current.role or payload.role,
+                "aliases": aliases,
+            }
+        )
+    return [entity.model_dump() for entity in merged.values()]
+
+
+def lint_chapter(
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    plan: ChapterPlan | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+    prior_chapters: list[ChapterDraft],
+) -> ChapterLintResult:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    content = (chapter.content or "").strip()
+    lowered = content.lower()
+    result = ChapterLintResult()
+
+    tail = lowered[-220:]
+    for pattern in ABSTRACT_ENDING_PATTERNS:
+        if re.search(pattern, tail):
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} ends in an abstract thesis statement instead of a concrete hook."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+            break
+
+    ending_hook = entry.get("concrete_ending_hook") or {}
+    hook_terms = _meaningful_terms(
+        " ".join(
+            [
+                str(ending_hook.get("trigger", "")),
+                str(ending_hook.get("visible_object_or_actor", "")),
+                str(ending_hook.get("next_problem", "")),
+            ]
+        )
+    )
+    tail_terms = _meaningful_terms(content[-320:])
+    if hook_terms and not (hook_terms & tail_terms):
+        result.blocking_issues.append(
+            f"Chapter {chapter.chapter_number} misses the planned concrete ending hook."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+    elif not any(cue in tail for cue in CONCRETE_ENDING_CUES):
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} may still end too abstractly; the final beat lacks a strong visible action cue."
+        )
+
+    for phrase in STOCK_PHRASES:
+        count = lowered.count(phrase)
+        if count >= 2:
+            result.soft_warnings.append(
+                f"Chapter {chapter.chapter_number} repeats atmospheric phrase '{phrase}' {count} times."
+            )
+
+    opening_signature = _opening_signature(content)
+    opening_prefix = _opening_signature(content, words=10)
+    prior_signatures = {_opening_signature(previous.content or "") for previous in prior_chapters if previous.content}
+    prior_prefixes = {_opening_signature(previous.content or "", words=10) for previous in prior_chapters if previous.content}
+    if opening_signature and opening_signature in prior_signatures:
+        result.blocking_issues.append(
+            f"Chapter {chapter.chapter_number} reuses an opening signature from an earlier chapter."
+        )
+        result.needs_repair = True
+        result.repair_scope = result.repair_scope if result.repair_scope != "none" else "targeted_scene_and_ending"
+    elif opening_prefix and opening_prefix in prior_prefixes:
+        result.blocking_issues.append(
+            f"Chapter {chapter.chapter_number} reuses an opening signature from an earlier chapter."
+        )
+        result.needs_repair = True
+        result.repair_scope = result.repair_scope if result.repair_scope != "none" else "targeted_scene_and_ending"
+
+    uses_technical_solution = any(keyword in lowered for keyword in TECH_SOLUTION_KEYWORDS) or any(
+        keyword in str(chapter_plan).lower() for keyword in TECH_SOLUTION_KEYWORDS
+    )
+    has_visible_cost = any(keyword in lowered for keyword in COST_KEYWORDS)
+    if uses_technical_solution and not has_visible_cost:
+        result.blocking_issues.append(
+            f"Chapter {chapter.chapter_number} resolves a technical problem without showing a concrete cost or exposure."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+
+    friction = str(entry.get("side_character_friction", "")).strip()
+    if friction:
+        friction_terms = _meaningful_terms(friction)
+        content_terms = _meaningful_terms(content)
+        if friction_terms and len(friction_terms & content_terms) < 2:
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} is missing the planned side-character friction."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+
+    approved_nouns = _approved_proper_nouns(story_bible, entry, chapter_plan, continuity_ledger)
+    candidate_nouns = _proper_noun_candidates(content)
+    unknown_nouns = sorted(candidate for candidate in candidate_nouns if candidate not in approved_nouns)
+    if unknown_nouns:
+        rendered = ", ".join(unknown_nouns[:5])
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} introduces possible unapproved proper nouns: {rendered}."
+        )
+        result.needs_repair = True
+        result.repair_scope = result.repair_scope if result.repair_scope != "none" else "targeted_scene_and_ending"
+
+    collisions = detect_canonical_entity_collisions(
+        ledger.get("active_entities") or [],
+        (chapter.continuity_update or {}).get("new_entities_introduced", []),
+    )
+    if collisions:
+        result.blocking_issues.extend(collisions)
+        result.canonical_collision = True
+        result.needs_repair = True
+        result.repair_scope = "full_chapter"
+
+    result.blocking_issues = list(dict.fromkeys(result.blocking_issues))
+    result.soft_warnings = list(dict.fromkeys(result.soft_warnings))
+    if result.repair_scope == "none" and result.needs_repair:
+        result.repair_scope = "targeted_scene_and_ending"
+    return result
 
 
 def lint_manuscript(chapters: list[ChapterDraft]) -> list[str]:
@@ -80,6 +443,77 @@ def lint_manuscript(chapters: list[ChapterDraft]) -> list[str]:
     return findings
 
 
+def manuscript_quality_notes(
+    chapters: list[ChapterDraft],
+    story_bible: StoryBible | dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
+    bible = None
+    if story_bible is not None:
+        bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+
+    notes = {
+        "chapter_ending_quality_notes": [],
+        "easy_win_warnings": [],
+        "proper_noun_continuity_findings": [],
+        "side_character_agency_notes": [],
+        "atmospheric_repetition_findings": [],
+    }
+
+    manuscript_text = "\n\n".join(chapter.content or "" for chapter in chapters).lower()
+    for chapter in chapters:
+        qa = chapter.qa_notes or {}
+        warnings = [*qa.get("warnings", []), *qa.get("soft_warnings", []), *qa.get("blocking_issues", [])]
+        lowered_warnings = " ".join(warnings).lower()
+
+        if qa.get("ending_concreteness_score", 10) <= 5 or "ending" in lowered_warnings:
+            notes["chapter_ending_quality_notes"].append(
+                f"Chapter {chapter.chapter_number} still shows ending risk: {', '.join(warnings[:2]) or 'ending needs sharper specificity.'}"
+            )
+        if qa.get("cost_consequence_realism_score", 10) <= 5 or "cost" in lowered_warnings or "technical problem" in lowered_warnings:
+            notes["easy_win_warnings"].append(
+                f"Chapter {chapter.chapter_number} may still resolve a major problem too cleanly."
+            )
+        if qa.get("side_character_independence_score", 10) <= 5 or "side-character" in lowered_warnings:
+            notes["side_character_agency_notes"].append(
+                f"Chapter {chapter.chapter_number} may need stronger side-character resistance or competing goals."
+            )
+        if "proper noun" in lowered_warnings or "canonical entity collision" in lowered_warnings or qa.get("proper_noun_continuity_score", 10) <= 5:
+            notes["proper_noun_continuity_findings"].append(
+                f"Chapter {chapter.chapter_number} raised proper-noun continuity concerns."
+            )
+        for phrase in STOCK_PHRASES:
+            count = (chapter.content or "").lower().count(phrase)
+            if count >= 2:
+                notes["atmospheric_repetition_findings"].append(
+                    f"Chapter {chapter.chapter_number} repeats '{phrase}' {count} times."
+                )
+
+    if bible:
+        for entity in bible.get("canon_registry") or []:
+            name = str(entity.get("name", "")).strip()
+            if not name:
+                continue
+            kind = str(entity.get("kind", "")).strip().lower()
+            aliases = [alias for alias in entity.get("aliases", []) if alias]
+            canonical_mentions = manuscript_text.count(name.lower())
+            alias_mentions = sum(manuscript_text.count(alias.lower()) for alias in aliases)
+            if canonical_mentions == 0 and kind in {"project", "faction", "system", "location"}:
+                notes["proper_noun_continuity_findings"].append(
+                    f"Canonical {kind} '{name}' never appears in the manuscript."
+                )
+            if alias_mentions > 0 and canonical_mentions == 0:
+                notes["proper_noun_continuity_findings"].append(
+                    f"Alias drift risk: aliases for '{name}' appear without the canonical name."
+                )
+
+    notes["chapter_ending_quality_notes"] = list(dict.fromkeys(notes["chapter_ending_quality_notes"]))
+    notes["easy_win_warnings"] = list(dict.fromkeys(notes["easy_win_warnings"]))
+    notes["proper_noun_continuity_findings"] = list(dict.fromkeys(notes["proper_noun_continuity_findings"]))
+    notes["side_character_agency_notes"] = list(dict.fromkeys(notes["side_character_agency_notes"]))
+    notes["atmospheric_repetition_findings"] = list(dict.fromkeys(notes["atmospheric_repetition_findings"]))
+    return notes
+
+
 def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
     sections = [
         "# Manuscript QA Report",
@@ -105,6 +539,26 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Ending Coherence Notes",
         "",
         *([f"- {item}" for item in report.ending_coherence_notes] or ["- No ending notes recorded."]),
+        "",
+        "## Chapter Ending Quality",
+        "",
+        *([f"- {item}" for item in report.chapter_ending_quality_notes] or ["- No chapter ending quality notes recorded."]),
+        "",
+        "## Easy Win Warnings",
+        "",
+        *([f"- {item}" for item in report.easy_win_warnings] or ["- No easy-win warnings recorded."]),
+        "",
+        "## Proper Noun Continuity",
+        "",
+        *([f"- {item}" for item in report.proper_noun_continuity_findings] or ["- No proper-noun continuity findings recorded."]),
+        "",
+        "## Side Character Agency",
+        "",
+        *([f"- {item}" for item in report.side_character_agency_notes] or ["- No side-character agency notes recorded."]),
+        "",
+        "## Atmospheric Repetition",
+        "",
+        *([f"- {item}" for item in report.atmospheric_repetition_findings] or ["- No atmospheric repetition findings recorded."]),
         "",
         "## Deterministic Lint Findings",
         "",

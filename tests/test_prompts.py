@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from novel_generator.models import ChapterDraft, ChapterStatus
 from novel_generator.services.prompts import (
+    parse_chapter_critique,
+    parse_chapter_plan,
+    parse_continuity_update,
     parse_outline,
     parse_story_bible,
     rolling_context,
@@ -19,8 +22,23 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
           "cast": [
             {"name": "Iris", "role": "Archivist", "desire": "Restore the city", "risk": "Becoming its servant"}
           ],
+          "character_agendas": [
+            {
+              "name": "Iris",
+              "want": "Restore the city",
+              "fear": "Becoming its servant",
+              "line_in_sand": "She will not erase consent to save order.",
+              "stance_on_core_conflict": "Freedom matters more than imposed calm.",
+              "relationship_to_protagonist": "Self"
+            }
+          ],
+          "canon_registry": [
+            {"name": "Living Map", "kind": "system", "role": "Sentient map", "aliases": ["Map"]}
+          ],
+          "conflict_ladder": ["The map awakens", "The city fights back", "Iris must choose who controls memory"],
           "world_rules": ["The city records memory in living stone."],
           "core_system_rules": ["Maps can rewrite routes and memories."],
+          "prose_guardrails": ["No abstract ending thesis statements."],
           "ending_promise": "The city survives only if Iris gives up control."
         }
         ```"""
@@ -28,6 +46,8 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
 
     assert parsed.logline.startswith("An archivist")
     assert parsed.cast[0].name == "Iris"
+    assert parsed.character_agendas[0].line_in_sand.startswith("She will not erase")
+    assert parsed.canon_registry[0].name == "Living Map"
     assert parsed.ending_promise.endswith("control.")
 
 
@@ -44,7 +64,16 @@ def test_outline_parser_enforces_exact_count_and_keys() -> None:
               "conflict_turn": "The archive locks Iris inside.",
               "character_turn": "Iris stops hiding how desperate she is.",
               "reveal": "The map recognizes Iris by name.",
-              "ending_state": "Iris escapes with proof the map is alive."
+              "ending_state": "Iris escapes with proof the map is alive.",
+              "outcome_type": "setback",
+              "primary_obstacle": "The archive shutters and isolates Iris.",
+              "cost_if_success": "Iris burns her archivist credentials to escape.",
+              "side_character_friction": "Tarin refuses to trust the map until Iris proves it is not manipulating her.",
+              "concrete_ending_hook": {
+                "trigger": "The map reroutes the exits.",
+                "visible_object_or_actor": "A stone doorway folds shut.",
+                "next_problem": "Iris has only one path left underground."
+              }
             },
             {
               "chapter_number": 2,
@@ -54,7 +83,16 @@ def test_outline_parser_enforces_exact_count_and_keys() -> None:
               "conflict_turn": "The tunnels begin rewriting the route.",
               "character_turn": "Iris chooses trust over isolation.",
               "reveal": "The city has been steering her for years.",
-              "ending_state": "Iris commits to the undercity mission."
+              "ending_state": "Iris commits to the undercity mission.",
+              "outcome_type": "reversal",
+              "primary_obstacle": "The undercity mutates around Iris and Tarin.",
+              "cost_if_success": "Tarin is exposed to the map's memory surge.",
+              "side_character_friction": "Tarin wants to destroy the map instead of follow it.",
+              "concrete_ending_hook": {
+                "trigger": "A hidden elevator wakes below them.",
+                "visible_object_or_actor": "Its lens locks onto Iris.",
+                "next_problem": "The city has begun choosing for her."
+              }
             }
           ]
         }
@@ -81,7 +119,16 @@ def test_outline_parser_rejects_wrong_chapter_count() -> None:
                   "conflict_turn": "Trouble arrives.",
                   "character_turn": "The hero commits.",
                   "reveal": "The threat is personal.",
-                  "ending_state": "The mission begins."
+                  "ending_state": "The mission begins.",
+                  "outcome_type": "reversal",
+                  "primary_obstacle": "The station locks down.",
+                  "cost_if_success": "The hero loses their credentials.",
+                  "side_character_friction": "The pilot wants to run instead of investigate.",
+                  "concrete_ending_hook": {
+                    "trigger": "A dead channel crackles alive.",
+                    "visible_object_or_actor": "The pilot's stolen comm unit",
+                    "next_problem": "The mission is now public."
+                  }
                 }
               ]
             }
@@ -98,6 +145,65 @@ def test_sanitize_chapter_content_removes_duplicate_heading() -> None:
     cleaned = sanitize_chapter_content("Chapter 7: Descent\n\nThe real prose starts here.")
 
     assert cleaned == "The real prose starts here."
+
+
+def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> None:
+    plan = parse_chapter_plan(
+        """
+        {
+          "opening_state": "Iris hides in the maintenance shaft with the map pulsing in her bag.",
+          "character_goal": "Get the source shard to Tarin without triggering the drones.",
+          "scene_beats": ["Iris escapes the archive", "Tarin blocks her route", "The drones triangulate their comms", "Iris burns her badge to misdirect them"],
+          "conflict_turn": "The drones pivot toward Tarin instead of Iris.",
+          "ending_hook": "The elevator below the shaft wakes up.",
+          "attempt": "Iris spoofs the drones using her archive badge.",
+          "complication": "The spoof reveals Tarin's location.",
+          "price_paid": "Iris permanently burns her badge and loses archive access.",
+          "partial_failure_mode": "The drones still isolate Tarin's sector.",
+          "ending_hook_delivery": "End on the elevator opening beneath Tarin."
+        }
+        """
+    )
+    critique = parse_chapter_critique(
+        """
+        {
+          "strengths": ["The chapter escalates cleanly."],
+          "warnings": ["The final paragraph still sounds too abstract."],
+          "revision_required": true,
+          "focus": ["Rewrite the ending beat around the elevator doors opening."],
+          "forward_motion_score": 8,
+          "ending_concreteness_score": 4,
+          "cost_consequence_realism_score": 7,
+          "side_character_independence_score": 6,
+          "proper_noun_continuity_score": 8,
+          "repetition_risk_score": 3,
+          "blocking_issues": ["The ending does not land on the planned object/action beat."],
+          "soft_warnings": ["Tarin could resist harder in scene two."],
+          "repair_scope": "targeted_scene_and_ending"
+        }
+        """
+    )
+    continuity = parse_continuity_update(
+        """
+        {
+          "chapter_outcome": "Iris escapes but loses archive access.",
+          "current_patch_status": "The map remains hidden but active.",
+          "character_states": {"Iris": "Cut off from official systems.", "Tarin": "Now exposed to the drones."},
+          "world_state": "Archive security is on full alert.",
+          "open_threads": ["Who taught the map Iris's name?", "Can Tarin survive the sweep?"],
+          "resolved_threads": ["Iris gets out of the archive."],
+          "timeline_entry": "Iris burns her badge and escapes through the shaft.",
+          "timeline": ["Iris discovers the map.", "Iris burns her badge and escapes through the shaft."],
+          "new_entities_introduced": [{"name": "Shaft Elevator", "kind": "artifact", "role": "Emergency lift", "aliases": ["maintenance elevator"]}],
+          "entity_state_changes": {"Living Map": "It actively responds to Iris.", "Archive Security": "Now fully mobilized."},
+          "open_promises_by_name": {"map_name_source": "The map knows Iris's identity.", "tarin_exposed": "Tarin may be captured next chapter."}
+        }
+        """
+    )
+
+    assert plan.price_paid.startswith("Iris permanently burns")
+    assert critique.repair_scope == "targeted_scene_and_ending"
+    assert continuity.new_entities_introduced[0].name == "Shaft Elevator"
 
 
 def test_rolling_context_uses_recent_completed_chapters() -> None:

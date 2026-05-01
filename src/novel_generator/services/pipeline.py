@@ -18,7 +18,15 @@ from ..schemas import (
     StructuredOutlineEntry,
 )
 from ..settings import Settings
-from .editorial import lint_manuscript, render_qa_report_markdown
+from .editorial import (
+    ChapterLintResult,
+    detect_canonical_entity_collisions,
+    lint_chapter,
+    lint_manuscript,
+    manuscript_quality_notes,
+    merge_canonical_entities,
+    render_qa_report_markdown,
+)
 from .exports import export_run_artifacts
 from .ollama import OllamaClient, OllamaError, OllamaTransportError
 from .prompts import (
@@ -45,6 +53,10 @@ from .prompts import (
 
 class RunCanceled(Exception):
     pass
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(item for item in items if item))
 
 
 def _sorted_chapters(run: GenerationRun) -> list:
@@ -102,6 +114,12 @@ def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
         open_threads=[story_bible.logline, story_bible.ending_promise],
         resolved_threads=[],
         timeline=["Opening state established."],
+        active_entities=[entity.model_dump() for entity in story_bible.canon_registry],
+        entity_state_changes={},
+        open_promises_by_name={
+            "central_conflict": story_bible.logline,
+            "ending_promise": story_bible.ending_promise,
+        },
     )
 
 
@@ -126,17 +144,25 @@ def _outline_entry(run: GenerationRun, chapter_number: int) -> StructuredOutline
     raise RuntimeError(f"Structured outline entry for chapter {chapter_number} was not found.")
 
 
-def _ledger_from_update(update: ChapterContinuityUpdate) -> ContinuityLedger:
-    timeline = update.timeline or [update.timeline_entry]
+def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinuityUpdate) -> ContinuityLedger:
+    collisions = detect_canonical_entity_collisions(current_ledger.active_entities, update.new_entities_introduced)
+    if collisions:
+        raise RuntimeError("; ".join(collisions))
+
+    timeline = list(update.timeline or current_ledger.timeline)
     if update.timeline_entry and update.timeline_entry not in timeline:
         timeline.append(update.timeline_entry)
+
     return ContinuityLedger(
-        current_patch_status=update.current_patch_status,
-        character_states=update.character_states,
-        world_state=update.world_state,
-        open_threads=update.open_threads,
-        resolved_threads=update.resolved_threads,
+        current_patch_status=update.current_patch_status or current_ledger.current_patch_status,
+        character_states={**current_ledger.character_states, **update.character_states},
+        world_state=update.world_state or current_ledger.world_state,
+        open_threads=_dedupe([*current_ledger.open_threads, *update.open_threads]),
+        resolved_threads=_dedupe([*current_ledger.resolved_threads, *update.resolved_threads]),
         timeline=timeline,
+        active_entities=merge_canonical_entities(current_ledger.active_entities, update.new_entities_introduced),
+        entity_state_changes={**current_ledger.entity_state_changes, **update.entity_state_changes},
+        open_promises_by_name=update.open_promises_by_name or current_ledger.open_promises_by_name,
     )
 
 
@@ -146,6 +172,41 @@ def _persist_structured_plan(chapter: Any, plan: ChapterPlan) -> None:
 
 def _persist_structured_qa(chapter: Any, critique: ChapterCritique) -> None:
     chapter.qa_notes = critique.model_dump()
+
+
+def _resolve_repair_scope(*scopes: str) -> str:
+    if "full_chapter" in scopes:
+        return "full_chapter"
+    if "targeted_scene_and_ending" in scopes:
+        return "targeted_scene_and_ending"
+    return "none"
+
+
+def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLintResult) -> ChapterCritique:
+    blocking_issues = _dedupe([*critique.blocking_issues, *lint_result.blocking_issues])
+    soft_warnings = _dedupe([*critique.soft_warnings, *lint_result.soft_warnings])
+    warnings = _dedupe([*critique.warnings, *soft_warnings])
+    focus = _dedupe([*critique.focus, *blocking_issues[:2], *soft_warnings[:2]])
+    revision_required = critique.revision_required or lint_result.needs_repair or bool(blocking_issues)
+    repair_scope = _resolve_repair_scope(critique.repair_scope, lint_result.repair_scope)
+    return critique.model_copy(
+        update={
+            "warnings": warnings,
+            "revision_required": revision_required,
+            "focus": focus,
+            "blocking_issues": blocking_issues,
+            "soft_warnings": soft_warnings,
+            "repair_scope": repair_scope,
+        }
+    )
+
+
+def _chapter_prior_context(run: GenerationRun, chapter_number: int) -> list:
+    return [
+        prior
+        for prior in _sorted_chapters(run)
+        if prior.chapter_number < chapter_number and (prior.content or prior.summary)
+    ]
 
 
 def _generate_story_bible(session: Session, run: GenerationRun, settings: Settings, client: OllamaClient) -> StoryBible:
@@ -203,6 +264,7 @@ def _draft_chapter(
 ) -> None:
     project = run.project
     ledger = _continuity_ledger_from_run(run)
+    prior_chapters = _chapter_prior_context(run, chapter.chapter_number)
     _sync_summary_context(run, settings.chapter_summary_window)
     run.current_chapter = chapter.chapter_number
     run.current_step = "chapter_plan"
@@ -264,20 +326,32 @@ def _draft_chapter(
 
     _ensure_not_canceled(session, run)
     run.current_step = "chapter_revision"
+    lint_result = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
     critique = _generate_structured_output(
         client,
         run.model_name,
-        lambda: build_chapter_critique_messages(project, chapter, outline_entry, story_bible, ledger),
+        lambda: build_chapter_critique_messages(
+            project,
+            chapter,
+            outline_entry,
+            story_bible,
+            ledger,
+            plan,
+            lint_result.combined_findings(),
+        ),
         parse_chapter_critique,
         f"chapter {chapter.chapter_number} critique",
     )
-    _persist_structured_qa(chapter, critique)
-    if critique.revision_required:
+    combined_critique = _combine_chapter_feedback(critique, lint_result)
+    _persist_structured_qa(chapter, combined_critique)
+    session.commit()
+
+    if combined_critique.revision_required:
         record_event(
             session,
             run,
             "chapter_revision_started",
-            {"chapter_number": chapter.chapter_number, "title": chapter.title},
+            {"chapter_number": chapter.chapter_number, "title": chapter.title, "repair_scope": combined_critique.repair_scope},
         )
         session.commit()
         chapter.content = sanitize_chapter_content(
@@ -290,7 +364,8 @@ def _draft_chapter(
                     story_bible,
                     ledger,
                     plan,
-                    critique,
+                    combined_critique,
+                    combined_critique.blocking_issues + combined_critique.soft_warnings,
                 ),
             )
         )
@@ -299,19 +374,40 @@ def _draft_chapter(
         chapter.word_count = len((chapter.content or "").split())
         session.commit()
 
+        final_lint = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
+        final_critique = _generate_structured_output(
+            client,
+            run.model_name,
+            lambda: build_chapter_critique_messages(
+                project,
+                chapter,
+                outline_entry,
+                story_bible,
+                ledger,
+                plan,
+                final_lint.combined_findings(),
+            ),
+            parse_chapter_critique,
+            f"chapter {chapter.chapter_number} post-repair critique",
+        )
+        combined_critique = _combine_chapter_feedback(final_critique, final_lint)
+        _persist_structured_qa(chapter, combined_critique)
+        session.commit()
+
     _ensure_not_canceled(session, run)
     run.current_step = "chapter_summary"
     chapter.summary = client.chat(run.model_name, build_summary_messages(chapter, outline_entry)).strip()
     if not chapter.summary:
         raise RuntimeError(f"Chapter {chapter.chapter_number} summary was empty.")
+
     continuity_update = _generate_structured_output(
         client,
         run.model_name,
-        lambda: build_continuity_update_messages(project, chapter, ledger),
+        lambda: build_continuity_update_messages(project, chapter, ledger, story_bible),
         parse_continuity_update,
         f"chapter {chapter.chapter_number} continuity update",
     )
-    ledger_after = _ledger_from_update(continuity_update)
+    ledger_after = _ledger_from_update(ledger, continuity_update)
     if continuity_update.timeline != ledger_after.timeline:
         continuity_update.timeline = ledger_after.timeline
     chapter.continuity_update = continuity_update.model_dump()
@@ -340,6 +436,7 @@ def _run_manuscript_qa(
 ) -> tuple[ManuscriptQaReport, str]:
     story_bible = _story_bible_from_run(run)
     lint_findings = lint_manuscript(chapters)
+    deterministic_notes = manuscript_quality_notes(chapters, story_bible)
     run.current_step = "manuscript_qa"
     record_event(session, run, "manuscript_qa_started", {"message": "Running manuscript QA."})
     session.commit()
@@ -350,9 +447,24 @@ def _run_manuscript_qa(
         parse_manuscript_qa_report,
         "manuscript QA report",
     )
-    if lint_findings:
-        merged_findings = list(dict.fromkeys([*qa_report.lint_findings, *lint_findings]))
-        qa_report = qa_report.model_copy(update={"lint_findings": merged_findings})
+    qa_report = qa_report.model_copy(
+        update={
+            "lint_findings": _dedupe([*qa_report.lint_findings, *lint_findings]),
+            "chapter_ending_quality_notes": _dedupe(
+                [*qa_report.chapter_ending_quality_notes, *deterministic_notes["chapter_ending_quality_notes"]]
+            ),
+            "easy_win_warnings": _dedupe([*qa_report.easy_win_warnings, *deterministic_notes["easy_win_warnings"]]),
+            "proper_noun_continuity_findings": _dedupe(
+                [*qa_report.proper_noun_continuity_findings, *deterministic_notes["proper_noun_continuity_findings"]]
+            ),
+            "side_character_agency_notes": _dedupe(
+                [*qa_report.side_character_agency_notes, *deterministic_notes["side_character_agency_notes"]]
+            ),
+            "atmospheric_repetition_findings": _dedupe(
+                [*qa_report.atmospheric_repetition_findings, *deterministic_notes["atmospheric_repetition_findings"]]
+            ),
+        }
+    )
     qa_markdown = render_qa_report_markdown(qa_report)
     return qa_report, qa_markdown
 
@@ -371,11 +483,16 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
         create_chapters_from_outline(session, run)
         session.commit()
 
+    run.continuity_ledger = _build_initial_ledger(story_bible).model_dump()
+    _sync_summary_context(run, settings.chapter_summary_window)
+    session.commit()
+
     chapters = _require_requested_chapters(session, run)
     for chapter in chapters:
         if chapter.status == ChapterStatus.COMPLETED and chapter.content and chapter.summary and chapter.continuity_update:
-            ledger = _ledger_from_update(ChapterContinuityUpdate.model_validate(chapter.continuity_update))
-            run.continuity_ledger = ledger.model_dump()
+            ledger = _continuity_ledger_from_run(run)
+            ledger_after = _ledger_from_update(ledger, ChapterContinuityUpdate.model_validate(chapter.continuity_update))
+            run.continuity_ledger = ledger_after.model_dump()
             _sync_summary_context(run, settings.chapter_summary_window)
             session.commit()
             continue

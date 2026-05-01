@@ -51,14 +51,50 @@ class StoryCastMember(BaseModel):
     risk: str
 
 
+class CharacterAgenda(BaseModel):
+    name: str
+    want: str
+    fear: str
+    line_in_sand: str
+    stance_on_core_conflict: str
+    relationship_to_protagonist: str
+
+
+class CanonicalEntity(BaseModel):
+    name: str
+    kind: str
+    role: str = ""
+    aliases: list[str] = Field(default_factory=list)
+
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def validate_aliases(cls, value: Any) -> list[str]:
+        return _clean_list(value)
+
+
+class ConcreteEndingHook(BaseModel):
+    trigger: str = ""
+    visible_object_or_actor: str = ""
+    next_problem: str = ""
+
+
 class StoryBible(BaseModel):
     logline: str
     theme: str
     act_plan: list[str] = Field(default_factory=list)
     cast: list[StoryCastMember] = Field(default_factory=list)
+    character_agendas: list[CharacterAgenda] = Field(default_factory=list)
+    canon_registry: list[CanonicalEntity] = Field(default_factory=list)
+    conflict_ladder: list[str] = Field(default_factory=list)
     world_rules: list[str] = Field(default_factory=list)
     core_system_rules: list[str] = Field(default_factory=list)
+    prose_guardrails: list[str] = Field(default_factory=list)
     ending_promise: str
+
+    @field_validator("act_plan", "conflict_ladder", "world_rules", "core_system_rules", "prose_guardrails", mode="before")
+    @classmethod
+    def validate_story_lists(cls, value: Any) -> list[str]:
+        return _clean_list(value)
 
 
 class StructuredOutlineEntry(BaseModel):
@@ -70,6 +106,11 @@ class StructuredOutlineEntry(BaseModel):
     character_turn: str
     reveal: str
     ending_state: str
+    outcome_type: str = ""
+    primary_obstacle: str = ""
+    cost_if_success: str = ""
+    side_character_friction: str = ""
+    concrete_ending_hook: ConcreteEndingHook = Field(default_factory=ConcreteEndingHook)
 
 
 class ContinuityLedger(BaseModel):
@@ -79,6 +120,9 @@ class ContinuityLedger(BaseModel):
     open_threads: list[str] = Field(default_factory=list)
     resolved_threads: list[str] = Field(default_factory=list)
     timeline: list[str] = Field(default_factory=list)
+    active_entities: list[CanonicalEntity] = Field(default_factory=list)
+    entity_state_changes: dict[str, str] = Field(default_factory=dict)
+    open_promises_by_name: dict[str, str] = Field(default_factory=dict)
 
 
 class ChapterPlan(BaseModel):
@@ -87,6 +131,11 @@ class ChapterPlan(BaseModel):
     scene_beats: list[str] = Field(default_factory=list)
     conflict_turn: str
     ending_hook: str
+    attempt: str = ""
+    complication: str = ""
+    price_paid: str = ""
+    partial_failure_mode: str = ""
+    ending_hook_delivery: str = ""
 
 
 class ChapterContinuityUpdate(BaseModel):
@@ -98,6 +147,9 @@ class ChapterContinuityUpdate(BaseModel):
     resolved_threads: list[str] = Field(default_factory=list)
     timeline_entry: str
     timeline: list[str] = Field(default_factory=list)
+    new_entities_introduced: list[CanonicalEntity] = Field(default_factory=list)
+    entity_state_changes: dict[str, str] = Field(default_factory=dict)
+    open_promises_by_name: dict[str, str] = Field(default_factory=dict)
 
 
 class ChapterCritique(BaseModel):
@@ -105,6 +157,15 @@ class ChapterCritique(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     revision_required: bool = False
     focus: list[str] = Field(default_factory=list)
+    forward_motion_score: int = Field(default=0, ge=0, le=10)
+    ending_concreteness_score: int = Field(default=0, ge=0, le=10)
+    cost_consequence_realism_score: int = Field(default=0, ge=0, le=10)
+    side_character_independence_score: int = Field(default=0, ge=0, le=10)
+    proper_noun_continuity_score: int = Field(default=0, ge=0, le=10)
+    repetition_risk_score: int = Field(default=0, ge=0, le=10)
+    blocking_issues: list[str] = Field(default_factory=list)
+    soft_warnings: list[str] = Field(default_factory=list)
+    repair_scope: str = "none"
 
 
 class ManuscriptQaReport(BaseModel):
@@ -115,6 +176,11 @@ class ManuscriptQaReport(BaseModel):
     repetition_risks: list[str] = Field(default_factory=list)
     ending_coherence_notes: list[str] = Field(default_factory=list)
     lint_findings: list[str] = Field(default_factory=list)
+    chapter_ending_quality_notes: list[str] = Field(default_factory=list)
+    easy_win_warnings: list[str] = Field(default_factory=list)
+    proper_noun_continuity_findings: list[str] = Field(default_factory=list)
+    side_character_agency_notes: list[str] = Field(default_factory=list)
+    atmospheric_repetition_findings: list[str] = Field(default_factory=list)
 
 
 class ProviderCapabilities(BaseModel):

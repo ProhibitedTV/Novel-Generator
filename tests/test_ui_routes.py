@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import Artifact, RunStatus
-from novel_generator.repositories import create_project, create_run, get_project, get_run
+from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, get_project, get_run
 from novel_generator.schemas import ProjectCreate, ProviderCapabilities, RunCreate
 from novel_generator.services.ollama import OllamaClient
 
@@ -229,8 +229,23 @@ def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> No
             "theme": "Safety without consent is still captivity.",
             "act_plan": ["Setup", "Escalation", "Ending"],
             "cast": [],
+            "character_agendas": [
+                {
+                    "name": "Nora",
+                    "want": "Expose the patch",
+                    "fear": "Becoming part of it",
+                    "line_in_sand": "She will not ship a coercive cure.",
+                    "stance_on_core_conflict": "Freedom over stability",
+                    "relationship_to_protagonist": "Self",
+                }
+            ],
+            "canon_registry": [
+                {"name": "Peace Patch", "kind": "project", "role": "Behavioral control patch", "aliases": ["the patch"]}
+            ],
+            "conflict_ladder": ["Patch discovered", "Authority closes in", "Nora decides what ships"],
             "world_rules": ["The lattice edits memory."],
             "core_system_rules": ["Only signed patches can propagate."],
+            "prose_guardrails": ["No abstract chapter endings."],
             "ending_promise": "One irreversible choice ends the crisis.",
         }
         run.outline = [
@@ -243,6 +258,15 @@ def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> No
                 "character_turn": "Nora stops hiding what she knows.",
                 "reveal": "The patch carries her own signature.",
                 "ending_state": "Nora commits to tracing the patch.",
+                "outcome_type": "reversal",
+                "primary_obstacle": "Authority lockdown",
+                "cost_if_success": "Nora burns her admin access",
+                "side_character_friction": "Jun wants to destroy the evidence",
+                "concrete_ending_hook": {
+                    "trigger": "A drone reaches the hatch",
+                    "visible_object_or_actor": "Its lens turns blue",
+                    "next_problem": "It speaks in Nora's own voice",
+                },
             }
         ]
         session.commit()
@@ -254,6 +278,9 @@ def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> No
     assert "Cancel and edit project" in response.text
     assert "Story bible" in response.text
     assert "Structured outline" in response.text
+    assert "Character agendas" in response.text
+    assert "Canon registry" in response.text
+    assert "Concrete ending hook" in response.text
 
 
 def test_run_detail_surfaces_qa_report_artifact(client, monkeypatch) -> None:
@@ -281,6 +308,53 @@ def test_run_detail_surfaces_qa_report_artifact(client, monkeypatch) -> None:
     assert response.status_code == 200
     assert "editorial feedback" in response.text
     assert "qa-report.md" in response.text
+
+
+def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.outline = [
+            {
+                "chapter_number": 1,
+                "act": "Act I",
+                "title": "Signal",
+                "objective": "Find the patch.",
+                "conflict_turn": "The system isolates Nora.",
+                "character_turn": "Nora stops hiding what she knows.",
+                "reveal": "The patch is signed with her key.",
+                "ending_state": "Nora commits to tracing it.",
+            }
+        ]
+        create_chapters_from_outline(session, run)
+        chapter = run.chapters[0]
+        chapter.qa_notes = {
+            "strengths": ["Forward motion holds."],
+            "warnings": ["The ending still feels abstract."],
+            "revision_required": True,
+            "focus": ["Rewrite the final beat around the hatch alarm."],
+            "forward_motion_score": 8,
+            "ending_concreteness_score": 4,
+            "cost_consequence_realism_score": 6,
+            "side_character_independence_score": 5,
+            "proper_noun_continuity_score": 9,
+            "repetition_risk_score": 3,
+            "blocking_issues": ["Chapter 1 ends in an abstract thesis statement instead of a concrete hook."],
+            "soft_warnings": ["Chapter 1 may still need stronger side-character friction."],
+            "repair_scope": "targeted_scene_and_ending",
+        }
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "Blocking issues" in response.text
+    assert "Repair scope" in response.text
+    assert "Ending concreteness: 4/10" in response.text
 
 
 def test_project_detail_renders_cleanup_controls_for_finished_runs(client, monkeypatch) -> None:
