@@ -103,6 +103,7 @@ def outline_summary_from_entry(entry: StructuredOutlineEntry | dict[str, Any]) -
     item = entry if isinstance(entry, dict) else entry.model_dump()
     parts = [
         item.get("objective", "").strip(),
+        f"Mode: {item.get('chapter_mode', '').strip()}",
         f"Obstacle: {item.get('primary_obstacle', '').strip()}",
         f"Conflict turn: {item.get('conflict_turn', '').strip()}",
         f"Reveal: {item.get('reveal', '').strip()}",
@@ -140,7 +141,10 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 '      "fear": "string",\n'
                 '      "line_in_sand": "string",\n'
                 '      "stance_on_core_conflict": "string",\n'
-                '      "relationship_to_protagonist": "string"\n'
+                '      "relationship_to_protagonist": "string",\n'
+                '      "public_belief": "string",\n'
+                '      "private_pressure": "string",\n'
+                '      "stress_response": "string"\n'
                 "    }\n"
                 "  ],\n"
                 '  "canon_registry": [\n'
@@ -159,9 +163,10 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 "}\n\n"
                 "Requirements:\n"
                 "- make the protagonist, antagonist, and supporting cast distinct in goal, fear, and moral boundary\n"
+                "- each major character agenda must include a stable ideological belief, a private pressure point, and a predictable stress response\n"
                 "- include only recurring canonical entities in canon_registry and keep names stable\n"
                 "- build a clean escalation ladder toward one primary ending, not multiple competing finales\n"
-                "- prose_guardrails must explicitly discourage repeated atmospheric phrasing, thesis-statement endings, and zero-cost technical wins\n"
+                "- prose_guardrails must explicitly discourage repeated atmospheric phrasing, thesis-statement endings, zero-cost technical wins, and nonstop alarm escalation without breathers\n"
                 "- keep the tone and world rules specific enough to govern later chapters"
             ),
         },
@@ -212,7 +217,11 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 '        "trigger": "string",\n'
                 '        "visible_object_or_actor": "string",\n'
                 '        "next_problem": "string"\n'
-                "      }\n"
+                "      },\n"
+                '      "chapter_mode": "investigation|systems_crisis|breather|aftermath|confrontation|reversal",\n'
+                '      "civilian_life_detail": "string",\n'
+                '      "emotional_reveal": "string",\n'
+                '      "ideology_pressure": "string"\n'
                 "    }\n"
                 "  ]\n"
                 "}\n\n"
@@ -224,9 +233,14 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 f"- at least {minimum_setbacks} chapters must have outcome_type set to setback or reversal\n"
                 "- no more than 2 consecutive clean wins are allowed\n"
                 f"{midpoint_rule}"
+                "- every block of 4 chapters must contain at least 1 chapter_mode of breather or aftermath\n"
                 "- side_character_friction must name who pushes back on the protagonist and why\n"
                 "- cost_if_success must describe the price of progress, not just the risk of failure\n"
                 "- concrete_ending_hook must end on a specific actor, object, interruption, alarm, arrival, discovery, or reversal\n"
+                "- breather and aftermath chapters must center face-to-face conflict, civilian-life texture, and ideology pressure rather than another terminal emergency\n"
+                "- civilian_life_detail must name one concrete detail of ordinary life in the world\n"
+                "- emotional_reveal must expose a vulnerable truth, memory consequence, or personal motive\n"
+                "- ideology_pressure must state which belief gets tested in the chapter"
                 "- preserve one clean climax and one primary ending in the final chapter"
             ),
         },
@@ -286,13 +300,21 @@ def build_chapter_plan_messages(
                 '  "complication": "string",\n'
                 '  "price_paid": "string",\n'
                 '  "partial_failure_mode": "string",\n'
-                '  "ending_hook_delivery": "string"\n'
+                '  "ending_hook_delivery": "string",\n'
+                '  "emotional_anchor": "string",\n'
+                '  "civilian_texture": "string",\n'
+                '  "ideology_clash": "string",\n'
+                '  "primary_interpersonal_conflict": "string"\n'
                 "}\n\n"
                 "Rules:\n"
                 "- include 4 to 6 concrete scene beats\n"
                 "- at least one beat must materially worsen or transform the conflict\n"
                 "- if the protagonist uses a technical solution, the plan must include a visible cost or exposure\n"
                 "- side characters must exert pressure from their own agendas, not merely help or warn\n"
+                "- if chapter_mode is breather or aftermath, do not make hacking or console work the primary action\n"
+                "- emotional_anchor must describe the human feeling the chapter lingers on\n"
+                "- civilian_texture must surface a specific detail of lived daily life\n"
+                "- ideology_clash must name the belief conflict driving the chapter\n"
                 "- the ending_hook_delivery must describe the specific final beat that lands the outline's concrete_ending_hook"
             ),
         },
@@ -341,6 +363,11 @@ def build_chapter_draft_messages(
                 "- if a technical solution works, show the concrete cost, fallout, or exposure on the page\n"
                 "- if side_character_friction exists, the side character must push back from their own agenda\n"
                 "- keep names, aliases, systems, projects, and locations consistent with the canon registry\n"
+                "- if chapter_mode is breather or aftermath, make face-to-face emotional conflict the primary motion instead of another terminal emergency\n"
+                "- include the civilian_life_detail and emotional_reveal explicitly on the page\n"
+                "- make the ideology_pressure visible in dialogue, argument, or a choice under pressure\n"
+                "- if the continuity ledger shows memory damage or trust fractures, carry those consequences into behavior and dialogue\n"
+                "- limit new system acronyms in breather or aftermath chapters unless absolutely necessary\n"
                 "- do not introduce abstract chapter endings about destiny, choices, or the future hanging in the balance\n"
                 "- end in the exact story state promised by ending_state and land the concrete ending hook with a visible actor, object, or event\n"
                 "- keep each named character's voice and priorities distinct\n\n"
@@ -392,16 +419,20 @@ def build_chapter_critique_messages(
                 '  "side_character_independence_score": 0,\n'
                 '  "proper_noun_continuity_score": 0,\n'
                 '  "repetition_risk_score": 0,\n'
+                '  "emotional_depth_score": 0,\n'
+                '  "ideology_clarity_score": 0,\n'
+                '  "civilian_texture_score": 0,\n'
                 '  "blocking_issues": ["string"],\n'
                 '  "soft_warnings": ["string"],\n'
                 '  "repair_scope": "none|targeted_scene_and_ending|full_chapter"\n'
                 "}\n\n"
                 "Rules:\n"
-                "- set revision_required to true if the chapter has an abstract ending, a zero-cost major solution, a repeated premise beat, a side character who only helps or warns, or a proper-noun inconsistency\n"
+                "- set revision_required to true if the chapter has an abstract ending, a zero-cost major solution, a repeated premise beat, a side character who only helps or warns, a proper-noun inconsistency, emotional fallout that disappears, or blurred ideology positions\n"
                 "- use repair_scope 'targeted_scene_and_ending' for ending, cost, repetition-fatigue, or side-character pressure problems\n"
                 "- use repair_scope 'full_chapter' only when continuity or premise repetition is severe\n"
                 "- all score fields must be whole numbers from 0 to 10, not percentages\n"
                 "- forward_motion_score, ending_concreteness_score, cost_consequence_realism_score, side_character_independence_score, and proper_noun_continuity_score should be higher when the draft is stronger\n"
+                "- emotional_depth_score, ideology_clarity_score, and civilian_texture_score should be higher when the chapter creates human texture and belief conflict\n"
                 "- repetition_risk_score should be higher when repetition risk is worse"
             ),
         },
@@ -446,6 +477,8 @@ def build_chapter_revision_messages(
                 "- if repair_scope is 'full_chapter', rebuild the chapter so it stops repeating the premise and restores continuity\n"
                 "- show a real price or fallout if a technical solution succeeds\n"
                 "- make side characters push back from their own agendas rather than existing only to help or warn\n"
+                "- restore any missing emotional fallout, civilian texture, or ideology clash that the plan called for\n"
+                "- if this is a breather or aftermath chapter, ensure the chapter breathes and does not become another pure console sequence\n"
                 "- end on a concrete next problem, not a thesis sentence about the future or a choice\n"
                 "- keep names and roles consistent with the canon registry and continuity ledger\n"
                 "- do not add a heading\n\n"
@@ -466,7 +499,7 @@ def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutli
             "role": "user",
             "content": (
                 f"Summarize chapter {chapter.chapter_number} in 3 to 5 sentences.\n"
-                f"Make sure the summary captures the external change, the character turn, the price paid, and the new ending state.\n\n"
+                f"Make sure the summary captures the external change, the character turn, the price paid, the emotional consequence, and the new ending state.\n\n"
                 f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 f"{chapter.content or ''}"
             ),
@@ -520,14 +553,22 @@ def build_continuity_update_messages(
                 "    }\n"
                 "  ],\n"
                 '  "entity_state_changes": {"Entity Name": "what changed"},\n'
-                '  "open_promises_by_name": {"promise label": "why it is still live"}\n'
+                '  "open_promises_by_name": {"promise label": "why it is still live"},\n'
+                '  "ideology_state_by_character": {"Character": "current belief state"},\n'
+                '  "ideology_shift_notes": {"Character": "intentional shift or consistency note"},\n'
+                '  "memory_damage": {"Character": "what memory or cognition was damaged"},\n'
+                '  "trust_fractures": {"Relationship": "what trust was damaged"},\n'
+                '  "civilian_pressure_points": ["concrete civilian consequence"],\n'
+                '  "emotional_open_loops": {"Character": "unresolved emotional burden"}\n'
                 "}\n\n"
                 "Rules:\n"
                 "- keep unresolved threads alive unless the chapter truly resolves them\n"
                 "- update character states only where the chapter created a real change\n"
                 "- append a concise timeline entry for this chapter\n"
                 "- only list intentionally new canonical entities in new_entities_introduced\n"
-                "- explicitly track which named entities changed state and which open promises are still live"
+                "- explicitly track which named entities changed state and which open promises are still live\n"
+                "- if a character's belief is contradicted, mark whether that contradiction is intentional in ideology_shift_notes\n"
+                "- preserve memory damage, trust fractures, civilian harm, and unresolved emotional fallout unless the chapter truly heals them"
             ),
         },
     ]
@@ -577,10 +618,14 @@ def build_manuscript_qa_messages(
                 '  "easy_win_warnings": ["string"],\n'
                 '  "proper_noun_continuity_findings": ["string"],\n'
                 '  "side_character_agency_notes": ["string"],\n'
-                '  "atmospheric_repetition_findings": ["string"]\n'
+                '  "atmospheric_repetition_findings": ["string"],\n'
+                '  "emotional_pacing_notes": ["string"],\n'
+                '  "ideology_consistency_findings": ["string"],\n'
+                '  "civilian_texture_findings": ["string"],\n'
+                '  "technical_escalation_fatigue_findings": ["string"]\n'
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, continuity instability, easy technical wins, side-character flatness, "
-                "proper-noun drift, and whether the manuscript delivers on the ending promise."
+                "proper-noun drift, emotional pacing, ideology blur, civilian-life absence, technical alarm fatigue, and whether the manuscript delivers on the ending promise."
             ),
         },
     ]
@@ -685,6 +730,9 @@ def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
     if actual_numbers != expected_numbers:
         raise ValueError("Outline chapter numbers must run sequentially from 1 to the requested chapter count.")
 
+    if any(not item.chapter_mode.strip() for item in outline):
+        raise ValueError("Outline entries must include a chapter_mode for every chapter.")
+
     minimum_setbacks = max(1, math.ceil(requested_chapters * 0.3))
     setback_count = sum(1 for item in outline if item.outcome_type.lower() in {"setback", "reversal"})
     if setback_count < minimum_setbacks:
@@ -701,6 +749,20 @@ def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
         if clean_win_streak > 2:
             raise ValueError("Outline contains more than two consecutive clean wins.")
 
+        if item.chapter_mode.lower() in {"breather", "aftermath"}:
+            if not item.civilian_life_detail.strip():
+                raise ValueError(
+                    f"Breather or aftermath chapter {item.chapter_number} is missing civilian_life_detail."
+                )
+            if not item.emotional_reveal.strip():
+                raise ValueError(
+                    f"Breather or aftermath chapter {item.chapter_number} is missing emotional_reveal."
+                )
+            if not item.ideology_pressure.strip():
+                raise ValueError(
+                    f"Breather or aftermath chapter {item.chapter_number} is missing ideology_pressure."
+                )
+
     if requested_chapters >= 3:
         midpoint_start = max(2, math.ceil(requested_chapters * 0.4))
         midpoint_end = max(midpoint_start, math.floor(requested_chapters * 0.7))
@@ -712,6 +774,16 @@ def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
             raise ValueError(
                 f"Outline must include a midpoint reversal between chapters {midpoint_start} and {midpoint_end}."
             )
+
+    if requested_chapters >= 4:
+        for chunk_start in range(0, requested_chapters, 4):
+            chunk = outline[chunk_start : chunk_start + 4]
+            if not any(item.chapter_mode.lower() in {"breather", "aftermath"} for item in chunk):
+                start_number = chunk[0].chapter_number
+                end_number = chunk[-1].chapter_number
+                raise ValueError(
+                    f"Outline must include a breather or aftermath chapter between chapters {start_number} and {end_number}."
+                )
 
     return [item.model_dump() for item in outline]
 

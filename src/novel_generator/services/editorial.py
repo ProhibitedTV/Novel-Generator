@@ -26,6 +26,8 @@ STOCK_PHRASES = [
     "mara stared",
 ]
 
+BREATHER_MODES = {"breather", "aftermath"}
+
 ABSTRACT_ENDING_PATTERNS = [
     r"the next step would decide",
     r"the choice would define",
@@ -49,6 +51,20 @@ TECH_SOLUTION_KEYWORDS = [
     "bruteforce",
     "brute force",
     "script",
+]
+
+TECHNICAL_FATIGUE_TERMS = [
+    "override",
+    "backdoor",
+    "lockdown",
+    "quarantine",
+    "countdown",
+    "emergency wipe",
+    "safe-mode",
+    "safe mode",
+    "power failure",
+    "life-support warning",
+    "life support warning",
 ]
 
 COST_KEYWORDS = [
@@ -125,6 +141,62 @@ COMMON_PROPER_NOUN_IGNORES = {
     "yes",
 }
 
+MEANINGFUL_TERM_IGNORES = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "beside",
+    "but",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "her",
+    "hers",
+    "him",
+    "his",
+    "in",
+    "into",
+    "its",
+    "more",
+    "not",
+    "of",
+    "off",
+    "on",
+    "one",
+    "onto",
+    "or",
+    "our",
+    "out",
+    "over",
+    "she",
+    "than",
+    "that",
+    "the",
+    "their",
+    "them",
+    "then",
+    "there",
+    "they",
+    "this",
+    "through",
+    "to",
+    "under",
+    "until",
+    "was",
+    "were",
+    "while",
+    "with",
+    "would",
+    "you",
+    "your",
+}
+
 
 @dataclass
 class ChapterLintResult:
@@ -151,7 +223,11 @@ def _normalize_entity_key(text: str) -> str:
 
 
 def _meaningful_terms(text: str) -> set[str]:
-    return {term for term in re.findall(r"[a-z0-9][a-z0-9\-']+", text.lower()) if len(term) > 2}
+    return {
+        term
+        for term in re.findall(r"[a-z0-9][a-z0-9\-']+", text.lower())
+        if len(term) > 2 and term not in MEANINGFUL_TERM_IGNORES
+    }
 
 
 def _entity_payload(entity: CanonicalEntity | dict[str, Any]) -> CanonicalEntity:
@@ -349,6 +425,38 @@ def lint_chapter(
         result.needs_repair = True
         result.repair_scope = "targeted_scene_and_ending"
 
+    chapter_mode = str(entry.get("chapter_mode", "")).strip().lower()
+    if chapter_mode in BREATHER_MODES:
+        civilian_terms = _meaningful_terms(str(entry.get("civilian_life_detail", "")))
+        emotional_terms = _meaningful_terms(str(entry.get("emotional_reveal", "")))
+        ideology_terms = _meaningful_terms(str(entry.get("ideology_pressure", "")))
+        content_terms = _meaningful_terms(content)
+
+        if civilian_terms and len(civilian_terms & content_terms) < 2:
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} is missing the planned civilian-life detail for a breather or aftermath chapter."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+        if emotional_terms and len(emotional_terms & content_terms) < 2:
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} is missing the planned emotional reveal for a breather or aftermath chapter."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+        if ideology_terms and len(ideology_terms & content_terms) < 2:
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} is missing the planned ideology pressure for a breather or aftermath chapter."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+        if uses_technical_solution:
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} is tagged as a breather or aftermath chapter but still centers technical problem-solving."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+
     friction = str(entry.get("side_character_friction", "")).strip()
     if friction:
         friction_terms = _meaningful_terms(friction)
@@ -370,6 +478,39 @@ def lint_chapter(
         )
         result.needs_repair = True
         result.repair_scope = result.repair_scope if result.repair_scope != "none" else "targeted_scene_and_ending"
+
+    fatigue_hits = [term for term in TECHNICAL_FATIGUE_TERMS if term in lowered]
+    if len(fatigue_hits) > 2:
+        message = (
+            f"Chapter {chapter.chapter_number} leans on too many technical emergency beats at once: "
+            + ", ".join(fatigue_hits[:4])
+            + "."
+        )
+        if chapter_mode in BREATHER_MODES:
+            result.blocking_issues.append(message)
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+        else:
+            result.soft_warnings.append(message)
+
+    if ledger.get("memory_damage"):
+        memory_terms = _meaningful_terms(str(ledger.get("memory_damage")))
+        if memory_terms and len(memory_terms & _meaningful_terms(content)) < 1:
+            result.soft_warnings.append(
+                f"Chapter {chapter.chapter_number} may be dropping an ongoing memory-damage consequence."
+            )
+    if ledger.get("trust_fractures"):
+        fracture_terms = _meaningful_terms(str(ledger.get("trust_fractures")))
+        if fracture_terms and len(fracture_terms & _meaningful_terms(content)) < 1:
+            result.soft_warnings.append(
+                f"Chapter {chapter.chapter_number} may be dropping an ongoing trust fracture."
+            )
+    if ledger.get("civilian_pressure_points"):
+        civilian_pressure_terms = _meaningful_terms(str(ledger.get("civilian_pressure_points")))
+        if civilian_pressure_terms and len(civilian_pressure_terms & _meaningful_terms(content)) < 1:
+            result.soft_warnings.append(
+                f"Chapter {chapter.chapter_number} may be ignoring existing civilian consequences."
+            )
 
     collisions = detect_canonical_entity_collisions(
         ledger.get("active_entities") or [],
@@ -457,6 +598,10 @@ def manuscript_quality_notes(
         "proper_noun_continuity_findings": [],
         "side_character_agency_notes": [],
         "atmospheric_repetition_findings": [],
+        "emotional_pacing_notes": [],
+        "ideology_consistency_findings": [],
+        "civilian_texture_findings": [],
+        "technical_escalation_fatigue_findings": [],
     }
 
     manuscript_text = "\n\n".join(chapter.content or "" for chapter in chapters).lower()
@@ -477,9 +622,25 @@ def manuscript_quality_notes(
             notes["side_character_agency_notes"].append(
                 f"Chapter {chapter.chapter_number} may need stronger side-character resistance or competing goals."
             )
+        if qa.get("emotional_depth_score", 10) <= 5 or "emotional" in lowered_warnings or "memory-damage consequence" in lowered_warnings:
+            notes["emotional_pacing_notes"].append(
+                f"Chapter {chapter.chapter_number} may need more emotional aftermath or breathing room."
+            )
+        if qa.get("ideology_clarity_score", 10) <= 5 or "ideology" in lowered_warnings:
+            notes["ideology_consistency_findings"].append(
+                f"Chapter {chapter.chapter_number} may be blurring or contradicting a character's beliefs."
+            )
+        if qa.get("civilian_texture_score", 10) <= 5 or "civilian" in lowered_warnings:
+            notes["civilian_texture_findings"].append(
+                f"Chapter {chapter.chapter_number} may need more concrete civilian-life texture."
+            )
         if "proper noun" in lowered_warnings or "canonical entity collision" in lowered_warnings or qa.get("proper_noun_continuity_score", 10) <= 5:
             notes["proper_noun_continuity_findings"].append(
                 f"Chapter {chapter.chapter_number} raised proper-noun continuity concerns."
+            )
+        if "technical emergency beats" in lowered_warnings:
+            notes["technical_escalation_fatigue_findings"].append(
+                f"Chapter {chapter.chapter_number} may be too dense with emergency-system language."
             )
         for phrase in STOCK_PHRASES:
             count = (chapter.content or "").lower().count(phrase)
@@ -511,6 +672,10 @@ def manuscript_quality_notes(
     notes["proper_noun_continuity_findings"] = list(dict.fromkeys(notes["proper_noun_continuity_findings"]))
     notes["side_character_agency_notes"] = list(dict.fromkeys(notes["side_character_agency_notes"]))
     notes["atmospheric_repetition_findings"] = list(dict.fromkeys(notes["atmospheric_repetition_findings"]))
+    notes["emotional_pacing_notes"] = list(dict.fromkeys(notes["emotional_pacing_notes"]))
+    notes["ideology_consistency_findings"] = list(dict.fromkeys(notes["ideology_consistency_findings"]))
+    notes["civilian_texture_findings"] = list(dict.fromkeys(notes["civilian_texture_findings"]))
+    notes["technical_escalation_fatigue_findings"] = list(dict.fromkeys(notes["technical_escalation_fatigue_findings"]))
     return notes
 
 
@@ -559,6 +724,22 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Atmospheric Repetition",
         "",
         *([f"- {item}" for item in report.atmospheric_repetition_findings] or ["- No atmospheric repetition findings recorded."]),
+        "",
+        "## Emotional Pacing",
+        "",
+        *([f"- {item}" for item in report.emotional_pacing_notes] or ["- No emotional pacing notes recorded."]),
+        "",
+        "## Ideology Consistency",
+        "",
+        *([f"- {item}" for item in report.ideology_consistency_findings] or ["- No ideology consistency findings recorded."]),
+        "",
+        "## Civilian Texture",
+        "",
+        *([f"- {item}" for item in report.civilian_texture_findings] or ["- No civilian texture findings recorded."]),
+        "",
+        "## Technical Escalation Fatigue",
+        "",
+        *([f"- {item}" for item in report.technical_escalation_fatigue_findings] or ["- No technical escalation fatigue findings recorded."]),
         "",
         "## Deterministic Lint Findings",
         "",

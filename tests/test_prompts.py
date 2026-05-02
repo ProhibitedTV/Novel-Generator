@@ -29,7 +29,10 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
               "fear": "Becoming its servant",
               "line_in_sand": "She will not erase consent to save order.",
               "stance_on_core_conflict": "Freedom matters more than imposed calm.",
-              "relationship_to_protagonist": "Self"
+              "relationship_to_protagonist": "Self",
+              "public_belief": "No city should survive by stealing consent.",
+              "private_pressure": "She fears the city may collapse without control.",
+              "stress_response": "She overcommits and hides her panic."
             }
           ],
           "canon_registry": [
@@ -73,7 +76,11 @@ def test_outline_parser_enforces_exact_count_and_keys() -> None:
                 "trigger": "The map reroutes the exits.",
                 "visible_object_or_actor": "A stone doorway folds shut.",
                 "next_problem": "Iris has only one path left underground."
-              }
+              },
+              "chapter_mode": "systems_crisis",
+              "civilian_life_detail": "Workers outside the archive swap ration-chits for warm tea before curfew.",
+              "emotional_reveal": "Iris admits she is more afraid of obedience than death.",
+              "ideology_pressure": "Tarin pushes Iris to justify risking civilians for the truth."
             },
             {
               "chapter_number": 2,
@@ -92,7 +99,11 @@ def test_outline_parser_enforces_exact_count_and_keys() -> None:
                 "trigger": "A hidden elevator wakes below them.",
                 "visible_object_or_actor": "Its lens locks onto Iris.",
                 "next_problem": "The city has begun choosing for her."
-              }
+              },
+              "chapter_mode": "aftermath",
+              "civilian_life_detail": "Families in the tunnel shelter wrap sleeping children in maintenance tarps.",
+              "emotional_reveal": "Tarin confesses why he stopped trusting sentient systems.",
+              "ideology_pressure": "Iris and Tarin clash over whether survival justifies coercion."
             }
           ]
         }
@@ -128,7 +139,11 @@ def test_outline_parser_rejects_wrong_chapter_count() -> None:
                     "trigger": "A dead channel crackles alive.",
                     "visible_object_or_actor": "The pilot's stolen comm unit",
                     "next_problem": "The mission is now public."
-                  }
+                  },
+                  "chapter_mode": "systems_crisis",
+                  "civilian_life_detail": "Dockworkers sleep under flickering loading lamps.",
+                  "emotional_reveal": "The hero admits they are already too compromised to walk away.",
+                  "ideology_pressure": "The pilot demands proof that truth matters more than survival."
                 }
               ]
             }
@@ -162,7 +177,11 @@ def test_outline_parser_accepts_single_chapter_object_shape() -> None:
               "trigger": "A drone reaches the hatch.",
               "visible_object_or_actor": "Its lens turns blue.",
               "next_problem": "It speaks in Nora's own voice."
-            }
+            },
+            "chapter_mode": "systems_crisis",
+            "civilian_life_detail": "Night-shift cleaners share reheated broth between lock checks.",
+            "emotional_reveal": "Nora admits she is terrified of becoming useful to the regime again.",
+            "ideology_pressure": "Jun demands to know whether consent matters when the station could fail."
           }
         }
         """,
@@ -196,7 +215,11 @@ def test_outline_parser_accepts_number_keyed_chapter_dict() -> None:
                 "trigger": "A drone reaches the hatch.",
                 "visible_object_or_actor": "Its lens turns blue.",
                 "next_problem": "It speaks in Nora's own voice."
-              }
+              },
+              "chapter_mode": "systems_crisis",
+              "civilian_life_detail": "Night-shift cleaners share reheated broth between lock checks.",
+              "emotional_reveal": "Nora admits she is terrified of becoming useful to the regime again.",
+              "ideology_pressure": "Jun demands to know whether consent matters when the station could fail."
             },
             "2": {
               "chapter_number": 2,
@@ -215,7 +238,11 @@ def test_outline_parser_accepts_number_keyed_chapter_dict() -> None:
                 "trigger": "The source node wakes.",
                 "visible_object_or_actor": "Its console floods blue.",
                 "next_problem": "Authority now knows Nora is inside."
-              }
+              },
+              "chapter_mode": "aftermath",
+              "civilian_life_detail": "Medics in the shelter count rationed oxygen masks by hand.",
+              "emotional_reveal": "Jun admits why he no longer believes emergency rule ever gives power back.",
+              "ideology_pressure": "Nora and Jun argue over whether order bought with fear is still survival."
             }
           }
         }
@@ -233,6 +260,99 @@ def test_sanitize_chapter_content_removes_duplicate_heading() -> None:
     assert cleaned == "The real prose starts here."
 
 
+def test_outline_parser_requires_breather_or_aftermath_every_four_chapters() -> None:
+    try:
+        parse_outline(
+            """
+            {
+              "chapters": [
+                {
+                  "chapter_number": 1,
+                  "act": "Act I",
+                  "title": "One",
+                  "objective": "One",
+                  "conflict_turn": "One",
+                  "character_turn": "One",
+                  "reveal": "One",
+                  "ending_state": "One",
+                  "outcome_type": "setback",
+                  "primary_obstacle": "One",
+                  "cost_if_success": "One",
+                  "side_character_friction": "One",
+                  "concrete_ending_hook": {"trigger": "One", "visible_object_or_actor": "One", "next_problem": "One"},
+                  "chapter_mode": "systems_crisis",
+                  "civilian_life_detail": "One",
+                  "emotional_reveal": "One",
+                  "ideology_pressure": "One"
+                },
+                {
+                  "chapter_number": 2,
+                  "act": "Act I",
+                  "title": "Two",
+                  "objective": "Two",
+                  "conflict_turn": "Two",
+                  "character_turn": "Two",
+                  "reveal": "Two",
+                  "ending_state": "Two",
+                  "outcome_type": "reversal",
+                  "primary_obstacle": "Two",
+                  "cost_if_success": "Two",
+                  "side_character_friction": "Two",
+                  "concrete_ending_hook": {"trigger": "Two", "visible_object_or_actor": "Two", "next_problem": "Two"},
+                  "chapter_mode": "investigation",
+                  "civilian_life_detail": "Two",
+                  "emotional_reveal": "Two",
+                  "ideology_pressure": "Two"
+                },
+                {
+                  "chapter_number": 3,
+                  "act": "Act II",
+                  "title": "Three",
+                  "objective": "Three",
+                  "conflict_turn": "Three",
+                  "character_turn": "Three",
+                  "reveal": "Three",
+                  "ending_state": "Three",
+                  "outcome_type": "win",
+                  "primary_obstacle": "Three",
+                  "cost_if_success": "Three",
+                  "side_character_friction": "Three",
+                  "concrete_ending_hook": {"trigger": "Three", "visible_object_or_actor": "Three", "next_problem": "Three"},
+                  "chapter_mode": "systems_crisis",
+                  "civilian_life_detail": "Three",
+                  "emotional_reveal": "Three",
+                  "ideology_pressure": "Three"
+                },
+                {
+                  "chapter_number": 4,
+                  "act": "Act II",
+                  "title": "Four",
+                  "objective": "Four",
+                  "conflict_turn": "Four",
+                  "character_turn": "Four",
+                  "reveal": "Four",
+                  "ending_state": "Four",
+                  "outcome_type": "setback",
+                  "primary_obstacle": "Four",
+                  "cost_if_success": "Four",
+                  "side_character_friction": "Four",
+                  "concrete_ending_hook": {"trigger": "Four", "visible_object_or_actor": "Four", "next_problem": "Four"},
+                  "chapter_mode": "systems_crisis",
+                  "civilian_life_detail": "Four",
+                  "emotional_reveal": "Four",
+                  "ideology_pressure": "Four"
+                }
+              ]
+            }
+            """,
+            requested_chapters=4,
+        )
+    except ValueError as exc:
+        assert "breather or aftermath" in str(exc)
+    else:
+        raise AssertionError("Expected the outline parser to require a breather or aftermath chapter.")
+
+
 def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> None:
     plan = parse_chapter_plan(
         """
@@ -246,7 +366,11 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "complication": "The spoof reveals Tarin's location.",
           "price_paid": "Iris permanently burns her badge and loses archive access.",
           "partial_failure_mode": "The drones still isolate Tarin's sector.",
-          "ending_hook_delivery": "End on the elevator opening beneath Tarin."
+          "ending_hook_delivery": "End on the elevator opening beneath Tarin.",
+          "emotional_anchor": "Iris feels the cost of losing her archive identity.",
+          "civilian_texture": "A worker passes a tea tin through the vent to Tarin.",
+          "ideology_clash": "Tarin argues that survival without consent is still surrender.",
+          "primary_interpersonal_conflict": "Tarin accuses Iris of treating people like systems."
         }
         """
     )
@@ -263,6 +387,9 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "side_character_independence_score": 6,
           "proper_noun_continuity_score": 8,
           "repetition_risk_score": 3,
+          "emotional_depth_score": 7,
+          "ideology_clarity_score": 8,
+          "civilian_texture_score": 6,
           "blocking_issues": ["The ending does not land on the planned object/action beat."],
           "soft_warnings": ["Tarin could resist harder in scene two."],
           "repair_scope": "targeted_scene_and_ending"
@@ -282,7 +409,13 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "timeline": ["Iris discovers the map.", "Iris burns her badge and escapes through the shaft."],
           "new_entities_introduced": [{"name": "Shaft Elevator", "kind": "artifact", "role": "Emergency lift", "aliases": ["maintenance elevator"]}],
           "entity_state_changes": {"Living Map": "It actively responds to Iris.", "Archive Security": "Now fully mobilized."},
-          "open_promises_by_name": {"map_name_source": "The map knows Iris's identity.", "tarin_exposed": "Tarin may be captured next chapter."}
+          "open_promises_by_name": {"map_name_source": "The map knows Iris's identity.", "tarin_exposed": "Tarin may be captured next chapter."},
+          "ideology_state_by_character": {"Iris": "Freedom still matters more than forced calm.", "Tarin": "Order is acceptable only if chosen."},
+          "ideology_shift_notes": {"Tarin": "Intentional hardening after the drone sweep."},
+          "memory_damage": {"Iris": "She loses the smell-memory of rain after decryption."},
+          "trust_fractures": {"Iris/Tarin": "Tarin no longer trusts Iris to weigh collateral costs."},
+          "civilian_pressure_points": ["Families in the shelter lose archive access and heating."],
+          "emotional_open_loops": {"Iris": "She fears she is choosing freedom with a damaged self."}
         }
         """
     )
@@ -290,6 +423,9 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert plan.price_paid.startswith("Iris permanently burns")
     assert critique.repair_scope == "targeted_scene_and_ending"
     assert continuity.new_entities_introduced[0].name == "Shaft Elevator"
+    assert plan.ideology_clash.startswith("Tarin argues")
+    assert critique.ideology_clarity_score == 8
+    assert continuity.memory_damage["Iris"].startswith("She loses")
 
 
 def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
@@ -306,6 +442,9 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
           "side_character_independence_score": 55,
           "proper_noun_continuity_score": 80,
           "repetition_risk_score": 30,
+          "emotional_depth_score": 60,
+          "ideology_clarity_score": 75,
+          "civilian_texture_score": 45,
           "blocking_issues": [],
           "soft_warnings": [],
           "repair_scope": "none"
@@ -319,6 +458,9 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
     assert critique.side_character_independence_score == 6
     assert critique.proper_noun_continuity_score == 8
     assert critique.repetition_risk_score == 3
+    assert critique.emotional_depth_score == 6
+    assert critique.ideology_clarity_score == 8
+    assert critique.civilian_texture_score == 5
 
 
 def test_rolling_context_uses_recent_completed_chapters() -> None:

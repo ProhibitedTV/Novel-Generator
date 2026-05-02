@@ -21,6 +21,9 @@ def _story_bible() -> dict:
                 "line_in_sand": "She will not erase consent for peace.",
                 "stance_on_core_conflict": "Freedom over order",
                 "relationship_to_protagonist": "Self",
+                "public_belief": "Consent matters more than engineered calm.",
+                "private_pressure": "She worries the colony may die if she is wrong.",
+                "stress_response": "She narrows into technical control and hides fear.",
             },
             {
                 "name": "Nadia",
@@ -29,6 +32,9 @@ def _story_bible() -> dict:
                 "line_in_sand": "She will not falsify records",
                 "stance_on_core_conflict": "Truth before comfort",
                 "relationship_to_protagonist": "Institutional ally",
+                "public_belief": "Truth must survive even when order is fragile.",
+                "private_pressure": "She fears chaos more than she admits.",
+                "stress_response": "She becomes rigid and procedural under threat.",
             },
         ],
         "canon_registry": [
@@ -65,6 +71,10 @@ def _outline_entry() -> dict:
             "visible_object_or_actor": "Its lens turns blue.",
             "next_problem": "It speaks in Nadia's voice.",
         },
+        "chapter_mode": "aftermath",
+        "civilian_life_detail": "Families in the archive shelter trade warmth packs and stale broth.",
+        "emotional_reveal": "Mara admits she is more afraid of obedience than death.",
+        "ideology_pressure": "Nadia forces Mara to justify risking frightened civilians for the truth.",
     }
 
 
@@ -80,6 +90,10 @@ def _plan() -> dict:
         "price_paid": "Nadia loses archive access and her trust in Mara cracks.",
         "partial_failure_mode": "Authority still learns which vault they entered.",
         "ending_hook_delivery": "End on the drone speaking in Nadia's voice.",
+        "emotional_anchor": "Mara feels what it costs to weaponize trust.",
+        "civilian_texture": "Children in the shelter sleep beside flickering heat coils.",
+        "ideology_clash": "Nadia argues that truth without shelter is just another cruelty.",
+        "primary_interpersonal_conflict": "Nadia refuses to keep enabling Mara's collateral damage.",
     }
 
 
@@ -94,6 +108,14 @@ def _ledger() -> dict:
         "active_entities": _story_bible()["canon_registry"],
         "entity_state_changes": {},
         "open_promises_by_name": {"signature_source": "The forged signature still has no source."},
+        "ideology_state_by_character": {
+            "Mara": "Consent matters more than engineered calm.",
+            "Nadia": "Truth must survive even when order is fragile.",
+        },
+        "memory_damage": {"Mara": "She is missing the smell-memory of rain after decryption."},
+        "trust_fractures": {"Mara/Nadia": "Nadia no longer trusts Mara to weigh civilian cost."},
+        "civilian_pressure_points": ["Families in shelter seven lost heating during the lockdown."],
+        "emotional_open_loops": {"Mara": "She fears she is choosing freedom with damaged memory."},
     }
 
 
@@ -164,3 +186,40 @@ def test_canonical_entity_collision_detection_finds_alias_drift() -> None:
 
     assert len(collisions) == 1
     assert "Canonical entity collision" in collisions[0]
+
+
+def test_breather_mode_lint_requires_emotional_and_civilian_followthrough() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Mara and Nadia moved from terminal to terminal while override warnings stacked across the vault. "
+            "Another countdown flashed red, and Mara forced one more backdoor open."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, _outline_entry(), _plan(), _story_bible(), _ledger(), [])
+
+    assert any("civilian-life detail" in item.lower() for item in result.blocking_issues)
+    assert any("emotional reveal" in item.lower() for item in result.blocking_issues)
+    assert any("breather or aftermath chapter but still centers technical problem-solving" in item.lower() for item in result.blocking_issues)
+
+
+def test_lint_flags_technical_escalation_fatigue() -> None:
+    systems_outline = {**_outline_entry(), "chapter_mode": "systems_crisis"}
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "The override failed under lockdown, then quarantine dropped, then the countdown resumed. "
+            "Mara warned that a power failure would trigger an emergency wipe and safe-mode collapse."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, systems_outline, _plan(), _story_bible(), _ledger(), [])
+
+    assert any("technical emergency beats" in item.lower() for item in result.soft_warnings)

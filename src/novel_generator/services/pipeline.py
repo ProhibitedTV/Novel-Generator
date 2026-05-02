@@ -120,6 +120,18 @@ def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
             "central_conflict": story_bible.logline,
             "ending_promise": story_bible.ending_promise,
         },
+        ideology_state_by_character={
+            agenda.name: agenda.public_belief or agenda.stance_on_core_conflict
+            for agenda in story_bible.character_agendas
+        },
+        memory_damage={},
+        trust_fractures={},
+        civilian_pressure_points=[],
+        emotional_open_loops={
+            agenda.name: agenda.private_pressure
+            for agenda in story_bible.character_agendas
+            if agenda.private_pressure
+        },
     )
 
 
@@ -162,7 +174,12 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
         timeline=timeline,
         active_entities=merge_canonical_entities(current_ledger.active_entities, update.new_entities_introduced),
         entity_state_changes={**current_ledger.entity_state_changes, **update.entity_state_changes},
-        open_promises_by_name=update.open_promises_by_name or current_ledger.open_promises_by_name,
+        open_promises_by_name={**current_ledger.open_promises_by_name, **update.open_promises_by_name},
+        ideology_state_by_character={**current_ledger.ideology_state_by_character, **update.ideology_state_by_character},
+        memory_damage={**current_ledger.memory_damage, **update.memory_damage},
+        trust_fractures={**current_ledger.trust_fractures, **update.trust_fractures},
+        civilian_pressure_points=_dedupe([*current_ledger.civilian_pressure_points, *update.civilian_pressure_points]),
+        emotional_open_loops={**current_ledger.emotional_open_loops, **update.emotional_open_loops},
     )
 
 
@@ -462,6 +479,21 @@ def _run_manuscript_qa(
             ),
             "atmospheric_repetition_findings": _dedupe(
                 [*qa_report.atmospheric_repetition_findings, *deterministic_notes["atmospheric_repetition_findings"]]
+            ),
+            "emotional_pacing_notes": _dedupe(
+                [*qa_report.emotional_pacing_notes, *deterministic_notes["emotional_pacing_notes"]]
+            ),
+            "ideology_consistency_findings": _dedupe(
+                [*qa_report.ideology_consistency_findings, *deterministic_notes["ideology_consistency_findings"]]
+            ),
+            "civilian_texture_findings": _dedupe(
+                [*qa_report.civilian_texture_findings, *deterministic_notes["civilian_texture_findings"]]
+            ),
+            "technical_escalation_fatigue_findings": _dedupe(
+                [
+                    *qa_report.technical_escalation_fatigue_findings,
+                    *deterministic_notes["technical_escalation_fatigue_findings"],
+                ]
             ),
         }
     )

@@ -59,6 +59,9 @@ class CharacterAgenda(BaseModel):
     line_in_sand: str
     stance_on_core_conflict: str
     relationship_to_protagonist: str
+    public_belief: str = ""
+    private_pressure: str = ""
+    stress_response: str = ""
 
 
 class CanonicalEntity(BaseModel):
@@ -112,6 +115,10 @@ class StructuredOutlineEntry(BaseModel):
     cost_if_success: str = ""
     side_character_friction: str = ""
     concrete_ending_hook: ConcreteEndingHook = Field(default_factory=ConcreteEndingHook)
+    chapter_mode: str = ""
+    civilian_life_detail: str = ""
+    emotional_reveal: str = ""
+    ideology_pressure: str = ""
 
 
 class ContinuityLedger(BaseModel):
@@ -124,6 +131,11 @@ class ContinuityLedger(BaseModel):
     active_entities: list[CanonicalEntity] = Field(default_factory=list)
     entity_state_changes: dict[str, str] = Field(default_factory=dict)
     open_promises_by_name: dict[str, str] = Field(default_factory=dict)
+    ideology_state_by_character: dict[str, str] = Field(default_factory=dict)
+    memory_damage: dict[str, str] = Field(default_factory=dict)
+    trust_fractures: dict[str, str] = Field(default_factory=dict)
+    civilian_pressure_points: list[str] = Field(default_factory=list)
+    emotional_open_loops: dict[str, str] = Field(default_factory=dict)
 
 
 class ChapterPlan(BaseModel):
@@ -137,6 +149,10 @@ class ChapterPlan(BaseModel):
     price_paid: str = ""
     partial_failure_mode: str = ""
     ending_hook_delivery: str = ""
+    emotional_anchor: str = ""
+    civilian_texture: str = ""
+    ideology_clash: str = ""
+    primary_interpersonal_conflict: str = ""
 
 
 class ChapterContinuityUpdate(BaseModel):
@@ -151,6 +167,12 @@ class ChapterContinuityUpdate(BaseModel):
     new_entities_introduced: list[CanonicalEntity] = Field(default_factory=list)
     entity_state_changes: dict[str, str] = Field(default_factory=dict)
     open_promises_by_name: dict[str, str] = Field(default_factory=dict)
+    ideology_state_by_character: dict[str, str] = Field(default_factory=dict)
+    ideology_shift_notes: dict[str, str] = Field(default_factory=dict)
+    memory_damage: dict[str, str] = Field(default_factory=dict)
+    trust_fractures: dict[str, str] = Field(default_factory=dict)
+    civilian_pressure_points: list[str] = Field(default_factory=list)
+    emotional_open_loops: dict[str, str] = Field(default_factory=dict)
 
 
 class ChapterCritique(BaseModel):
@@ -164,6 +186,9 @@ class ChapterCritique(BaseModel):
     side_character_independence_score: int = Field(default=0, ge=0, le=10)
     proper_noun_continuity_score: int = Field(default=0, ge=0, le=10)
     repetition_risk_score: int = Field(default=0, ge=0, le=10)
+    emotional_depth_score: int = Field(default=0, ge=0, le=10)
+    ideology_clarity_score: int = Field(default=0, ge=0, le=10)
+    civilian_texture_score: int = Field(default=0, ge=0, le=10)
     blocking_issues: list[str] = Field(default_factory=list)
     soft_warnings: list[str] = Field(default_factory=list)
     repair_scope: str = "none"
@@ -175,6 +200,9 @@ class ChapterCritique(BaseModel):
         "side_character_independence_score",
         "proper_noun_continuity_score",
         "repetition_risk_score",
+        "emotional_depth_score",
+        "ideology_clarity_score",
+        "civilian_texture_score",
         mode="before",
     )
     @classmethod
@@ -208,6 +236,10 @@ class ManuscriptQaReport(BaseModel):
     proper_noun_continuity_findings: list[str] = Field(default_factory=list)
     side_character_agency_notes: list[str] = Field(default_factory=list)
     atmospheric_repetition_findings: list[str] = Field(default_factory=list)
+    emotional_pacing_notes: list[str] = Field(default_factory=list)
+    ideology_consistency_findings: list[str] = Field(default_factory=list)
+    civilian_texture_findings: list[str] = Field(default_factory=list)
+    technical_escalation_fatigue_findings: list[str] = Field(default_factory=list)
 
 
 class ProviderCapabilities(BaseModel):

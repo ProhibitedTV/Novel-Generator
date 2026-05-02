@@ -39,6 +39,9 @@ def _story_bible_json() -> str:
                     "line_in_sand": "She will not erase consent for peace.",
                     "stance_on_core_conflict": "Freedom matters more than imposed order.",
                     "relationship_to_protagonist": "Self",
+                    "public_belief": "No city deserves survival through coerced obedience.",
+                    "private_pressure": "Iris worries the city may collapse if she is wrong.",
+                    "stress_response": "She doubles down on control when afraid.",
                 },
                 {
                     "name": "Tarin",
@@ -47,6 +50,9 @@ def _story_bible_json() -> str:
                     "line_in_sand": "He will not trust any sentient system twice.",
                     "stance_on_core_conflict": "Order is acceptable only if it is chosen.",
                     "relationship_to_protagonist": "Reluctant ally",
+                    "public_belief": "Order only counts if people still get to choose it.",
+                    "private_pressure": "He fears chaos because he has survived a module collapse before.",
+                    "stress_response": "He hardens and withdraws trust under pressure.",
                 },
             ],
             "canon_registry": [
@@ -63,6 +69,7 @@ def _story_bible_json() -> str:
             "prose_guardrails": [
                 "Do not end chapters with abstract future-stakes summaries.",
                 "Force technical wins to cost access, trust, or safety.",
+                "Every fourth chapter must breathe and reconnect the crisis to human life.",
             ],
             "ending_promise": "Iris must choose between saving the city and keeping free will intact.",
         }
@@ -71,6 +78,28 @@ def _story_bible_json() -> str:
 
 def _outline_json(chapters: int) -> str:
     outcome_types = ["setback", "reversal", "win", "setback", "reversal"]
+    chapter_modes = ["systems_crisis", "aftermath", "investigation", "breather", "reversal"]
+    civilian_details = [
+        "Families ration heat tabs in the archive corridor.",
+        "Shelter families trade broth cups beside failing heat cloths.",
+        "Exhausted workers pass bread tokens through the checkpoint queue.",
+        "Children wait for filtered water while elders swap blankets in silence.",
+        "Repair crews sleep in public transit pods while vendors count the dark stalls.",
+    ]
+    emotional_reveals = [
+        "Iris admits the living map has started to feel like a grief she can touch.",
+        "Iris admits she fears obedience more than collapse.",
+        "Tarin admits he would rather flee than trust another sentient system.",
+        "Iris admits she no longer trusts her own memory of the city.",
+        "Tarin admits order only feels safe when someone else pays for it.",
+    ]
+    ideology_pressures = [
+        "Tarin pushes Iris to justify risking frightened civilians for buried truth.",
+        "Tarin demands to know why frightened civilians should pay for Iris's truth.",
+        "A foreman argues that consent is meaningless if the pumps fail by dawn.",
+        "A shelter medic says freedom speeches mean nothing without breathable air.",
+        "A transit chief insists that survival first is still a moral choice.",
+    ]
     payload = {
         "chapters": [
             {
@@ -91,6 +120,10 @@ def _outline_json(chapters: int) -> str:
                     "visible_object_or_actor": f"Visible actor {index}",
                     "next_problem": f"Next problem {index}",
                 },
+                "chapter_mode": chapter_modes[index - 1] if index - 1 < len(chapter_modes) else ("breather" if index % 4 == 0 else "systems_crisis"),
+                "civilian_life_detail": civilian_details[index - 1] if index - 1 < len(civilian_details) else f"Civilian detail {index}",
+                "emotional_reveal": emotional_reveals[index - 1] if index - 1 < len(emotional_reveals) else f"Emotional reveal {index}",
+                "ideology_pressure": ideology_pressures[index - 1] if index - 1 < len(ideology_pressures) else f"Ideology pressure {index}",
             }
             for index in range(1, chapters + 1)
         ]
@@ -111,6 +144,10 @@ def _plan_json(index: int) -> str:
             "price_paid": f"Price paid {index}",
             "partial_failure_mode": f"Partial failure {index}",
             "ending_hook_delivery": f"Ending hook delivery {index}",
+            "emotional_anchor": f"Emotional anchor {index}",
+            "civilian_texture": f"Civilian texture {index}",
+            "ideology_clash": f"Ideology clash {index}",
+            "primary_interpersonal_conflict": f"Primary interpersonal conflict {index}",
         }
     )
 
@@ -128,6 +165,9 @@ def _critique_json(*, revision_required: bool) -> str:
             "side_character_independence_score": 6,
             "proper_noun_continuity_score": 8,
             "repetition_risk_score": 3,
+            "emotional_depth_score": 7 if revision_required else 8,
+            "ideology_clarity_score": 7 if revision_required else 8,
+            "civilian_texture_score": 6 if revision_required else 8,
             "blocking_issues": ["The ending is still too abstract."] if revision_required else [],
             "soft_warnings": ["Tarin should push back harder."] if revision_required else [],
             "repair_scope": "targeted_scene_and_ending" if revision_required else "none",
@@ -156,6 +196,15 @@ def _continuity_json(index: int) -> str:
             ],
             "entity_state_changes": {f"Entity {index}": f"State change {index}"},
             "open_promises_by_name": {f"Promise {index}": f"Why promise {index} is still live"},
+            "ideology_state_by_character": {
+                "Iris": f"Ideology state {index} for Iris",
+                "Tarin": f"Ideology state {index} for Tarin",
+            },
+            "ideology_shift_notes": {"Iris": f"Shift note {index}"},
+            "memory_damage": {"Iris": f"Memory damage {index}"},
+            "trust_fractures": {"Iris/Tarin": f"Trust fracture {index}"},
+            "civilian_pressure_points": [f"Civilian pressure {index}"],
+            "emotional_open_loops": {"Iris": f"Emotional loop {index}"},
         }
     )
 
@@ -188,6 +237,10 @@ def _qa_report_json() -> str:
             "proper_noun_continuity_findings": ["Track whether the map and Living Map are treated as the same system."],
             "side_character_agency_notes": ["Tarin still needs one harder refusal."],
             "atmospheric_repetition_findings": ["Watch for repeated luminous-stone phrasing."],
+            "emotional_pacing_notes": ["The story needs one more breather after the midpoint surge."],
+            "ideology_consistency_findings": ["Track whether Tarin's survival doctrine hardens intentionally."],
+            "civilian_texture_findings": ["Show more concrete shelter life when the city locks down."],
+            "technical_escalation_fatigue_findings": ["Watch for stacked alert language in late Act II."],
         }
     )
 
@@ -261,19 +314,23 @@ def test_approved_run_completes_and_generates_qa_report(configured_environment) 
         session.commit()
 
         resume_client = FakeOllamaClient(
-            [
-                _plan_json(1),
-                "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor and the next problem 1 is the only route left.",
-                _critique_json(revision_required=False),
-                "Iris discovers the living map and commits to following it underground.",
-                _continuity_json(1),
-                _plan_json(2),
-                "Iris and Tarin descend while Tarin resists the map's pull. Trigger 2 hits when the visible actor 2 wakes beneath them and the next problem 2 forces a deeper descent.",
-                _critique_json(revision_required=False),
-                "Iris and Tarin descend farther and realize the city has been steering them.",
-                _continuity_json(2),
-                _qa_report_json(),
-            ]
+                [
+                    _plan_json(1),
+                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor and the next problem 1 is the only route left.",
+                    _critique_json(revision_required=False),
+                    "Iris discovers the living map and commits to following it underground.",
+                    _continuity_json(1),
+                    _plan_json(2),
+                    (
+                        "Iris and Tarin move through the shelter corridor where families trade broth cups beside failing heat cloths. "
+                        "Tarin resists the pull to run, then demands to know why frightened civilians should pay for Iris's truth, and Iris admits she fears obedience more than collapse. "
+                        "Trigger 2 hits when the visible actor 2 wakes beneath them and the next problem 2 forces a deeper descent."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris and Tarin descend farther and realize the city has been steering them.",
+                    _continuity_json(2),
+                    _qa_report_json(),
+                ]
         )
         process_run_safe(session, paused, settings, resume_client)
 
@@ -334,6 +391,7 @@ def test_revision_pass_updates_chapter_and_continuity_ledger(configured_environm
         assert "Chapter 1" not in chapter.content
         assert refreshed.continuity_ledger["current_patch_status"] == "Patch status after chapter 1"
         assert refreshed.continuity_ledger["active_entities"]
+        assert refreshed.continuity_ledger["memory_damage"]["Iris"] == "Memory damage 1"
 
 
 def test_canonical_entity_collision_hard_fails_run(configured_environment) -> None:
@@ -391,21 +449,25 @@ def test_continuity_ledger_carries_entities_forward_across_completed_chapters(co
             run,
             settings,
             FakeOllamaClient(
-                [
-                    _story_bible_json(),
-                    _outline_json(2),
-                    _plan_json(1),
-                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor and the next problem 1 is the only route left.",
-                    _critique_json(revision_required=False),
-                    "Iris discovers the living map and commits to following it underground.",
-                    _continuity_json(1),
-                    _plan_json(2),
-                    "Iris and Tarin descend while Tarin resists the map's pull. Trigger 2 hits when the visible actor 2 wakes beneath them and the next problem 2 forces a deeper descent.",
-                    _critique_json(revision_required=False),
-                    "Iris and Tarin descend farther and realize the city has been steering them.",
-                    _continuity_json(2),
-                    _qa_report_json(),
-                ]
+                    [
+                        _story_bible_json(),
+                        _outline_json(2),
+                        _plan_json(1),
+                        "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor and the next problem 1 is the only route left.",
+                        _critique_json(revision_required=False),
+                        "Iris discovers the living map and commits to following it underground.",
+                        _continuity_json(1),
+                        _plan_json(2),
+                        (
+                            "Iris and Tarin move through the shelter corridor where families trade broth cups beside failing heat cloths. "
+                            "Tarin resists the pull to run, then demands to know why frightened civilians should pay for Iris's truth, and Iris admits she fears obedience more than collapse. "
+                            "Trigger 2 hits when the visible actor 2 wakes beneath them and the next problem 2 forces a deeper descent."
+                        ),
+                        _critique_json(revision_required=False),
+                        "Iris and Tarin descend farther and realize the city has been steering them.",
+                        _continuity_json(2),
+                        _qa_report_json(),
+                    ]
             ),
         )
 
@@ -415,6 +477,8 @@ def test_continuity_ledger_carries_entities_forward_across_completed_chapters(co
         assert "Living Map" in names
         assert "Entity 1" in names
         assert "Entity 2" in names
+        assert refreshed.continuity_ledger["trust_fractures"]["Iris/Tarin"] == "Trust fracture 2"
+        assert refreshed.continuity_ledger["civilian_pressure_points"][-1] == "Civilian pressure 2"
 
 
 def test_v1_regeneration_creates_fresh_v2_structure(configured_environment) -> None:
