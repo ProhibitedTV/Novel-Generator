@@ -12,16 +12,20 @@ def test_export_run_artifacts_writes_manuscript_and_qa_report_without_duplicate_
         requested_chapters=2,
         min_words_per_chapter=900,
         max_words_per_chapter=1200,
+        preferred_provider_name="ollama",
         preferred_model="test-model",
+        task_routing={},
     )
     run = GenerationRun(
         id="run-1",
         project_id="project-1",
+        provider_name="ollama",
         model_name="test-model",
         target_word_count=2000,
         requested_chapters=2,
         min_words_per_chapter=900,
         max_words_per_chapter=1200,
+        task_routing={},
         current_step="completed",
     )
     chapters = [

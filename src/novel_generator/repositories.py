@@ -18,29 +18,66 @@ from .models import (
 )
 from .schemas import ProjectCreate, ProjectUpdate, ProviderConfigUpdate, RunCreate
 from .services.prompts import outline_summary_from_entry
+from .services.providers import PROVIDER_DEFINITIONS, provider_definition
 from .settings import Settings
 
 TERMINAL_RUN_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
 
 
-def ensure_provider_config(session: Session, settings: Settings) -> ProviderConfig:
-    config = session.scalar(select(ProviderConfig).where(ProviderConfig.provider_name == "ollama"))
+def _normalized_task_routing(raw_routing) -> dict:
+    if raw_routing is None:
+        return {}
+    if hasattr(raw_routing, "model_dump"):
+        return raw_routing.model_dump(exclude_none=True)
+    return dict(raw_routing)
+
+
+def _provider_seed_defaults(settings: Settings, provider_name: str) -> dict[str, object]:
+    definition = provider_definition(provider_name)
+    if provider_name == "ollama":
+        return {
+            "provider_name": "ollama",
+            "base_url": settings.ollama_base_url,
+            "default_model": settings.default_model,
+            "api_key": None,
+            "is_enabled": True,
+        }
+    return {
+        "provider_name": definition.name,
+        "base_url": settings.openai_compatible_base_url,
+        "default_model": settings.openai_compatible_default_model,
+        "api_key": settings.openai_compatible_api_key or None,
+        "is_enabled": False,
+    }
+
+
+def ensure_provider_config(session: Session, settings: Settings, provider_name: str = "ollama") -> ProviderConfig:
+    config = session.scalar(select(ProviderConfig).where(ProviderConfig.provider_name == provider_name))
     if config is None:
-        config = ProviderConfig(
-            provider_name="ollama",
-            base_url=settings.ollama_base_url,
-            default_model=settings.default_model,
-            is_enabled=True,
-        )
+        config = ProviderConfig(**_provider_seed_defaults(settings, provider_name))
         session.add(config)
         session.flush()
     return config
 
 
-def update_provider_config(session: Session, settings: Settings, payload: ProviderConfigUpdate) -> ProviderConfig:
-    config = ensure_provider_config(session, settings)
+def ensure_provider_configs(session: Session, settings: Settings) -> list[ProviderConfig]:
+    configs = [ensure_provider_config(session, settings, provider_name) for provider_name in PROVIDER_DEFINITIONS]
+    session.flush()
+    return sorted(configs, key=lambda item: (0 if item.provider_name == "ollama" else 1, item.provider_name))
+
+
+def update_provider_config(
+    session: Session,
+    settings: Settings,
+    provider_name: str,
+    payload: ProviderConfigUpdate,
+) -> ProviderConfig:
+    config = ensure_provider_config(session, settings, provider_name)
     config.base_url = payload.base_url.rstrip("/")
     config.default_model = payload.default_model.strip()
+    if payload.api_key is not None:
+        config.api_key = payload.api_key or None
+    config.is_enabled = payload.is_enabled
     config.updated_at = datetime.utcnow()
     session.flush()
     return config
@@ -139,12 +176,16 @@ def get_artifact(session: Session, artifact_id: str) -> Artifact | None:
 
 
 def create_run(session: Session, project: Project, payload: RunCreate) -> GenerationRun:
+    provider_name = (payload.provider_name or project.preferred_provider_name or "ollama").strip()
     model_name = (payload.model_name or project.preferred_model).strip()
     target_word_count = payload.target_word_count or project.desired_word_count
     requested_chapters = payload.requested_chapters or project.requested_chapters
     min_words_per_chapter = payload.min_words_per_chapter or project.min_words_per_chapter
     max_words_per_chapter = payload.max_words_per_chapter or project.max_words_per_chapter
+    task_routing = _normalized_task_routing(payload.task_routing) if payload.task_routing is not None else deepcopy(project.task_routing or {})
 
+    if not provider_name:
+        raise ValueError("A provider name is required.")
     if not model_name:
         raise ValueError("A model name is required.")
     if max_words_per_chapter < min_words_per_chapter:
@@ -152,6 +193,7 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
 
     run = GenerationRun(
         project_id=project.id,
+        provider_name=provider_name,
         model_name=model_name,
         target_word_count=target_word_count,
         requested_chapters=requested_chapters,
@@ -159,6 +201,7 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
         max_words_per_chapter=max_words_per_chapter,
         pipeline_version=2,
         pause_after_outline=payload.pause_after_outline,
+        task_routing=task_routing,
         status=RunStatus.QUEUED,
         current_step="queued",
         source_run_id=payload.source_run_id,
@@ -210,6 +253,14 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
                     "open_threads": deepcopy(latest.get("open_threads", [])),
                     "resolved_threads": deepcopy(latest.get("resolved_threads", [])),
                     "timeline": deepcopy(latest.get("timeline", [])),
+                    "active_entities": deepcopy((source_run.continuity_ledger or {}).get("active_entities", [])),
+                    "entity_state_changes": deepcopy(latest.get("entity_state_changes", {})),
+                    "open_promises_by_name": deepcopy(latest.get("open_promises_by_name", {})),
+                    "ideology_state_by_character": deepcopy(latest.get("ideology_state_by_character", {})),
+                    "memory_damage": deepcopy(latest.get("memory_damage", {})),
+                    "trust_fractures": deepcopy(latest.get("trust_fractures", {})),
+                    "civilian_pressure_points": deepcopy(latest.get("civilian_pressure_points", [])),
+                    "emotional_open_loops": deepcopy(latest.get("emotional_open_loops", {})),
                 }
             session.flush()
         else:

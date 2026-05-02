@@ -18,6 +18,7 @@ from ..repositories import (
     delete_run,
     delete_terminal_runs_for_project,
     ensure_provider_config,
+    ensure_provider_configs,
     get_artifact,
     get_project,
     get_run,
@@ -32,10 +33,12 @@ from ..schemas import (
     ProjectRead,
     ProjectUpdate,
     ProviderCapabilities,
+    ProviderConfigRead,
     ProviderConfigUpdate,
     RunCreate,
 )
-from ..services.ollama import OllamaClient, OllamaError, OllamaTransportError
+from ..services.provider_errors import ProviderError, ProviderTransportError
+from ..services.providers import ProviderManager, provider_definition
 from ..services.state import approve_outline_review, request_run_cancellation
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
 from ..settings import Settings
@@ -44,15 +47,56 @@ router = APIRouter(tags=["api"])
 TERMINAL_RUN_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
 
 
-def _provider_client(settings: Settings, db: Session) -> tuple[OllamaClient, str]:
-    config = ensure_provider_config(db, settings)
+def _provider_manager(settings: Settings, db: Session) -> ProviderManager:
+    configs = ensure_provider_configs(db, settings)
     db.commit()
-    client = OllamaClient(
+    return ProviderManager(settings, configs)
+
+
+def _provider_config_read(config) -> ProviderConfigRead:
+    return ProviderConfigRead(
+        provider_name=config.provider_name,
         base_url=config.base_url,
-        timeout_seconds=settings.ollama_timeout_seconds,
-        max_retries=settings.ollama_max_retries,
+        default_model=config.default_model,
+        api_key_set=bool(config.api_key),
+        is_enabled=config.is_enabled,
+        created_at=config.created_at,
+        updated_at=config.updated_at,
     )
-    return client, config.default_model
+
+
+def _normalized_task_routing(raw_routing) -> dict:
+    if raw_routing is None:
+        return {}
+    if hasattr(raw_routing, "model_dump"):
+        return raw_routing.model_dump(exclude_none=True)
+    return dict(raw_routing)
+
+
+def _validate_routing_models(
+    manager: ProviderManager,
+    default_provider_name: str,
+    default_model_name: str,
+    task_routing: dict,
+) -> None:
+    routes = {(default_provider_name.strip(), default_model_name.strip())}
+    for stage, override in (task_routing or {}).items():
+        if not override:
+            continue
+        provider_name = str(override.get("provider_name") or default_provider_name).strip()
+        model_name = str(override.get("model_name") or default_model_name).strip()
+        if not provider_name:
+            raise ProviderError(f"No provider was configured for stage '{stage}'.")
+        if not model_name:
+            raise ProviderError(f"No model was configured for stage '{stage}'.")
+        config = manager.config_for(provider_name)
+        if not config.is_enabled:
+            label = provider_definition(provider_name).label
+            raise ProviderError(f"{label} is disabled. Enable it in provider settings before using it in a run.")
+        routes.add((provider_name, model_name))
+
+    for provider_name, model_name in routes:
+        manager.ensure_model(provider_name, model_name)
 
 
 def _validated_project_update(project, payload: ProjectUpdate) -> ProjectUpdate:
@@ -63,9 +107,11 @@ def _validated_project_update(project, payload: ProjectUpdate) -> ProjectUpdate:
         "requested_chapters": project.requested_chapters,
         "min_words_per_chapter": project.min_words_per_chapter,
         "max_words_per_chapter": project.max_words_per_chapter,
+        "preferred_provider_name": project.preferred_provider_name,
         "preferred_model": project.preferred_model,
         "notes": project.notes,
         "story_brief": project.story_brief or {},
+        "task_routing": project.task_routing or {},
     }
     merged.update(payload.model_dump(exclude_unset=True))
     validated = ProjectCreate.model_validate(merged)
@@ -75,40 +121,86 @@ def _validated_project_update(project, payload: ProjectUpdate) -> ProjectUpdate:
 def _same_settings_payload(run, *, pause_after_outline: bool = True) -> RunCreate:
     return RunCreate(
         project_id=run.project_id,
+        provider_name=run.provider_name,
         model_name=run.model_name,
         target_word_count=run.target_word_count,
         requested_chapters=run.requested_chapters,
         min_words_per_chapter=run.min_words_per_chapter,
         max_words_per_chapter=run.max_words_per_chapter,
         pause_after_outline=pause_after_outline,
+        task_routing=run.task_routing or {},
     )
 
 
 @router.get("/health")
 def health(db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)) -> dict:
-    client, default_model = _provider_client(settings, db)
-    provider = client.health(default_model)
+    manager = _provider_manager(settings, db)
+    primary_provider = manager.health("ollama")
+    providers = [manager.health(provider_name).model_dump() for provider_name in ("ollama", "openai_compatible")]
     return {
         "status": "ok",
         "timestamp": datetime.utcnow().isoformat(),
         "database": "ok",
-        "provider": provider.model_dump(),
+        "provider": primary_provider.model_dump(),
+        "providers": providers,
     }
+
+
+@router.get("/providers", response_model=list[ProviderConfigRead])
+def list_provider_configs_api(db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)) -> list[ProviderConfigRead]:
+    return [_provider_config_read(config) for config in ensure_provider_configs(db, settings)]
+
+
+@router.get("/providers/{provider_name}/status", response_model=ProviderCapabilities)
+def provider_status(
+    provider_name: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> ProviderCapabilities:
+    manager = _provider_manager(settings, db)
+    try:
+        return manager.health(provider_name)
+    except ProviderError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/providers/ollama/status", response_model=ProviderCapabilities)
 def ollama_status(db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)) -> ProviderCapabilities:
-    client, default_model = _provider_client(settings, db)
-    return client.health(default_model)
+    return provider_status("ollama", db, settings)
+
+
+@router.get("/providers/{provider_name}/models")
+def provider_models(provider_name: str, db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)) -> dict:
+    manager = _provider_manager(settings, db)
+    try:
+        return {"models": manager.list_models(provider_name)}
+    except ProviderError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProviderTransportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/providers/ollama/models")
 def ollama_models(db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)) -> dict:
-    client, _ = _provider_client(settings, db)
+    return provider_models("ollama", db, settings)
+
+
+@router.post("/providers/{provider_name}/config", response_model=ProviderCapabilities)
+def update_provider_api(
+    provider_name: str,
+    payload: ProviderConfigUpdate,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+) -> ProviderCapabilities:
+    from ..repositories import update_provider_config
+
     try:
-        return {"models": client.list_models()}
-    except OllamaTransportError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        config = update_provider_config(db, settings, provider_name, payload)
+    except ProviderError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    db.commit()
+    manager = _provider_manager(settings, db)
+    return manager.health(config.provider_name)
 
 
 @router.post("/providers/ollama/config", response_model=ProviderCapabilities)
@@ -117,16 +209,7 @@ def update_ollama_config(
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ) -> ProviderCapabilities:
-    from ..repositories import update_provider_config
-
-    config = update_provider_config(db, settings, payload)
-    db.commit()
-    client = OllamaClient(
-        base_url=config.base_url,
-        timeout_seconds=settings.ollama_timeout_seconds,
-        max_retries=settings.ollama_max_retries,
-    )
-    return client.health(config.default_model)
+    return update_provider_api("ollama", payload, db, settings)
 
 
 @router.post("/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
@@ -208,23 +291,35 @@ def api_create_run(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found.")
 
-    client, default_model = _provider_client(settings, db)
-    model_name = (payload.model_name or project.preferred_model or default_model).strip()
+    manager = _provider_manager(settings, db)
+    provider_name = (payload.provider_name or project.preferred_provider_name or "ollama").strip()
+    try:
+        provider_config = manager.config_for(provider_name)
+    except ProviderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    model_name = (payload.model_name or project.preferred_model or provider_config.default_model).strip()
+    task_routing = _normalized_task_routing(payload.task_routing) or dict(project.task_routing or {})
     if not model_name:
         raise HTTPException(status_code=400, detail="A model name is required.")
     try:
-        client.ensure_model(model_name)
-    except OllamaTransportError as exc:
+        _validate_routing_models(manager, provider_name, model_name, task_routing)
+    except ProviderTransportError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except OllamaError as exc:
+    except ProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    payload = payload.model_copy(update={"model_name": model_name})
+    payload = payload.model_copy(update={"provider_name": provider_name, "model_name": model_name, "task_routing": task_routing})
     try:
         run = create_run(db, project, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    record_event(db, run, "run_queued", {"message": "Run queued for processing."})
+    record_event(
+        db,
+        run,
+        "run_queued",
+        {"message": "Run queued for processing.", "provider_name": provider_name, "model_name": model_name},
+    )
     db.commit()
     run = get_run(db, run.id)
     return GenerationRunRead.model_validate(run)
@@ -293,17 +388,22 @@ def api_rerun(
     if run.status not in TERMINAL_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Wait for the current run to finish before re-queueing it.")
 
-    client, _ = _provider_client(settings, db)
+    manager = _provider_manager(settings, db)
     try:
-        client.ensure_model(run.model_name)
-    except OllamaTransportError as exc:
+        _validate_routing_models(manager, run.provider_name, run.model_name, run.task_routing or {})
+    except ProviderTransportError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except OllamaError as exc:
+    except ProviderError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     payload = _same_settings_payload(run, pause_after_outline=True)
     new_run = create_run(db, run.project, payload)
-    record_event(db, new_run, "run_queued", {"message": "Run re-queued with the same settings."})
+    record_event(
+        db,
+        new_run,
+        "run_queued",
+        {"message": "Run re-queued with the same settings.", "provider_name": run.provider_name, "model_name": run.model_name},
+    )
     db.commit()
     new_run = get_run(db, new_run.id)
     return GenerationRunRead.model_validate(new_run)

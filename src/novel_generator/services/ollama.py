@@ -6,13 +6,14 @@ from collections.abc import Callable
 import httpx
 
 from ..schemas import ProviderCapabilities
+from .provider_errors import ProviderError, ProviderTransportError
 
 
-class OllamaError(RuntimeError):
+class OllamaError(ProviderError):
     pass
 
 
-class OllamaTransportError(OllamaError):
+class OllamaTransportError(ProviderTransportError, OllamaError):
     pass
 
 
@@ -100,6 +101,7 @@ class OllamaClient:
         try:
             models = self.list_models()
             return ProviderCapabilities(
+                provider_name="ollama",
                 reachable=True,
                 base_url=self.base_url,
                 default_model=default_model,
@@ -107,6 +109,7 @@ class OllamaClient:
             )
         except OllamaTransportError as exc:
             return ProviderCapabilities(
+                provider_name="ollama",
                 reachable=False,
                 base_url=self.base_url,
                 default_model=default_model,

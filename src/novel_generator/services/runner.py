@@ -4,10 +4,10 @@ import logging
 import time
 
 from ..db import build_session_factory
-from ..repositories import claim_next_queued_run, ensure_provider_config, get_run_for_processing, recover_running_runs
+from ..repositories import claim_next_queued_run, ensure_provider_configs, get_run_for_processing, recover_running_runs
 from ..settings import Settings
-from .ollama import OllamaClient
 from .pipeline import process_run_safe
+from .providers import ProviderManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,13 +36,9 @@ def run_worker_loop(settings: Settings) -> None:
             run = get_run_for_processing(session, run_id)
             if run is None:
                 continue
-            provider_config = ensure_provider_config(session, settings)
+            provider_configs = ensure_provider_configs(session, settings)
             session.commit()
-            client = OllamaClient(
-                base_url=provider_config.base_url,
-                timeout_seconds=settings.ollama_timeout_seconds,
-                max_retries=settings.ollama_max_retries,
-            )
+            client = ProviderManager(settings, provider_configs)
             try:
                 process_run_safe(session, run, settings, client)
             except Exception:

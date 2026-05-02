@@ -24,6 +24,7 @@
     <div><dt>Target words</dt><dd>{{ project.desired_word_count }}</dd></div>
     <div><dt>Requested chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
     <div><dt>Chapter range</dt><dd>{{ project.min_words_per_chapter }}-{{ project.max_words_per_chapter }}</dd></div>
+    <div><dt>Preferred provider</dt><dd>{{ project.preferred_provider_name }}</dd></div>
     <div><dt>Preferred model</dt><dd class="long-value">{{ project.preferred_model }}</dd></div>
   </dl>
 </section>
@@ -66,6 +67,18 @@
             <textarea class="{{ 'input-invalid' if edit_errors.premise }}" name="premise" rows="5" required>{{ edit_values.premise }}</textarea>
           </label>
           {% if edit_errors.premise %}<p class="field-error">{{ edit_errors.premise }}</p>{% endif %}
+
+          <label>
+            Preferred provider
+            <select name="preferred_provider_name">
+              {% for option in provider_options %}
+                <option value="{{ option.name }}" {% if edit_values.preferred_provider_name == option.name %}selected{% endif %}>
+                  {{ option.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+          {% if edit_errors.preferred_provider_name %}<p class="field-error">{{ edit_errors.preferred_provider_name }}</p>{% endif %}
 
           <label>
             Preferred model
@@ -181,6 +194,34 @@
         </div>
       </div>
 
+      <div class="form-section">
+        <div class="section-header-copy">
+          <h3>Advanced per-task routing</h3>
+          <p>Optional overrides for planning, drafting, editing, and QA. Leave blank to keep the project default provider/model for everything.</p>
+        </div>
+        <div class="routing-grid">
+          {% for row in edit_task_route_rows %}
+            <div class="routing-row">
+              <label>
+                {{ row.label }} provider
+                <select name="{{ row.provider_field }}">
+                  <option value="">Use project default</option>
+                  {% for option in provider_options %}
+                    <option value="{{ option.name }}" {% if row.provider_name == option.name %}selected{% endif %}>{{ option.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                {{ row.label }} model
+                <input type="text" name="{{ row.model_field }}" value="{{ row.model_name }}" placeholder="Leave blank to use the project default">
+              </label>
+              {% if edit_errors[row.provider_field] %}<p class="field-error">{{ edit_errors[row.provider_field] }}</p>{% endif %}
+              {% if edit_errors[row.model_field] %}<p class="field-error">{{ edit_errors[row.model_field] }}</p>{% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
       <div class="form-actions">
         <button type="submit">Save project defaults</button>
       </div>
@@ -203,11 +244,21 @@
 
     <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form">
       <label>
+        Provider
+        <select name="provider_name">
+          {% for option in provider_options %}
+            <option value="{{ option.name }}" {% if run_values.provider_name == option.name %}selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if run_errors.provider_name %}<p class="field-error">{{ run_errors.provider_name }}</p>{% endif %}
+
+      <label>
         Model
         <input id="project-run-model" data-model-input class="{{ 'input-invalid' if run_errors.model_name }}" type="text" name="model_name" value="{{ run_values.model_name }}" required>
       </label>
       {% if run_errors.model_name %}<p class="field-error">{{ run_errors.model_name }}</p>{% endif %}
-      <p class="field-note">Pick a detected model for the safest first-run experience, or type one manually if you already know it exists in Ollama.</p>
+      <p class="field-note">The run inherits this project's advanced task routing. Verified chips below still reflect the saved Ollama connection for the default self-hosted path.</p>
 
       {% if provider_status.available_models %}
         <div class="model-picker">
@@ -383,6 +434,7 @@
                 <span class="run-row-title long-value">{{ run.model_name }}</span>
               </div>
               <div class="meta-chip-row">
+                <span class="meta-chip">{{ run.provider_name }}</span>
                 <span class="meta-chip">{{ run.requested_chapters }} chapters requested</span>
                 <span class="meta-chip">{{ run.current_step.replace("_", " ") }}</span>
                 <span class="meta-chip">v{{ run.pipeline_version or 1 }}</span>

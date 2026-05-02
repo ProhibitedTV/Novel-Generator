@@ -242,6 +242,30 @@ class ManuscriptQaReport(BaseModel):
     technical_escalation_fatigue_findings: list[str] = Field(default_factory=list)
 
 
+class TaskRouteOverride(BaseModel):
+    provider_name: str = Field(min_length=1)
+    model_name: str = Field(min_length=1)
+
+    @field_validator("provider_name", "model_name", mode="before")
+    @classmethod
+    def validate_route_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+
+class TaskRouting(BaseModel):
+    story_bible: TaskRouteOverride | None = None
+    outline: TaskRouteOverride | None = None
+    chapter_plan: TaskRouteOverride | None = None
+    chapter_draft: TaskRouteOverride | None = None
+    chapter_critique: TaskRouteOverride | None = None
+    chapter_revision: TaskRouteOverride | None = None
+    chapter_summary: TaskRouteOverride | None = None
+    continuity_update: TaskRouteOverride | None = None
+    manuscript_qa: TaskRouteOverride | None = None
+
+
 class ProviderCapabilities(BaseModel):
     provider_name: str = "ollama"
     reachable: bool
@@ -251,18 +275,40 @@ class ProviderCapabilities(BaseModel):
     error: str | None = None
 
 
+class ProviderConfigRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    provider_name: str
+    base_url: str
+    default_model: str
+    api_key_set: bool = False
+    is_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class ProviderConfigUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     base_url: str = Field(min_length=1)
     default_model: str = Field(min_length=1)
+    api_key: str | None = None
+    is_enabled: bool = True
 
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, value: str) -> str:
         if not value.startswith(("http://", "https://")):
-            raise ValueError("Enter a full Ollama URL starting with http:// or https://.")
+            raise ValueError("Enter a full provider URL starting with http:// or https://.")
         return value.rstrip("/")
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def validate_api_key(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        rendered = str(value).strip()
+        return rendered or None
 
 
 class ProjectCreate(BaseModel):
@@ -274,9 +320,11 @@ class ProjectCreate(BaseModel):
     requested_chapters: int = Field(ge=1)
     min_words_per_chapter: int = Field(ge=1)
     max_words_per_chapter: int = Field(ge=1)
+    preferred_provider_name: str = Field(min_length=1, default="ollama")
     preferred_model: str = Field(min_length=1)
     notes: str | None = None
     story_brief: StoryBrief = Field(default_factory=StoryBrief)
+    task_routing: TaskRouting = Field(default_factory=TaskRouting)
 
     @model_validator(mode="after")
     def validate_ranges(self) -> "ProjectCreate":
@@ -294,9 +342,11 @@ class ProjectUpdate(BaseModel):
     requested_chapters: int | None = Field(default=None, ge=1)
     min_words_per_chapter: int | None = Field(default=None, ge=1)
     max_words_per_chapter: int | None = Field(default=None, ge=1)
+    preferred_provider_name: str | None = None
     preferred_model: str | None = None
     notes: str | None = None
     story_brief: StoryBrief | None = None
+    task_routing: TaskRouting | None = None
 
 
 class ChapterDraftRead(BaseModel):
@@ -341,12 +391,14 @@ class RunCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     project_id: str
+    provider_name: str | None = None
     model_name: str | None = None
     target_word_count: int | None = Field(default=None, ge=1)
     requested_chapters: int | None = Field(default=None, ge=1)
     min_words_per_chapter: int | None = Field(default=None, ge=1)
     max_words_per_chapter: int | None = Field(default=None, ge=1)
     pause_after_outline: bool = True
+    task_routing: TaskRouting | None = None
     source_run_id: str | None = None
     resume_from_chapter: int | None = Field(default=None, ge=1)
 
@@ -357,6 +409,7 @@ class GenerationRunRead(BaseModel):
     id: str
     project_id: str
     source_run_id: str | None
+    provider_name: str
     model_name: str
     target_word_count: int
     requested_chapters: int
@@ -370,6 +423,7 @@ class GenerationRunRead(BaseModel):
     outline: list[dict[str, Any]] | None = None
     story_bible: StoryBible | None = None
     continuity_ledger: ContinuityLedger | None = None
+    task_routing: TaskRouting = Field(default_factory=TaskRouting)
     summary_context: str | None
     error_message: str | None
     cancel_requested: bool
@@ -392,9 +446,11 @@ class ProjectRead(BaseModel):
     requested_chapters: int
     min_words_per_chapter: int
     max_words_per_chapter: int
+    preferred_provider_name: str
     preferred_model: str
     notes: str | None
     story_brief: StoryBrief = Field(default_factory=StoryBrief)
+    task_routing: TaskRouting = Field(default_factory=TaskRouting)
     created_at: datetime
     updated_at: datetime
     runs: list[GenerationRunRead] = Field(default_factory=list)

@@ -115,15 +115,26 @@
 
       <div class="form-section">
         <div class="section-header-copy">
-          <h3>Preferred model</h3>
-          <p>Use a detected model when one is available, or type a model name manually if you already know what you want.</p>
+          <h3>Default provider and model</h3>
+          <p>Keep Ollama as the simple default, or point the project at another enabled provider and route only selected stages later.</p>
         </div>
+        <label>
+          Preferred provider
+          <select name="preferred_provider_name">
+            {% for option in provider_options %}
+              <option value="{{ option.name }}" {% if form_values.preferred_provider_name == option.name %}selected{% endif %}>
+                {{ option.label }}
+              </option>
+            {% endfor %}
+          </select>
+        </label>
+        {% if form_errors.preferred_provider_name %}<p class="field-error">{{ form_errors.preferred_provider_name }}</p>{% endif %}
         <label>
           Preferred model
           <input id="project-preferred-model" data-model-input class="{{ 'input-invalid' if form_errors.preferred_model }}" type="text" name="preferred_model" value="{{ form_values.preferred_model }}" required>
         </label>
         {% if form_errors.preferred_model %}<p class="field-error">{{ form_errors.preferred_model }}</p>{% endif %}
-        <p class="field-note">Verified models come from the currently saved Ollama configuration.</p>
+        <p class="field-note">Verified chips below come from the saved Ollama connection. For other providers, type the model name manually or confirm it in provider settings.</p>
         {% if provider_status.available_models %}
           <div class="model-picker">
             <div class="model-picker-header">
@@ -153,6 +164,36 @@
         {% else %}
           <p class="empty-state">No verified models are available yet. Open provider settings, save the Ollama connection, and refresh models.</p>
         {% endif %}
+      </div>
+
+      <div class="form-section">
+        <div class="section-header-copy">
+          <h3>Advanced per-task routing</h3>
+          <p>Optional. Leave these blank to use the project default provider/model everywhere, or override only the stages where you want a different tradeoff.</p>
+        </div>
+        <div class="routing-grid">
+          {% for row in task_route_rows %}
+            <div class="routing-row">
+              <label>
+                {{ row.label }} provider
+                <select name="{{ row.provider_field }}">
+                  <option value="">Use project default</option>
+                  {% for option in provider_options %}
+                    <option value="{{ option.name }}" {% if row.provider_name == option.name %}selected{% endif %}>
+                      {{ option.label }}
+                    </option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                {{ row.label }} model
+                <input type="text" name="{{ row.model_field }}" value="{{ row.model_name }}" placeholder="Leave blank to use the project default">
+              </label>
+              {% if form_errors[row.provider_field] %}<p class="field-error">{{ form_errors[row.provider_field] }}</p>{% endif %}
+              {% if form_errors[row.model_field] %}<p class="field-error">{{ form_errors[row.model_field] }}</p>{% endif %}
+            </div>
+          {% endfor %}
+        </div>
       </div>
 
       <div class="form-section">

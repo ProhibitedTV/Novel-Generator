@@ -45,6 +45,10 @@
     <div class="overview-card">
       <div class="overview-grid">
         <div class="detail-item">
+          <span class="detail-label">Provider</span>
+          <span class="detail-value">{{ run.provider_name }}</span>
+        </div>
+        <div class="detail-item">
           <span class="detail-label">Model</span>
           <span class="detail-value long-value">{{ run.model_name }}</span>
         </div>
@@ -159,12 +163,42 @@
         <span class="detail-value">{{ "Enabled" if run.pause_after_outline else "Consumed or disabled" }}</span>
       </div>
       <div class="detail-item inline-detail">
+        <span class="detail-label">Per-task overrides</span>
+        <span class="detail-value">{{ (run.task_routing or {})|length }}</span>
+      </div>
+      <div class="detail-item inline-detail">
         <span class="detail-label">Open threads</span>
         <span class="detail-value">{{ continuity_ledger.open_threads|length if continuity_ledger else 0 }}</span>
       </div>
     </div>
   </details>
 </section>
+
+{% if run.task_routing %}
+  <section class="panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Task routing</h2>
+        <p>This run snapshots its stage routing so reruns stay reproducible even if provider defaults change later.</p>
+      </div>
+    </div>
+    <div class="run-table">
+      {% for stage_name, route in run.task_routing.items() %}
+        <article class="run-row">
+          <div class="run-row-main">
+            <div class="run-row-top">
+              <span class="run-row-title">{{ stage_name.replace("_", " ") }}</span>
+            </div>
+            <div class="meta-chip-row">
+              <span class="meta-chip">{{ route.provider_name if route.provider_name is defined else route["provider_name"] }}</span>
+              <span class="meta-chip long-value">{{ route.model_name if route.model_name is defined else route["model_name"] }}</span>
+            </div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+{% endif %}
 
 {% if story_bible or outline_entries %}
   <section class="grid two-up">
@@ -412,6 +446,12 @@
             <span class="event-sequence">#{{ event.sequence }}</span>
           </div>
           <p class="event-copy">{{ event.payload.message or event.payload.title or event.payload.chapter_number or "Waiting for the next update." }}</p>
+          {% if event.payload.provider_name or event.payload.model_name %}
+            <p class="field-note">
+              {{ event.payload.provider_name or run.provider_name }}
+              {% if event.payload.model_name %}· {{ event.payload.model_name }}{% endif %}
+            </p>
+          {% endif %}
         </li>
       {% endfor %}
     </ul>

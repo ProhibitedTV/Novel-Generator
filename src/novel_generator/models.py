@@ -39,9 +39,11 @@ class Project(Base):
     requested_chapters: Mapped[int] = mapped_column(Integer)
     min_words_per_chapter: Mapped[int] = mapped_column(Integer)
     max_words_per_chapter: Mapped[int] = mapped_column(Integer)
+    preferred_provider_name: Mapped[str] = mapped_column(String(64), default="ollama")
     preferred_model: Mapped[str] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     story_brief: Mapped[dict] = mapped_column(JSON, default=dict)
+    task_routing: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -59,6 +61,7 @@ class ProviderConfig(Base):
     provider_name: Mapped[str] = mapped_column(String(64), unique=True)
     base_url: Mapped[str] = mapped_column(String(500))
     default_model: Mapped[str] = mapped_column(String(255))
+    api_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -77,6 +80,7 @@ class GenerationRun(Base):
         ForeignKey("generation_runs.id", ondelete="SET NULL"),
         nullable=True,
     )
+    provider_name: Mapped[str] = mapped_column(String(64), default="ollama")
     model_name: Mapped[str] = mapped_column(String(255))
     target_word_count: Mapped[int] = mapped_column(Integer)
     requested_chapters: Mapped[int] = mapped_column(Integer)
@@ -90,6 +94,7 @@ class GenerationRun(Base):
     outline: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     story_bible: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     continuity_ledger: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    task_routing: Mapped[dict] = mapped_column(JSON, default=dict)
     summary_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)

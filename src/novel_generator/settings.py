@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     ollama_base_url: str = "http://127.0.0.1:11434"
     default_model: str = "llama3.1:8b"
+    openai_compatible_base_url: str = "http://127.0.0.1:1234/v1"
+    openai_compatible_default_model: str = "local-model"
+    openai_compatible_api_key: str = ""
     max_concurrent_runs: int = Field(default=1, ge=1, le=4)
     worker_poll_interval_seconds: float = Field(default=2.0, ge=0.5, le=30.0)
     ollama_timeout_seconds: float = Field(default=120.0, ge=10.0, le=1800.0)

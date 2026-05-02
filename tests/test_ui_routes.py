@@ -191,6 +191,7 @@ def test_provider_settings_validation_and_live_actions_render(client, monkeypatc
     assert 'data-provider-action="status"' in response.text
     assert 'data-provider-action="models"' in response.text
     assert "Recommended setup flow" in response.text
+    assert "OpenAI-compatible API" in response.text
 
 
 def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> None:

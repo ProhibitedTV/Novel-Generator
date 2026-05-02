@@ -28,7 +28,8 @@ from .editorial import (
     render_qa_report_markdown,
 )
 from .exports import export_run_artifacts
-from .ollama import OllamaClient, OllamaError, OllamaTransportError
+from .ollama import OllamaClient
+from .provider_errors import ProviderError, ProviderTransportError
 from .prompts import (
     build_chapter_critique_messages,
     build_chapter_draft_messages,
@@ -49,6 +50,7 @@ from .prompts import (
     rolling_context,
     sanitize_chapter_content,
 )
+from .providers import ProviderManager
 
 
 class RunCanceled(Exception):
@@ -89,18 +91,44 @@ def _ensure_not_canceled(session: Session, run: GenerationRun) -> None:
 
 
 def _generate_structured_output(
-    client: OllamaClient,
+    client: ProviderManager | OllamaClient,
+    provider_name: str,
     model_name: str,
     build_messages: Callable[[], list[dict[str, str]]],
     parser: Callable[[str], Any],
     label: str,
 ) -> Any:
-    raw_output = client.chat(model_name, build_messages())
+    raw_output = _provider_chat(client, provider_name, model_name, build_messages())
     try:
         return parser(raw_output)
     except Exception:
-        repaired_output = client.chat(model_name, build_json_repair_messages(raw_output, label))
+        repaired_output = _provider_chat(client, provider_name, model_name, build_json_repair_messages(raw_output, label))
         return parser(repaired_output)
+
+
+def _provider_chat(
+    client: ProviderManager | OllamaClient,
+    provider_name: str,
+    model_name: str,
+    messages: list[dict[str, str]],
+    *,
+    stream: bool = False,
+) -> str:
+    if isinstance(client, ProviderManager):
+        return client.chat(provider_name, model_name, messages, stream=stream)
+    return client.chat(model_name, messages, stream=stream)
+
+
+def _resolve_stage_route(
+    client: ProviderManager | OllamaClient,
+    run: GenerationRun,
+    stage: str,
+) -> tuple[str, str]:
+    provider_name = getattr(run, "provider_name", "ollama") or "ollama"
+    model_name = run.model_name
+    if isinstance(client, ProviderManager):
+        return client.route_for(provider_name, model_name, run.task_routing, stage)
+    return provider_name, model_name
 
 
 def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
@@ -226,14 +254,21 @@ def _chapter_prior_context(run: GenerationRun, chapter_number: int) -> list:
     ]
 
 
-def _generate_story_bible(session: Session, run: GenerationRun, settings: Settings, client: OllamaClient) -> StoryBible:
+def _generate_story_bible(session: Session, run: GenerationRun, settings: Settings, client: ProviderManager | OllamaClient) -> StoryBible:
     project = run.project
+    provider_name, model_name = _resolve_stage_route(client, run, "story_bible")
     run.current_step = "story_bible"
-    record_event(session, run, "story_bible_started", {"message": "Generating story bible."})
+    record_event(
+        session,
+        run,
+        "story_bible_started",
+        {"message": "Generating story bible.", "provider_name": provider_name, "model_name": model_name},
+    )
     session.commit()
     story_bible = _generate_structured_output(
         client,
-        run.model_name,
+        provider_name,
+        model_name,
         lambda: build_story_bible_messages(project, run),
         parse_story_bible,
         "story bible",
@@ -245,14 +280,21 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
     return story_bible
 
 
-def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBible, client: OllamaClient) -> None:
+def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBible, client: ProviderManager | OllamaClient) -> None:
     project = run.project
+    provider_name, model_name = _resolve_stage_route(client, run, "outline")
     run.current_step = "outline"
-    record_event(session, run, "outline_started", {"message": "Generating structured outline."})
+    record_event(
+        session,
+        run,
+        "outline_started",
+        {"message": "Generating structured outline.", "provider_name": provider_name, "model_name": model_name},
+    )
     session.commit()
     run.outline = _generate_structured_output(
         client,
-        run.model_name,
+        provider_name,
+        model_name,
         lambda: build_outline_messages(project, run, story_bible),
         lambda raw: parse_outline(raw, run.requested_chapters),
         "structured outline",
@@ -277,25 +319,32 @@ def _draft_chapter(
     outline_entry: StructuredOutlineEntry,
     story_bible: StoryBible,
     settings: Settings,
-    client: OllamaClient,
+    client: ProviderManager | OllamaClient,
 ) -> None:
     project = run.project
     ledger = _continuity_ledger_from_run(run)
     prior_chapters = _chapter_prior_context(run, chapter.chapter_number)
     _sync_summary_context(run, settings.chapter_summary_window)
+    plan_provider_name, plan_model_name = _resolve_stage_route(client, run, "chapter_plan")
     run.current_chapter = chapter.chapter_number
     run.current_step = "chapter_plan"
     record_event(
         session,
         run,
         "chapter_planning",
-        {"chapter_number": chapter.chapter_number, "title": chapter.title},
+        {
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "provider_name": plan_provider_name,
+            "model_name": plan_model_name,
+        },
     )
     session.commit()
 
     plan = _generate_structured_output(
         client,
-        run.model_name,
+        plan_provider_name,
+        plan_model_name,
         lambda: build_chapter_plan_messages(
             project,
             run,
@@ -312,18 +361,26 @@ def _draft_chapter(
     session.commit()
 
     _ensure_not_canceled(session, run)
+    draft_provider_name, draft_model_name = _resolve_stage_route(client, run, "chapter_draft")
     run.current_step = "chapter_draft"
     record_event(
         session,
         run,
         "chapter_drafting",
-        {"chapter_number": chapter.chapter_number, "title": chapter.title},
+        {
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "provider_name": draft_provider_name,
+            "model_name": draft_model_name,
+        },
     )
     session.commit()
 
     chapter.content = sanitize_chapter_content(
-        client.chat(
-            run.model_name,
+        _provider_chat(
+            client,
+            draft_provider_name,
+            draft_model_name,
             build_chapter_draft_messages(
                 project,
                 run,
@@ -342,11 +399,13 @@ def _draft_chapter(
     session.commit()
 
     _ensure_not_canceled(session, run)
+    critique_provider_name, critique_model_name = _resolve_stage_route(client, run, "chapter_critique")
     run.current_step = "chapter_revision"
     lint_result = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
     critique = _generate_structured_output(
         client,
-        run.model_name,
+        critique_provider_name,
+        critique_model_name,
         lambda: build_chapter_critique_messages(
             project,
             chapter,
@@ -368,12 +427,21 @@ def _draft_chapter(
             session,
             run,
             "chapter_revision_started",
-            {"chapter_number": chapter.chapter_number, "title": chapter.title, "repair_scope": combined_critique.repair_scope},
+            {
+                "chapter_number": chapter.chapter_number,
+                "title": chapter.title,
+                "repair_scope": combined_critique.repair_scope,
+                "provider_name": critique_provider_name,
+                "model_name": critique_model_name,
+            },
         )
         session.commit()
+        revision_provider_name, revision_model_name = _resolve_stage_route(client, run, "chapter_revision")
         chapter.content = sanitize_chapter_content(
-            client.chat(
-                run.model_name,
+            _provider_chat(
+                client,
+                revision_provider_name,
+                revision_model_name,
                 build_chapter_revision_messages(
                     project,
                     chapter,
@@ -394,7 +462,8 @@ def _draft_chapter(
         final_lint = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
         final_critique = _generate_structured_output(
             client,
-            run.model_name,
+            critique_provider_name,
+            critique_model_name,
             lambda: build_chapter_critique_messages(
                 project,
                 chapter,
@@ -412,14 +481,22 @@ def _draft_chapter(
         session.commit()
 
     _ensure_not_canceled(session, run)
+    summary_provider_name, summary_model_name = _resolve_stage_route(client, run, "chapter_summary")
     run.current_step = "chapter_summary"
-    chapter.summary = client.chat(run.model_name, build_summary_messages(chapter, outline_entry)).strip()
+    chapter.summary = _provider_chat(
+        client,
+        summary_provider_name,
+        summary_model_name,
+        build_summary_messages(chapter, outline_entry),
+    ).strip()
     if not chapter.summary:
         raise RuntimeError(f"Chapter {chapter.chapter_number} summary was empty.")
 
+    continuity_provider_name, continuity_model_name = _resolve_stage_route(client, run, "continuity_update")
     continuity_update = _generate_structured_output(
         client,
-        run.model_name,
+        continuity_provider_name,
+        continuity_model_name,
         lambda: build_continuity_update_messages(project, chapter, ledger, story_bible),
         parse_continuity_update,
         f"chapter {chapter.chapter_number} continuity update",
@@ -449,17 +526,24 @@ def _run_manuscript_qa(
     session: Session,
     run: GenerationRun,
     chapters: list,
-    client: OllamaClient,
+    client: ProviderManager | OllamaClient,
 ) -> tuple[ManuscriptQaReport, str]:
     story_bible = _story_bible_from_run(run)
     lint_findings = lint_manuscript(chapters)
     deterministic_notes = manuscript_quality_notes(chapters, story_bible)
+    provider_name, model_name = _resolve_stage_route(client, run, "manuscript_qa")
     run.current_step = "manuscript_qa"
-    record_event(session, run, "manuscript_qa_started", {"message": "Running manuscript QA."})
+    record_event(
+        session,
+        run,
+        "manuscript_qa_started",
+        {"message": "Running manuscript QA.", "provider_name": provider_name, "model_name": model_name},
+    )
     session.commit()
     qa_report = _generate_structured_output(
         client,
-        run.model_name,
+        provider_name,
+        model_name,
         lambda: build_manuscript_qa_messages(run.project, story_bible, lint_findings, chapters),
         parse_manuscript_qa_report,
         "manuscript QA report",
@@ -501,7 +585,7 @@ def _run_manuscript_qa(
     return qa_report, qa_markdown
 
 
-def process_run(session: Session, run: GenerationRun, settings: Settings, client: OllamaClient) -> None:
+def process_run(session: Session, run: GenerationRun, settings: Settings, client: ProviderManager | OllamaClient) -> None:
     _ensure_not_canceled(session, run)
 
     story_bible = _story_bible_from_run(run) if run.story_bible else _generate_story_bible(session, run, settings, client)
@@ -569,12 +653,12 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
     session.commit()
 
 
-def process_run_safe(session: Session, run: GenerationRun, settings: Settings, client: OllamaClient) -> None:
+def process_run_safe(session: Session, run: GenerationRun, settings: Settings, client: ProviderManager | OllamaClient) -> None:
     try:
         process_run(session, run, settings, client)
     except RunCanceled:
         return
-    except (OllamaError, OllamaTransportError) as exc:
+    except (ProviderError, ProviderTransportError) as exc:
         if run.current_chapter:
             chapter = next((item for item in run.chapters if item.chapter_number == run.current_chapter), None)
             if chapter is not None:

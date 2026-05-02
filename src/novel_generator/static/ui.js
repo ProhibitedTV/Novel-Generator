@@ -389,6 +389,7 @@ function setupRunDetail() {
     const kind = document.createElement("span");
     const sequence = document.createElement("span");
     const copy = document.createElement("p");
+    const routeNote = document.createElement("p");
     const summary = payload.payload?.message || payload.payload?.title || payload.payload?.chapter_number || "Waiting for the next update.";
 
     item.className = "event-item";
@@ -401,11 +402,18 @@ function setupRunDetail() {
     sequence.textContent = `#${payload.sequence || "-"}`;
     copy.className = "event-copy";
     copy.textContent = String(summary);
+    routeNote.className = "field-note";
+    if (payload.payload?.provider_name || payload.payload?.model_name) {
+      routeNote.textContent = [payload.payload?.provider_name, payload.payload?.model_name].filter(Boolean).join(" · ");
+    }
 
     topline.appendChild(kind);
     topline.appendChild(sequence);
     item.appendChild(topline);
     item.appendChild(copy);
+    if (routeNote.textContent) {
+      item.appendChild(routeNote);
+    }
     eventLog.appendChild(item);
     eventLog.scrollTop = eventLog.scrollHeight;
   }

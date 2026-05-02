@@ -6,9 +6,9 @@
 <section class="panel page-banner">
   <div class="section-header">
     <div class="page-header-copy">
-      <p class="eyebrow">Provider</p>
-      <h1>Saved Ollama connection and model defaults.</h1>
-      <p class="hero-copy">This page is the control point for first-run setup. Save the connection, choose a verified default model, then use the live actions to confirm what Ollama reports.</p>
+      <p class="eyebrow">Providers</p>
+      <h1>Saved provider connections and model defaults.</h1>
+      <p class="hero-copy">Ollama stays the default local-first path, while optional extra providers can take specific stages when you want stronger planning, critique, or QA models.</p>
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/">Back to dashboard</a>
@@ -34,106 +34,154 @@
 {% endif %}
 
 <section class="grid two-up form-layout">
-  <article class="panel">
-    <div class="section-header">
-      <div class="section-header-copy">
-        <h2>Saved provider settings</h2>
-        <p>Save first, then use the live tools beside this form to verify the saved connection and refresh detected models.</p>
-      </div>
-    </div>
-
-    {% if form_errors.__all__ %}
-      <p class="error-text">{{ form_errors.__all__ }}</p>
-    {% endif %}
-
-    <form method="post" action="/settings/providers/ollama" class="stack-form">
-      <label>
-        Ollama base URL
-        <input class="{{ 'input-invalid' if form_errors.base_url }}" type="text" name="base_url" value="{{ form_values.base_url }}" required>
-      </label>
-      {% if form_errors.base_url %}<p class="field-error">{{ form_errors.base_url }}</p>{% endif %}
-      <p class="field-note">Examples: `http://127.0.0.1:11434`, `http://host.docker.internal:11434`, or `http://ollama:11434` inside the compose network.</p>
-
-      <label>
-        Default model
-        <input id="provider-default-model" data-model-input class="{{ 'input-invalid' if form_errors.default_model }}" type="text" name="default_model" value="{{ form_values.default_model }}" required>
-      </label>
-      {% if form_errors.default_model %}<p class="field-error">{{ form_errors.default_model }}</p>{% endif %}
-      <p class="field-note">When verified, this becomes the starting point for new project forms.</p>
-
-      {% if provider_status.available_models %}
-        <div class="model-picker">
-          <div class="model-picker-header">
-            <div class="section-header-copy">
-              <p class="model-picker-title">Detected models</p>
-              <p class="model-picker-copy">Click a model to fill the saved default model field.</p>
-            </div>
-            <p class="selection-note">These reflect the currently saved provider connection.</p>
+  <div class="stack-panels">
+    {% for card in provider_cards %}
+      <article class="panel {% if card.provider_name != 'ollama' %}provider-card-secondary{% endif %}" {% if card.provider_name == 'ollama' %}data-provider-console{% endif %}>
+        <div class="section-header">
+          <div class="section-header-copy">
+            <h2>{{ card.provider_label }}</h2>
+            <p>{{ card.provider_description }}</p>
           </div>
-          <ul class="model-chip-list" data-provider-model-list data-model-target="provider-default-model">
-            {% for model in provider_status.available_models %}
-              <li>
-                <button
-                  class="model-chip"
-                  type="button"
-                  data-model-choice
-                  data-target="provider-default-model"
-                  data-model="{{ model }}"
-                  aria-pressed="false"
-                >
-                  <span class="model-chip-value">{{ model }}</span>
-                </button>
-              </li>
-            {% endfor %}
-          </ul>
+          <span class="badge status-{{ 'running' if card.status.reachable else 'failed' }}" {% if card.provider_name == 'ollama' %}data-provider-badge{% endif %}>
+            {{ "Connected" if card.status.reachable else "Unavailable" }}
+          </span>
         </div>
-      {% else %}
-        <p class="empty-state" data-provider-model-empty>No models are currently detected from the saved provider connection.</p>
-        <ul class="model-chip-list is-hidden" data-provider-model-list data-model-target="provider-default-model"></ul>
-      {% endif %}
 
-      <div class="form-actions">
-        <button type="submit">Save provider settings</button>
-      </div>
-    </form>
-  </article>
+        {% if card.provider_name == 'ollama' %}
+          <p class="panel-intro">This remains the fastest path for self-hosted runs. Save first, then use the live tools to verify the saved connection and refresh detected models.</p>
+        {% else %}
+          <p class="panel-intro">Optional. Enable this when you want per-stage routing to an OpenAI-compatible endpoint for planning, editing, or QA.</p>
+        {% endif %}
 
-  <aside class="panel meta-panel" data-provider-console>
+        {% if card.form_errors.__all__ %}
+          <p class="error-text">{{ card.form_errors.__all__ }}</p>
+        {% endif %}
+
+        <form method="post" action="/settings/providers/{{ card.provider_name }}" class="stack-form">
+          {% if card.provider_name != "ollama" %}
+            <label class="toggle-card">
+              <span class="toggle-input">
+                <input type="checkbox" name="is_enabled" value="1" {% if card.form_values.is_enabled %}checked{% endif %}>
+                <strong>Enable {{ card.provider_label }}</strong>
+              </span>
+              <span class="field-note">Disabled providers stay saved but will not be used by projects or runs.</span>
+            </label>
+          {% else %}
+            <input type="hidden" name="is_enabled" value="1">
+          {% endif %}
+
+          <label>
+            Base URL
+            <input class="{{ 'input-invalid' if card.form_errors.base_url }}" type="text" name="base_url" value="{{ card.form_values.base_url }}" required>
+          </label>
+          {% if card.form_errors.base_url %}<p class="field-error">{{ card.form_errors.base_url }}</p>{% endif %}
+
+          {% if card.provider_name == "ollama" %}
+            <p class="field-note">Examples: `http://127.0.0.1:11434`, `http://host.docker.internal:11434`, or `http://ollama:11434` inside the compose network.</p>
+          {% else %}
+            <p class="field-note">Examples: `http://127.0.0.1:1234/v1`, `http://localhost:8001/v1`, or a hosted OpenAI-compatible endpoint.</p>
+          {% endif %}
+
+          <label>
+            Default model
+            <input
+              {% if card.provider_name == 'ollama' %}id="provider-default-model" data-model-input{% endif %}
+              class="{{ 'input-invalid' if card.form_errors.default_model }}"
+              type="text"
+              name="default_model"
+              value="{{ card.form_values.default_model }}"
+              required
+            >
+          </label>
+          {% if card.form_errors.default_model %}<p class="field-error">{{ card.form_errors.default_model }}</p>{% endif %}
+
+          {% if card.supports_api_key %}
+            <label>
+              API key
+              <input type="password" name="api_key" value="{{ card.form_values.api_key }}" placeholder="Optional bearer token">
+            </label>
+            <p class="field-note">Leave blank for local servers that do not require authentication.</p>
+          {% endif %}
+
+          {% if card.provider_name == "ollama" and card.status.available_models %}
+            <div class="model-picker">
+              <div class="model-picker-header">
+                <div class="section-header-copy">
+                  <p class="model-picker-title">Detected models</p>
+                  <p class="model-picker-copy">Click a model to fill the saved default model field.</p>
+                </div>
+                <p class="selection-note">These reflect the currently saved provider connection.</p>
+              </div>
+              <ul class="model-chip-list" data-provider-model-list data-model-target="provider-default-model">
+                {% for model in card.status.available_models %}
+                  <li>
+                    <button
+                      class="model-chip"
+                      type="button"
+                      data-model-choice
+                      data-target="provider-default-model"
+                      data-model="{{ model }}"
+                      aria-pressed="false"
+                    >
+                      <span class="model-chip-value">{{ model }}</span>
+                    </button>
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% elif card.provider_name == "ollama" %}
+            <p class="empty-state" data-provider-model-empty>No models are currently detected from the saved provider connection.</p>
+            <ul class="model-chip-list is-hidden" data-provider-model-list data-model-target="provider-default-model"></ul>
+          {% elif card.status.available_models %}
+            <p class="field-note">Detected models: {{ card.status.available_models | join(", ") }}</p>
+          {% endif %}
+
+          <div class="detail-list compact-details">
+            <div class="detail-item">
+              <span class="detail-label">Saved base URL</span>
+              <span class="detail-value long-value" {% if card.provider_name == 'ollama' %}data-provider-base-url{% endif %}>{{ card.status.base_url }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Saved default model</span>
+              <span class="detail-value long-value" {% if card.provider_name == 'ollama' %}data-provider-default-model{% endif %}>{{ card.status.default_model }}</span>
+            </div>
+            <div class="detail-item inline-detail">
+              <span class="detail-label">Detected models</span>
+              <span class="detail-value" {% if card.provider_name == 'ollama' %}data-provider-model-count{% endif %}>{{ card.status.available_models|length }}</span>
+            </div>
+          </div>
+
+          {% if card.provider_name == "ollama" %}
+            <div class="form-actions">
+              <button type="submit">Save provider settings</button>
+              <button type="button" class="secondary" data-provider-action="status">Test connection</button>
+              <button type="button" class="secondary" data-provider-action="models">Refresh models</button>
+            </div>
+            {% if card.status.error %}
+              <p class="error-text" data-provider-error>{{ card.status.error }}</p>
+            {% else %}
+              <p class="field-note" data-provider-error></p>
+            {% endif %}
+          {% else %}
+            <div class="form-actions">
+              <button type="submit">Save provider settings</button>
+            </div>
+            {% if card.status.error %}
+              <p class="field-note">{{ card.status.error }}</p>
+            {% endif %}
+          {% endif %}
+        </form>
+      </article>
+    {% endfor %}
+  </div>
+
+  <aside class="panel meta-panel">
     <div class="section-header">
       <div class="section-header-copy">
-        <h2>Live provider check</h2>
-        <p>These actions use the existing provider APIs to verify the saved configuration without leaving the page.</p>
-      </div>
-      <span class="badge status-{{ 'running' if provider_status.reachable else 'failed' }}" data-provider-badge>
-        {{ "Connected" if provider_status.reachable else "Unavailable" }}
-      </span>
-    </div>
-
-    <div class="detail-list">
-      <div class="detail-item">
-        <span class="detail-label">Saved base URL</span>
-        <span class="detail-value long-value" data-provider-base-url>{{ provider_status.base_url }}</span>
-      </div>
-      <div class="detail-item">
-        <span class="detail-label">Saved default model</span>
-        <span class="detail-value long-value" data-provider-default-model>{{ provider_status.default_model }}</span>
-      </div>
-      <div class="detail-item inline-detail">
-        <span class="detail-label">Detected models</span>
-        <span class="detail-value" data-provider-model-count>{{ provider_status.available_models|length }}</span>
+        <h2>How routing works</h2>
+        <p>Keep the default simple, then route only the expensive or editorial stages elsewhere when it actually helps.</p>
       </div>
     </div>
-
-    <div class="form-actions">
-      <button type="button" class="secondary" data-provider-action="status">Test connection</button>
-      <button type="button" class="secondary" data-provider-action="models">Refresh models</button>
-    </div>
-
-    {% if provider_status.error %}
-      <p class="error-text" data-provider-error>{{ provider_status.error }}</p>
-    {% else %}
-      <p class="field-note" data-provider-error></p>
-    {% endif %}
 
     <div class="support-stack">
       <section class="support-block">
@@ -145,29 +193,29 @@
           <li class="mini-step">
             <span class="mini-step-marker">1</span>
             <div>
-              <strong>Save the Ollama address first</strong>
-              <p class="field-note">The live checks only validate the saved connection, not unsaved values in the form.</p>
+              <strong>Keep Ollama as the default</strong>
+              <p class="field-note">Use a verified Ollama model for the whole run unless you have a clear reason to route a specific stage elsewhere.</p>
             </div>
           </li>
           <li class="mini-step">
             <span class="mini-step-marker">2</span>
             <div>
-              <strong>Test the connection</strong>
-              <p class="field-note">Make sure Novel Generator can actually reach the Ollama host you intend to use.</p>
+              <strong>Enable extra providers only if needed</strong>
+              <p class="field-note">Optional providers are best used for story bible, outline, critique, revision, or QA when you want a different tradeoff.</p>
             </div>
           </li>
           <li class="mini-step">
             <span class="mini-step-marker">3</span>
             <div>
-              <strong>Refresh and pick a verified model</strong>
-              <p class="field-note">Using a detected model removes guesswork from project creation and run queueing.</p>
+              <strong>Set per-task routing at the project level</strong>
+              <p class="field-note">Projects can keep one provider/model for everything or override only selected stages.</p>
             </div>
           </li>
           <li class="mini-step">
             <span class="mini-step-marker">4</span>
             <div>
-              <strong>Create a project</strong>
-              <p class="field-note">Once the provider is healthy, move on to a reusable story setup and queue a full draft run.</p>
+              <strong>Review stage usage in the run monitor</strong>
+              <p class="field-note">Run events and run details show which provider and model were used at each stage.</p>
             </div>
           </li>
         </ol>
@@ -176,7 +224,7 @@
       <section class="support-block">
         <div class="section-header-copy">
           <h3>Setup progress</h3>
-          <p>Each step below reflects the current saved state of this self-hosted instance.</p>
+          <p>The checklist below stays tied to real system state, not guesses.</p>
         </div>
         <ol class="mini-step-list">
           {% for step in setup_steps %}

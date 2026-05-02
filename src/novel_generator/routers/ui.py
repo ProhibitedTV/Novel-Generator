@@ -17,6 +17,7 @@ from ..repositories import (
     delete_run,
     delete_terminal_runs_for_project,
     ensure_provider_config,
+    ensure_provider_configs,
     get_project,
     get_run,
     list_projects,
@@ -26,7 +27,10 @@ from ..repositories import (
     update_provider_config,
 )
 from ..schemas import ProjectCreate, ProjectUpdate, ProviderCapabilities, ProviderConfigUpdate, RunCreate
-from ..services.ollama import OllamaClient, OllamaError, OllamaTransportError
+from ..services.openai_compatible import OpenAICompatibleClient
+from ..services.ollama import OllamaClient
+from ..services.provider_errors import ProviderError, ProviderTransportError
+from ..services.providers import ProviderManager, TASK_ROUTE_STAGES, provider_definition, provider_options
 from ..services.state import approve_outline_review, request_run_cancellation
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
 from ..settings import Settings
@@ -90,12 +94,39 @@ def _provider_status(settings: Settings, db: Session) -> tuple[Any, ProviderCapa
     return config, status, client
 
 
-def _provider_preview(settings: Settings, base_url: str, default_model: str) -> tuple[ProviderCapabilities, OllamaClient]:
-    client = OllamaClient(
-        base_url=base_url,
-        timeout_seconds=settings.ollama_timeout_seconds,
-        max_retries=settings.ollama_max_retries,
-    )
+def _provider_preview(
+    settings: Settings,
+    provider_name: str,
+    base_url: str,
+    default_model: str,
+    *,
+    api_key: str | None = None,
+    is_enabled: bool = True,
+) -> tuple[ProviderCapabilities, Any]:
+    if not is_enabled:
+        status = ProviderCapabilities(
+            provider_name=provider_name,
+            reachable=False,
+            base_url=base_url.rstrip("/"),
+            default_model=default_model.strip(),
+            available_models=[],
+            error="Provider is disabled.",
+        )
+        return status, None
+
+    if provider_name == "openai_compatible":
+        client = OpenAICompatibleClient(
+            base_url=base_url,
+            timeout_seconds=settings.ollama_timeout_seconds,
+            max_retries=settings.ollama_max_retries,
+            api_key=api_key,
+        )
+    else:
+        client = OllamaClient(
+            base_url=base_url,
+            timeout_seconds=settings.ollama_timeout_seconds,
+            max_retries=settings.ollama_max_retries,
+        )
     status = client.health(default_model)
     return status, client
 
@@ -160,18 +191,22 @@ def _project_defaults(default_model: str) -> dict[str, Any]:
         "requested_chapters": 12,
         "min_words_per_chapter": 1200,
         "max_words_per_chapter": 2200,
+        "preferred_provider_name": "ollama",
         "preferred_model": default_model,
         "notes": "",
         **_story_brief_form_values(),
+        **_task_routing_form_values(),
     }
 
 
 def _project_form_values(
+    default_provider_name: str,
     default_model: str,
     project: Project | None = None,
     values: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     base = _project_defaults(default_model)
+    base["preferred_provider_name"] = default_provider_name
     if project is not None:
         base.update(
             {
@@ -181,9 +216,11 @@ def _project_form_values(
                 "requested_chapters": project.requested_chapters,
                 "min_words_per_chapter": project.min_words_per_chapter,
                 "max_words_per_chapter": project.max_words_per_chapter,
+                "preferred_provider_name": project.preferred_provider_name,
                 "preferred_model": project.preferred_model,
                 "notes": project.notes or "",
                 **_story_brief_form_values(project.story_brief),
+                **_task_routing_form_values(project.task_routing),
             }
         )
     if values:
@@ -193,23 +230,131 @@ def _project_form_values(
 
 def _run_form_values(project: Project, values: dict[str, Any] | None = None) -> dict[str, Any]:
     base = {
+        "provider_name": project.preferred_provider_name,
         "model_name": project.preferred_model,
         "target_word_count": project.desired_word_count,
         "requested_chapters": project.requested_chapters,
         "min_words_per_chapter": project.min_words_per_chapter,
         "max_words_per_chapter": project.max_words_per_chapter,
         "pause_after_outline": True,
+        **_task_routing_form_values(project.task_routing),
     }
     if values:
         base.update(values)
     return base
 
 
-def _provider_form_values(base_url: str, default_model: str, values: dict[str, Any] | None = None) -> dict[str, Any]:
-    base = {"base_url": base_url, "default_model": default_model}
+def _provider_form_values(base_url: str, default_model: str, values: dict[str, Any] | None = None, *, api_key: str = "", is_enabled: bool = True) -> dict[str, Any]:
+    base = {"base_url": base_url, "default_model": default_model, "api_key": api_key, "is_enabled": is_enabled}
     if values:
         base.update(values)
     return base
+
+
+def _task_routing_form_values(task_routing: dict[str, Any] | None = None, values: dict[str, Any] | None = None) -> dict[str, Any]:
+    base: dict[str, Any] = {}
+    routing = task_routing or {}
+    for stage in TASK_ROUTE_STAGES:
+        entry = routing.get(stage["id"]) or {}
+        base[f"route_{stage['id']}_provider"] = str(entry.get("provider_name", "") or "")
+        base[f"route_{stage['id']}_model"] = str(entry.get("model_name", "") or "")
+    if values:
+        base.update(values)
+    return base
+
+
+def _task_routing_payload(values: dict[str, Any]) -> dict[str, Any]:
+    routing: dict[str, Any] = {}
+    for stage in TASK_ROUTE_STAGES:
+        provider_name = str(values.get(f"route_{stage['id']}_provider", "") or "").strip()
+        model_name = str(values.get(f"route_{stage['id']}_model", "") or "").strip()
+        if not provider_name and not model_name:
+            continue
+        routing[stage["id"]] = {"provider_name": provider_name, "model_name": model_name}
+    return routing
+
+
+def _task_route_rows(form_values: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {
+            "id": stage["id"],
+            "label": stage["label"],
+            "provider_field": f"route_{stage['id']}_provider",
+            "model_field": f"route_{stage['id']}_model",
+            "provider_name": str(form_values.get(f"route_{stage['id']}_provider", "") or ""),
+            "model_name": str(form_values.get(f"route_{stage['id']}_model", "") or ""),
+        }
+        for stage in TASK_ROUTE_STAGES
+    ]
+
+
+def _provider_catalog(settings: Settings, db: Session) -> tuple[dict[str, Any], dict[str, ProviderCapabilities], ProviderManager]:
+    configs = ensure_provider_configs(db, settings)
+    db.commit()
+    manager = ProviderManager(settings, configs)
+    configs_by_name = {config.provider_name: config for config in configs}
+    statuses_by_name = {config.provider_name: manager.health(config.provider_name) for config in configs}
+    return configs_by_name, statuses_by_name, manager
+
+
+def _provider_option_rows(configs_by_name: dict[str, Any], statuses_by_name: dict[str, ProviderCapabilities]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for option in provider_options():
+        config = configs_by_name[option["name"]]
+        status = statuses_by_name[option["name"]]
+        rows.append(
+            {
+                **option,
+                "is_enabled": config.is_enabled,
+                "reachable": status.reachable,
+                "available_models": status.available_models,
+                "default_model": config.default_model,
+            }
+        )
+    return rows
+
+
+def _validate_provider_selection(
+    provider_name: str,
+    model_name: str,
+    configs_by_name: dict[str, Any],
+    statuses_by_name: dict[str, ProviderCapabilities],
+) -> str | None:
+    config = configs_by_name.get(provider_name)
+    if config is None:
+        return "Choose a supported provider."
+    if not config.is_enabled:
+        return f"Enable {provider_definition(provider_name).label} in provider settings first."
+    status = statuses_by_name.get(provider_name)
+    if status and status.reachable and status.available_models and model_name not in status.available_models:
+        return "Choose one of the detected models or update the provider settings."
+    return None
+
+
+def _validate_task_routing(
+    routing: dict[str, Any],
+    configs_by_name: dict[str, Any],
+    statuses_by_name: dict[str, ProviderCapabilities],
+) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    for stage in TASK_ROUTE_STAGES:
+        entry = routing.get(stage["id"]) or {}
+        provider_name = str(entry.get("provider_name", "") or "").strip()
+        model_name = str(entry.get("model_name", "") or "").strip()
+        provider_field = f"route_{stage['id']}_provider"
+        model_field = f"route_{stage['id']}_model"
+        if not provider_name and not model_name:
+            continue
+        if not provider_name:
+            errors[provider_field] = "Choose a provider for this override."
+            continue
+        if not model_name:
+            errors[model_field] = "Enter a model for this override."
+            continue
+        message = _validate_provider_selection(provider_name, model_name, configs_by_name, statuses_by_name)
+        if message:
+            errors[model_field] = message
+    return errors
 
 
 def _default_model_verified(default_model: str, provider_status: ProviderCapabilities) -> bool:
@@ -341,6 +486,7 @@ def _artifact_context(run: GenerationRun) -> dict[str, Any]:
 
 def _home_context(request: Request, db: Session, settings: Settings) -> dict[str, Any]:
     provider_config, provider_status, _ = _provider_status(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     projects = list_projects(db)
     recent_runs = list_recent_runs(db, limit=6)
     ready_for_projects = provider_status.reachable and bool(provider_status.available_models)
@@ -366,11 +512,13 @@ def _home_context(request: Request, db: Session, settings: Settings) -> dict[str
         "has_projects": bool(projects),
         "primary_action": primary_action,
         "ready_for_projects": ready_for_projects,
+        "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
     }
 
 
 def _projects_context(request: Request, db: Session, settings: Settings) -> dict[str, Any]:
     provider_config, provider_status, _ = _provider_status(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     projects = list_projects(db)
     return {
         "active_nav": "projects",
@@ -383,6 +531,7 @@ def _projects_context(request: Request, db: Session, settings: Settings) -> dict
             provider_status,
             len(projects),
         ),
+        "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
     }
 
 
@@ -395,14 +544,19 @@ def _project_new_context(
     page_error: str | None = None,
 ) -> dict[str, Any]:
     provider_config, provider_status, _ = _provider_status(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     projects = list_projects(db)
+    form_payload = _project_form_values(provider_config.provider_name, provider_config.default_model, values=form_values)
     return {
         "active_nav": "projects",
         "provider_config": provider_config,
         "provider_status": provider_status,
+        "provider_statuses": provider_statuses_by_name,
         "provider_guidance": _provider_guidance(provider_config.base_url, provider_config.default_model, provider_status),
         "setup_steps": _onboarding_steps(provider_config, provider_status, projects),
-        "form_values": _project_form_values(provider_config.default_model, values=form_values),
+        "form_values": form_payload,
+        "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
+        "task_route_rows": _task_route_rows(form_payload),
         "form_errors": form_errors or {},
         "page_error": page_error,
     }
@@ -421,18 +575,30 @@ def _project_detail_context(
     open_edit_form: bool = False,
 ) -> dict[str, Any]:
     provider_config, provider_status, _ = _provider_status(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     run_stats = _project_run_stats(project)
+    edit_payload = _project_form_values(
+        project.preferred_provider_name or provider_config.provider_name,
+        project.preferred_model or provider_config.default_model,
+        project=project,
+        values=edit_values,
+    )
+    run_payload = _run_form_values(project, values=run_values)
     return {
         "active_nav": "projects",
         "project": project,
         **run_stats,
         "provider_config": provider_config,
         "provider_status": provider_status,
+        "provider_statuses": provider_statuses_by_name,
         "provider_guidance": _provider_guidance(provider_config.base_url, provider_config.default_model, provider_status, 1),
-        "edit_values": _project_form_values(provider_config.default_model, project=project, values=edit_values),
+        "edit_values": edit_payload,
         "edit_errors": edit_errors or {},
-        "run_values": _run_form_values(project, values=run_values),
+        "edit_task_route_rows": _task_route_rows(edit_payload),
+        "run_values": run_payload,
         "run_errors": run_errors or {},
+        "run_task_route_rows": _task_route_rows(run_payload),
+        "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
         "page_error": page_error,
         "open_edit_form": open_edit_form or request.query_params.get("open_edit") == "1",
         "terminal_statuses": TERMINAL_STATUSES,
@@ -449,21 +615,42 @@ def _provider_settings_context(
     provider_status: ProviderCapabilities | None = None,
 ) -> dict[str, Any]:
     provider_config, saved_status, _ = _provider_status(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     projects = list_projects(db)
-    values = _provider_form_values(provider_config.base_url, provider_config.default_model, form_values)
+    provider_cards = []
+    form_errors = form_errors or {}
+    for provider_name, config in provider_configs_by_name.items():
+        values = _provider_form_values(
+            config.base_url,
+            config.default_model,
+            (form_values or {}).get(provider_name),
+            api_key="" if provider_name == "ollama" else "",
+            is_enabled=config.is_enabled,
+        )
+        provider_cards.append(
+            {
+                "provider_name": provider_name,
+                "provider_label": provider_definition(provider_name).label,
+                "provider_description": provider_definition(provider_name).description,
+                "config": config,
+                "status": provider_statuses_by_name.get(provider_name) if provider_status is None or provider_name != provider_config.provider_name else provider_status,
+                "form_values": values,
+                "form_errors": form_errors.get(provider_name, {}) if isinstance(form_errors.get(provider_name), dict) else {},
+                "supports_api_key": provider_definition(provider_name).requires_api_key,
+            }
+        )
     return {
         "active_nav": "provider",
         "provider_config": provider_config,
         "provider_status": provider_status or saved_status,
+        "provider_cards": provider_cards,
         "provider_guidance": _provider_guidance(
-            values["base_url"],
-            values["default_model"],
+            provider_config.base_url,
+            provider_config.default_model,
             provider_status or saved_status,
             len(projects),
         ),
         "setup_steps": _onboarding_steps(provider_config, provider_status or saved_status, projects),
-        "form_values": values,
-        "form_errors": form_errors or {},
         "page_error": page_error,
     }
 
@@ -471,12 +658,14 @@ def _provider_settings_context(
 def _same_settings_payload(run: GenerationRun, *, source_run_id: str | None = None, resume_from_chapter: int | None = None) -> RunCreate:
     return RunCreate(
         project_id=run.project_id,
+        provider_name=run.provider_name,
         model_name=run.model_name,
         target_word_count=run.target_word_count,
         requested_chapters=run.requested_chapters,
         min_words_per_chapter=run.min_words_per_chapter,
         max_words_per_chapter=run.max_words_per_chapter,
         pause_after_outline=True,
+        task_routing=run.task_routing or {},
         source_run_id=source_run_id,
         resume_from_chapter=resume_from_chapter,
     )
@@ -518,8 +707,27 @@ def create_project_ui(
     requested_chapters: str = Form("12"),
     min_words_per_chapter: str = Form("1200"),
     max_words_per_chapter: str = Form("2200"),
+    preferred_provider_name: str = Form("ollama"),
     preferred_model: str = Form(""),
     notes: str = Form(""),
+    route_story_bible_provider: str = Form(""),
+    route_story_bible_model: str = Form(""),
+    route_outline_provider: str = Form(""),
+    route_outline_model: str = Form(""),
+    route_chapter_plan_provider: str = Form(""),
+    route_chapter_plan_model: str = Form(""),
+    route_chapter_draft_provider: str = Form(""),
+    route_chapter_draft_model: str = Form(""),
+    route_chapter_critique_provider: str = Form(""),
+    route_chapter_critique_model: str = Form(""),
+    route_chapter_revision_provider: str = Form(""),
+    route_chapter_revision_model: str = Form(""),
+    route_chapter_summary_provider: str = Form(""),
+    route_chapter_summary_model: str = Form(""),
+    route_continuity_update_provider: str = Form(""),
+    route_continuity_update_model: str = Form(""),
+    route_manuscript_qa_provider: str = Form(""),
+    route_manuscript_qa_model: str = Form(""),
     story_setting: str = Form(""),
     story_tone: str = Form(""),
     story_protagonist: str = Form(""),
@@ -540,8 +748,27 @@ def create_project_ui(
         "requested_chapters": requested_chapters,
         "min_words_per_chapter": min_words_per_chapter,
         "max_words_per_chapter": max_words_per_chapter,
+        "preferred_provider_name": preferred_provider_name,
         "preferred_model": preferred_model,
         "notes": notes,
+        "route_story_bible_provider": route_story_bible_provider,
+        "route_story_bible_model": route_story_bible_model,
+        "route_outline_provider": route_outline_provider,
+        "route_outline_model": route_outline_model,
+        "route_chapter_plan_provider": route_chapter_plan_provider,
+        "route_chapter_plan_model": route_chapter_plan_model,
+        "route_chapter_draft_provider": route_chapter_draft_provider,
+        "route_chapter_draft_model": route_chapter_draft_model,
+        "route_chapter_critique_provider": route_chapter_critique_provider,
+        "route_chapter_critique_model": route_chapter_critique_model,
+        "route_chapter_revision_provider": route_chapter_revision_provider,
+        "route_chapter_revision_model": route_chapter_revision_model,
+        "route_chapter_summary_provider": route_chapter_summary_provider,
+        "route_chapter_summary_model": route_chapter_summary_model,
+        "route_continuity_update_provider": route_continuity_update_provider,
+        "route_continuity_update_model": route_continuity_update_model,
+        "route_manuscript_qa_provider": route_manuscript_qa_provider,
+        "route_manuscript_qa_model": route_manuscript_qa_model,
         "story_setting": story_setting,
         "story_tone": story_tone,
         "story_protagonist": story_protagonist,
@@ -560,11 +787,14 @@ def create_project_ui(
         "requested_chapters": requested_chapters,
         "min_words_per_chapter": min_words_per_chapter,
         "max_words_per_chapter": max_words_per_chapter,
+        "preferred_provider_name": preferred_provider_name,
         "preferred_model": preferred_model,
         "notes": notes,
         "story_brief": _story_brief_payload(raw_form_values),
+        "task_routing": _task_routing_payload(raw_form_values),
     }
     provider_config, provider_status, _ = _provider_status(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     try:
         payload = ProjectCreate.model_validate(payload_values)
     except ValidationError as exc:
@@ -576,8 +806,15 @@ def create_project_ui(
         )
 
     errors: dict[str, str] = {}
-    if provider_status.reachable and provider_status.available_models and payload.preferred_model not in provider_status.available_models:
-        errors["preferred_model"] = "Choose one of the detected models or fix the provider settings."
+    provider_error = _validate_provider_selection(
+        payload.preferred_provider_name,
+        payload.preferred_model,
+        provider_configs_by_name,
+        provider_statuses_by_name,
+    )
+    if provider_error:
+        errors["preferred_model"] = provider_error
+    errors.update(_validate_task_routing(payload.task_routing.model_dump(exclude_none=True), provider_configs_by_name, provider_statuses_by_name))
     if errors:
         return _render(
             request,
@@ -602,25 +839,49 @@ def provider_settings_page(
 
 
 @router.post("/settings/providers/ollama")
+@router.post("/settings/providers/{provider_name}")
 def update_provider_ui(
     request: Request,
+    provider_name: str = "ollama",
     base_url: str = Form(""),
     default_model: str = Form(""),
+    api_key: str = Form(""),
+    is_enabled: str | None = Form(None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
-    raw_values = {"base_url": base_url, "default_model": default_model}
+    raw_values = {
+        provider_name: {
+            "base_url": base_url,
+            "default_model": default_model,
+            "api_key": api_key,
+            "is_enabled": True if provider_name == "ollama" and is_enabled is None else _coerce_checkbox(is_enabled),
+        }
+    }
     try:
-        payload = ProviderConfigUpdate.model_validate(raw_values)
+        payload = ProviderConfigUpdate.model_validate(raw_values[provider_name])
     except ValidationError as exc:
         return _render(
             request,
             "provider_settings.html",
-            _provider_settings_context(request, db, settings, form_values=raw_values, form_errors=_field_errors(exc)),
+            _provider_settings_context(
+                request,
+                db,
+                settings,
+                form_values=raw_values,
+                form_errors={provider_name: _field_errors(exc)},
+            ),
             status_code=400,
         )
 
-    preview_status, _ = _provider_preview(settings, payload.base_url, payload.default_model)
+    preview_status, _ = _provider_preview(
+        settings,
+        provider_name,
+        payload.base_url,
+        payload.default_model,
+        api_key=payload.api_key,
+        is_enabled=payload.is_enabled,
+    )
     errors: dict[str, str] = {}
     if preview_status.reachable and preview_status.available_models and payload.default_model not in preview_status.available_models:
         errors["default_model"] = "Choose a default model from the detected list so new projects start from a verified option."
@@ -633,20 +894,20 @@ def update_provider_ui(
                 db,
                 settings,
                 form_values=raw_values,
-                form_errors=errors,
+                form_errors={provider_name: errors},
                 page_error="These changes were tested but not saved yet.",
                 provider_status=preview_status,
             ),
             status_code=400,
         )
 
-    update_provider_config(db, settings, payload)
+    update_provider_config(db, settings, provider_name, payload)
     db.commit()
     if preview_status.reachable:
         return _redirect("/settings/provider", message="Provider settings saved.", message_tone="success")
     return _redirect(
         "/settings/provider",
-        message="Provider settings saved. Novel Generator still cannot reach Ollama at that address yet.",
+        message=f"Provider settings saved. Novel Generator still cannot reach {provider_definition(provider_name).label} at that address yet.",
         message_tone="warning",
     )
 
@@ -674,8 +935,27 @@ def edit_project_ui(
     requested_chapters: str = Form(""),
     min_words_per_chapter: str = Form(""),
     max_words_per_chapter: str = Form(""),
+    preferred_provider_name: str = Form("ollama"),
     preferred_model: str = Form(""),
     notes: str = Form(""),
+    route_story_bible_provider: str = Form(""),
+    route_story_bible_model: str = Form(""),
+    route_outline_provider: str = Form(""),
+    route_outline_model: str = Form(""),
+    route_chapter_plan_provider: str = Form(""),
+    route_chapter_plan_model: str = Form(""),
+    route_chapter_draft_provider: str = Form(""),
+    route_chapter_draft_model: str = Form(""),
+    route_chapter_critique_provider: str = Form(""),
+    route_chapter_critique_model: str = Form(""),
+    route_chapter_revision_provider: str = Form(""),
+    route_chapter_revision_model: str = Form(""),
+    route_chapter_summary_provider: str = Form(""),
+    route_chapter_summary_model: str = Form(""),
+    route_continuity_update_provider: str = Form(""),
+    route_continuity_update_model: str = Form(""),
+    route_manuscript_qa_provider: str = Form(""),
+    route_manuscript_qa_model: str = Form(""),
     story_setting: str = Form(""),
     story_tone: str = Form(""),
     story_protagonist: str = Form(""),
@@ -700,8 +980,27 @@ def edit_project_ui(
         "requested_chapters": requested_chapters,
         "min_words_per_chapter": min_words_per_chapter,
         "max_words_per_chapter": max_words_per_chapter,
+        "preferred_provider_name": preferred_provider_name,
         "preferred_model": preferred_model,
         "notes": notes,
+        "route_story_bible_provider": route_story_bible_provider,
+        "route_story_bible_model": route_story_bible_model,
+        "route_outline_provider": route_outline_provider,
+        "route_outline_model": route_outline_model,
+        "route_chapter_plan_provider": route_chapter_plan_provider,
+        "route_chapter_plan_model": route_chapter_plan_model,
+        "route_chapter_draft_provider": route_chapter_draft_provider,
+        "route_chapter_draft_model": route_chapter_draft_model,
+        "route_chapter_critique_provider": route_chapter_critique_provider,
+        "route_chapter_critique_model": route_chapter_critique_model,
+        "route_chapter_revision_provider": route_chapter_revision_provider,
+        "route_chapter_revision_model": route_chapter_revision_model,
+        "route_chapter_summary_provider": route_chapter_summary_provider,
+        "route_chapter_summary_model": route_chapter_summary_model,
+        "route_continuity_update_provider": route_continuity_update_provider,
+        "route_continuity_update_model": route_continuity_update_model,
+        "route_manuscript_qa_provider": route_manuscript_qa_provider,
+        "route_manuscript_qa_model": route_manuscript_qa_model,
         "story_setting": story_setting,
         "story_tone": story_tone,
         "story_protagonist": story_protagonist,
@@ -720,11 +1019,13 @@ def edit_project_ui(
         "requested_chapters": requested_chapters,
         "min_words_per_chapter": min_words_per_chapter,
         "max_words_per_chapter": max_words_per_chapter,
+        "preferred_provider_name": preferred_provider_name,
         "preferred_model": preferred_model,
         "notes": notes,
         "story_brief": _story_brief_payload(raw_form_values),
+        "task_routing": _task_routing_payload(raw_form_values),
     }
-    _, provider_status, _ = _provider_status(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     try:
         validated = ProjectCreate.model_validate(payload_values)
     except ValidationError as exc:
@@ -744,8 +1045,21 @@ def edit_project_ui(
         )
 
     errors: dict[str, str] = {}
-    if provider_status.reachable and provider_status.available_models and validated.preferred_model not in provider_status.available_models:
-        errors["preferred_model"] = "Choose one of the detected models or update the provider settings."
+    provider_error = _validate_provider_selection(
+        validated.preferred_provider_name,
+        validated.preferred_model,
+        provider_configs_by_name,
+        provider_statuses_by_name,
+    )
+    if provider_error:
+        errors["preferred_model"] = provider_error
+    errors.update(
+        _validate_task_routing(
+            validated.task_routing.model_dump(exclude_none=True),
+            provider_configs_by_name,
+            provider_statuses_by_name,
+        )
+    )
     if errors:
         return _render(
             request,
@@ -820,6 +1134,7 @@ def cleanup_project_runs_ui(
 def create_run_ui(
     project_id: str,
     request: Request,
+    provider_name: str = Form("ollama"),
     model_name: str = Form(""),
     target_word_count: str = Form(""),
     requested_chapters: str = Form(""),
@@ -834,6 +1149,7 @@ def create_run_ui(
         raise HTTPException(status_code=404, detail="Project not found.")
 
     raw_values = {
+        "provider_name": provider_name,
         "model_name": model_name,
         "target_word_count": target_word_count,
         "requested_chapters": requested_chapters,
@@ -841,39 +1157,10 @@ def create_run_ui(
         "max_words_per_chapter": max_words_per_chapter,
         "pause_after_outline": _coerce_checkbox(pause_after_outline),
     }
-    _, provider_status, client = _provider_status(settings, db)
-
-    if not provider_status.reachable:
-        return _render(
-            request,
-            "project_detail.html",
-            _project_detail_context(
-                request,
-                project,
-                db,
-                settings,
-                run_values=raw_values,
-                run_errors={"__all__": "Novel Generator cannot reach Ollama right now. Fix the provider settings, then queue the run."},
-            ),
-            status_code=400,
-        )
-    if not provider_status.available_models:
-        return _render(
-            request,
-            "project_detail.html",
-            _project_detail_context(
-                request,
-                project,
-                db,
-                settings,
-                run_values=raw_values,
-                run_errors={"__all__": "Ollama is reachable but no models are installed yet. Pull a model, refresh provider settings, and try again."},
-            ),
-            status_code=400,
-        )
+    provider_configs_by_name, provider_statuses_by_name, manager = _provider_catalog(settings, db)
 
     try:
-        payload = RunCreate.model_validate({"project_id": project_id, **raw_values})
+        payload = RunCreate.model_validate({"project_id": project_id, **raw_values, "task_routing": project.task_routing or {}})
     except ValidationError as exc:
         return _render(
             request,
@@ -889,10 +1176,17 @@ def create_run_ui(
             status_code=400,
         )
 
-    chosen_model = (payload.model_name or project.preferred_model or provider_status.default_model).strip()
+    chosen_provider = (payload.provider_name or project.preferred_provider_name or "ollama").strip()
+    chosen_model = (payload.model_name or project.preferred_model).strip()
     errors: dict[str, str] = {}
-    if chosen_model not in provider_status.available_models:
-        errors["model_name"] = "Choose one of the detected models or update the provider settings first."
+    provider_error = _validate_provider_selection(
+        chosen_provider,
+        chosen_model,
+        provider_configs_by_name,
+        provider_statuses_by_name,
+    )
+    if provider_error:
+        errors["model_name"] = provider_error
     if errors:
         return _render(
             request,
@@ -901,11 +1195,11 @@ def create_run_ui(
             status_code=400,
         )
 
-    payload = payload.model_copy(update={"model_name": chosen_model})
+    payload = payload.model_copy(update={"provider_name": chosen_provider, "model_name": chosen_model, "task_routing": project.task_routing or {}})
     try:
-        client.ensure_model(chosen_model)
+        manager.ensure_model(chosen_provider, chosen_model)
         run = create_run(db, project, payload)
-    except (OllamaError, OllamaTransportError, ValueError) as exc:
+    except (ProviderError, ProviderTransportError, ValueError) as exc:
         return _render(
             request,
             "project_detail.html",
@@ -919,7 +1213,12 @@ def create_run_ui(
             ),
             status_code=400,
         )
-    record_event(db, run, "run_queued", {"message": "Run queued from the web UI."})
+    record_event(
+        db,
+        run,
+        "run_queued",
+        {"message": "Run queued from the web UI.", "provider_name": chosen_provider, "model_name": chosen_model},
+    )
     db.commit()
     return _redirect(f"/runs/{run.id}", message="Run queued.", message_tone="success")
 
@@ -1009,10 +1308,10 @@ def rerun_ui(
             message_tone="warning",
         )
 
-    _, _, client = _provider_status(settings, db)
+    _, _, manager = _provider_catalog(settings, db)
     try:
-        client.ensure_model(run.model_name)
-    except (OllamaError, OllamaTransportError) as exc:
+        manager.ensure_model(run.provider_name, run.model_name)
+    except (ProviderError, ProviderTransportError) as exc:
         return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="error")
 
     payload = _same_settings_payload(run)
@@ -1020,7 +1319,12 @@ def rerun_ui(
         new_run = create_run(db, run.project, payload)
     except ValueError as exc:
         return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="error")
-    record_event(db, new_run, "run_queued", {"message": "Run re-queued with the same settings."})
+    record_event(
+        db,
+        new_run,
+        "run_queued",
+        {"message": "Run re-queued with the same settings.", "provider_name": run.provider_name, "model_name": run.model_name},
+    )
     db.commit()
     return _redirect(f"/runs/{new_run.id}", message="Run re-queued.", message_tone="success")
 
@@ -1070,10 +1374,10 @@ def regenerate_chapter_ui(
             message="Wait for the current run to finish before regenerating.",
             message_tone="warning",
         )
-    _, _, client = _provider_status(settings, db)
+    _, _, manager = _provider_catalog(settings, db)
     try:
-        client.ensure_model(run.model_name)
-    except (OllamaError, OllamaTransportError) as exc:
+        manager.ensure_model(run.provider_name, run.model_name)
+    except (ProviderError, ProviderTransportError) as exc:
         return _redirect(f"/runs/{run_id}", message=str(exc), message_tone="error")
     payload = _same_settings_payload(run, source_run_id=run.id, resume_from_chapter=chapter_number)
     try:

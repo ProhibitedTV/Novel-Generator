@@ -3,6 +3,7 @@ from __future__ import annotations
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import RunStatus
 from novel_generator.repositories import get_project, get_run, record_event
+from novel_generator.services.openai_compatible import OpenAICompatibleClient
 from novel_generator.services.ollama import OllamaClient
 
 
@@ -234,3 +235,56 @@ def test_run_events_sse_payload_shape_remains_compatible(client, monkeypatch) ->
     assert '"event_type": "run_canceled"' in payload
     assert '"run_status": "canceled"' in payload
     assert "event: terminal" in payload
+
+
+def test_openai_compatible_provider_can_be_enabled_and_used_for_run_routing(client, monkeypatch) -> None:
+    monkeypatch.setattr(OpenAICompatibleClient, "list_models", lambda self: ["editor-model", "qa-model"])
+
+    config_response = client.post(
+        "/api/providers/openai_compatible/config",
+        json={
+            "base_url": "http://openai-compatible.test/v1",
+            "default_model": "editor-model",
+            "api_key": "secret-token",
+            "is_enabled": True,
+        },
+    )
+    assert config_response.status_code == 200
+
+    project_response = client.post(
+        "/api/projects",
+        json={
+            **create_project_payload(),
+            "preferred_provider_name": "openai_compatible",
+            "preferred_model": "editor-model",
+            "task_routing": {
+                "manuscript_qa": {
+                    "provider_name": "openai_compatible",
+                    "model_name": "qa-model",
+                }
+            },
+        },
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    run_response = client.post(
+        "/api/runs",
+        json={
+            "project_id": project_id,
+            "provider_name": "openai_compatible",
+            "model_name": "editor-model",
+            "task_routing": {
+                "manuscript_qa": {
+                    "provider_name": "openai_compatible",
+                    "model_name": "qa-model",
+                }
+            },
+        },
+    )
+
+    assert run_response.status_code == 201
+    payload = run_response.json()
+    assert payload["provider_name"] == "openai_compatible"
+    assert payload["model_name"] == "editor-model"
+    assert payload["task_routing"]["manuscript_qa"]["model_name"] == "qa-model"
