@@ -1155,6 +1155,102 @@ dd {
   margin: 0;
 }
 
+.run-dashboard-grid {
+  margin-top: 1rem;
+}
+
+.dashboard-panel {
+  gap: 0.95rem;
+}
+
+.dashboard-stage-card,
+.dashboard-contract {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.compact-stage-grid {
+  align-items: start;
+}
+
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.8rem;
+}
+
+.signal-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.85rem;
+  border-radius: 18px;
+  border: 1px solid rgba(217, 207, 192, 0.92);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.signal-card.signal-healthy {
+  border-color: rgba(18, 107, 63, 0.24);
+  background: rgba(18, 107, 63, 0.07);
+}
+
+.signal-card.signal-steady {
+  border-color: rgba(23, 106, 90, 0.24);
+  background: rgba(23, 106, 90, 0.07);
+}
+
+.signal-card.signal-watch {
+  border-color: rgba(184, 126, 24, 0.28);
+  background: rgba(184, 126, 24, 0.08);
+}
+
+.signal-card.signal-risk {
+  border-color: rgba(161, 58, 42, 0.24);
+  background: rgba(161, 58, 42, 0.08);
+}
+
+.signal-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.7rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.signal-meter {
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: rgba(28, 31, 38, 0.08);
+  overflow: hidden;
+}
+
+.signal-meter span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(23, 106, 90, 0.7), rgba(23, 106, 90, 0.95));
+}
+
+.dashboard-alert-list li {
+  overflow-wrap: anywhere;
+}
+
+.alert-error {
+  color: var(--danger);
+}
+
+.alert-warning {
+  color: #8a5f15;
+}
+
+.alert-info {
+  color: var(--accent-strong);
+}
+
+.alert-neutral {
+  color: var(--ink);
+}
+
 code {
   display: inline-block;
   max-width: 100%;

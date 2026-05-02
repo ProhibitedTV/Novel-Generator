@@ -10,12 +10,16 @@
   data-run-status="{{ run.status.value }}"
   data-run-step="{{ run.current_step }}"
   data-run-current-chapter="{{ run.current_chapter or '' }}"
+  data-run-created-at="{{ run.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+  data-run-started-at="{{ run.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') if run.started_at else '' }}"
+  data-run-completed-at="{{ run.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') if run.completed_at else '' }}"
 >
+  <script type="application/json" data-run-stages-json>{{ run_stage_data|tojson }}</script>
   <div class="section-header">
     <div class="page-header-copy">
       <p class="eyebrow">Run</p>
       <h1>{{ project.title }}</h1>
-      <p class="hero-copy">This page keeps the current stage, outline approval, live events, editorial QA, exports, and chapter-level recovery actions in one place.</p>
+      <p class="hero-copy">This page keeps the live pipeline view, stage explanations, quality signals, outline approval, exports, and chapter-level recovery actions in one place.</p>
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
@@ -45,12 +49,16 @@
     <div class="overview-card">
       <div class="overview-grid">
         <div class="detail-item">
-          <span class="detail-label">Provider</span>
-          <span class="detail-value">{{ run.provider_name }}</span>
+          <span class="detail-label">Run</span>
+          <span class="detail-value">#{{ run.id[:8] }}</span>
         </div>
         <div class="detail-item">
-          <span class="detail-label">Model</span>
-          <span class="detail-value long-value">{{ run.model_name }}</span>
+          <span class="detail-label">Active route</span>
+          <span class="detail-value long-value" data-run-route-label>{{ current_route_context.provider_name }} / {{ current_route_context.model_name }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Provider default</span>
+          <span class="detail-value long-value">{{ run.provider_name }} / {{ run.model_name }}</span>
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Status</span>
@@ -58,7 +66,7 @@
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Current stage</span>
-          <span class="detail-value" data-run-step-label>{{ run.current_step.replace("_", " ") }}</span>
+          <span class="detail-value" data-run-step-label>{{ current_stage_context.label }}</span>
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Current chapter</span>
@@ -72,6 +80,10 @@
         <div class="detail-item inline-detail">
           <span class="detail-label">Queued</span>
           <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+        </div>
+        <div class="detail-item inline-detail">
+          <span class="detail-label">Elapsed</span>
+          <span class="detail-value" data-run-elapsed>{{ "Starting soon" if not run.started_at else "-" }}</span>
         </div>
         <div class="detail-item inline-detail">
           <span class="detail-label">Started</span>
@@ -109,14 +121,232 @@
     </div>
     <div class="metric-card">
       <span class="detail-label">Completed chapters</span>
-      <strong>{{ completed_chapter_count }}</strong>
+      <strong data-run-completed-chapters>{{ completed_chapter_count }}</strong>
       <p class="metric-copy">Saved with prose, summary, and continuity update.</p>
     </div>
     <div class="metric-card">
+      <span class="detail-label">Word progress</span>
+      <strong data-run-word-progress>{{ total_run_words }}</strong>
+      <p class="metric-copy"><span data-run-word-progress-label>{{ word_progress_percent }}%</span> of the {{ run.target_word_count }}-word target drafted so far.</p>
+    </div>
+    <div class="metric-card">
+      <span class="detail-label">Events logged</span>
+      <strong data-run-event-count>{{ event_count }}</strong>
+      <p class="metric-copy">Recent pipeline actions captured in the live event feed.</p>
+    </div>
+    <div class="metric-card">
       <span class="detail-label">Artifacts ready</span>
-      <strong>{{ run.artifacts|length }}</strong>
+      <strong data-run-artifact-count>{{ run.artifacts|length }}</strong>
       <p class="metric-copy">Manuscript exports plus editorial feedback.</p>
     </div>
+  </div>
+
+  <div class="grid two-up run-dashboard-grid">
+    <article class="panel dashboard-panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>What The Worker Is Doing</h2>
+          <p>Plain-language context for the current stage so long runs feel explainable instead of opaque.</p>
+        </div>
+      </div>
+      <div class="dashboard-stage-card">
+        <div class="chapter-topline">
+          <div class="chapter-heading">
+            <p class="eyebrow">Current stage</p>
+            <h3 data-stage-title>{{ current_stage_context.label }}</h3>
+          </div>
+          {% if next_stage_context %}
+            <span class="meta-chip" data-stage-next-label>Next: {{ next_stage_context.label }}</span>
+          {% endif %}
+        </div>
+        <p class="chapter-copy" data-stage-description>{{ current_stage_context.description }}</p>
+        <div class="story-bible-grid compact-stage-grid">
+          <div class="detail-item">
+            <span class="detail-label">Why this can take time</span>
+            <p class="chapter-copy" data-stage-why>{{ current_stage_context.why }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Healthy output to expect</span>
+            <p class="chapter-copy" data-stage-result>{{ current_stage_context.result }}</p>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article class="panel dashboard-panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>Current Chapter Contract</h2>
+          <p>The active chapter objective, obstacle, emotional turn, and ending hook that the pipeline is trying to honor.</p>
+        </div>
+      </div>
+      <div class="dashboard-contract{% if not current_contract %} is-hidden{% endif %}" data-current-contract>
+        <div class="chapter-topline">
+          <div class="chapter-heading">
+            <p class="eyebrow">Chapter <span data-contract-chapter>{{ current_contract.chapter_number if current_contract else "-" }}</span></p>
+            <h3 data-contract-title>{{ current_contract.title if current_contract else "Waiting for chapter planning" }}</h3>
+          </div>
+          <span class="badge{% if current_contract %} status-{{ current_contract.status }}{% endif %}" data-contract-status>{% if current_contract %}{{ current_contract.status.replace("_", " ") }}{% else %}pending{% endif %}</span>
+        </div>
+        <div class="story-bible-grid">
+          <div class="detail-item">
+            <span class="detail-label">Objective</span>
+            <p class="chapter-copy" data-contract-objective>{{ current_contract.objective if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Primary obstacle</span>
+            <p class="chapter-copy" data-contract-obstacle>{{ current_contract.primary_obstacle if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Character turn</span>
+            <p class="chapter-copy" data-contract-character-turn>{{ current_contract.character_turn if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Cost if success</span>
+            <p class="chapter-copy" data-contract-cost>{{ current_contract.cost_if_success if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Side-character friction</span>
+            <p class="chapter-copy" data-contract-friction>{{ current_contract.side_character_friction if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Chapter mode</span>
+            <p class="chapter-copy" data-contract-mode>{{ current_contract.chapter_mode if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Emotional reveal</span>
+            <p class="chapter-copy" data-contract-emotional-reveal>{{ (current_contract.emotional_reveal or current_contract.emotional_anchor) if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Civilian texture</span>
+            <p class="chapter-copy" data-contract-civilian>{{ (current_contract.civilian_life_detail or current_contract.civilian_texture) if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Ideology pressure</span>
+            <p class="chapter-copy" data-contract-ideology>{{ (current_contract.ideology_pressure or current_contract.ideology_clash) if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Attempt and complication</span>
+            <p class="chapter-copy" data-contract-attempt>{% if current_contract %}{{ current_contract.attempt or "-" }} / {{ current_contract.complication or "-" }}{% else %}-{% endif %}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Price paid</span>
+            <p class="chapter-copy" data-contract-price>{{ (current_contract.price_paid or current_contract.partial_failure_mode) if current_contract else "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Ending hook</span>
+            <p class="chapter-copy" data-contract-ending>{% if current_contract %}{{ current_contract.ending_trigger or "-" }} / {{ current_contract.ending_visible_actor or "-" }} / {{ current_contract.ending_next_problem or current_contract.ending_hook_delivery or "-" }}{% else %}-{% endif %}</p>
+          </div>
+        </div>
+      </div>
+      <p class="empty-state{% if current_contract %} is-hidden{% endif %}" data-current-contract-empty>The active chapter contract will appear here once the outline and chapter plan exist.</p>
+    </article>
+  </div>
+
+  <div class="grid two-up run-dashboard-grid">
+    <article class="panel dashboard-panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>Quality Signals</h2>
+          <p>These scores come from the chapter critique and tell you whether the prose looks healthy or needs intervention.</p>
+        </div>
+        <p data-quality-source-label>{% if quality_source_chapter %}Latest chapter: {{ quality_source_chapter }}{% else %}Waiting for the first critique{% endif %}</p>
+      </div>
+      <div class="signal-grid{% if not quality_signal_rows %} is-hidden{% endif %}" data-quality-signals>
+        {% if quality_signal_rows %}
+          {% for signal in quality_signal_rows %}
+            <article class="signal-card signal-{{ signal.tone }}">
+              <div class="signal-topline">
+                <strong>{{ signal.label }}</strong>
+                <span>{{ signal.score }}/10</span>
+              </div>
+              <div class="signal-meter" aria-hidden="true">
+                <span style="width: {{ signal.score * 10 }}%"></span>
+              </div>
+              <p class="field-note">{{ signal.state_label }}{% if signal.lower_is_better %} risk{% endif %}</p>
+            </article>
+          {% endfor %}
+        {% endif %}
+      </div>
+      <p class="empty-state{% if quality_signal_rows %} is-hidden{% endif %}" data-quality-empty>The first chapter critique will populate this area with quality signals and revision notes.</p>
+
+      <div class="support-block">
+        <div class="section-header-copy">
+          <h3>Revision triggers</h3>
+        </div>
+          <ul class="bullet-list dashboard-alert-list{% if not revision_trigger_rows %} is-hidden{% endif %}" data-revision-triggers>
+          {% if revision_trigger_rows %}
+            {% for item in revision_trigger_rows %}
+              <li class="alert-{{ item.tone }}">{{ item.text }}</li>
+            {% endfor %}
+          {% endif %}
+          </ul>
+          <p class="field-note{% if revision_trigger_rows %} is-hidden{% endif %}" data-revision-empty>No revision triggers are available yet.</p>
+      </div>
+    </article>
+
+    <article class="panel dashboard-panel">
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h2>Continuity Highlights</h2>
+          <p>After each completed chapter, the ledger freezes what changed so later chapters do not drift on canon or consequences.</p>
+        </div>
+        <p data-continuity-source-label>{% if continuity_snapshot and continuity_snapshot.chapter_number %}Latest checkpoint: Chapter {{ continuity_snapshot.chapter_number }}{% else %}Waiting for the first continuity update{% endif %}</p>
+      </div>
+      <div class="story-bible-grid{% if not continuity_snapshot %} is-hidden{% endif %}" data-continuity-panel>
+        {% if continuity_snapshot %}
+          <div class="detail-item">
+            <span class="detail-label">Chapter outcome</span>
+            <p class="chapter-copy" data-continuity-outcome>{{ continuity_snapshot.chapter_outcome or "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Patch status</span>
+            <p class="chapter-copy" data-continuity-patch>{{ continuity_snapshot.current_patch_status or "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">World state</span>
+            <p class="chapter-copy" data-continuity-world>{{ continuity_snapshot.world_state or "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Timeline checkpoint</span>
+            <p class="chapter-copy" data-continuity-timeline>{{ continuity_snapshot.timeline_entry or "-" }}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Entity changes</span>
+            <ul class="bullet-list" data-continuity-entities>
+              {% for item in continuity_snapshot.entity_changes %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Open promises</span>
+            <ul class="bullet-list" data-continuity-promises>
+              {% for item in continuity_snapshot.open_promises %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Emotional fallout</span>
+            <ul class="bullet-list" data-continuity-emotions>
+              {% for item in continuity_snapshot.emotional_loops %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Civilian pressure</span>
+            <ul class="bullet-list" data-continuity-civilians>
+              {% for item in continuity_snapshot.civilian_pressure_points %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+      </div>
+      <p class="empty-state{% if continuity_snapshot %} is-hidden{% endif %}" data-continuity-empty>Continuity highlights will appear after the first completed chapter checkpoint.</p>
+    </article>
   </div>
 
   {% if awaiting_outline_approval %}
@@ -337,7 +567,7 @@
               {% for entity in story_bible.canon_registry %}
                 <article class="story-card">
                   <strong>{{ entity.name }}</strong>
-                  <p class="field-note">{{ entity.kind }}{% if entity.role %} · {{ entity.role }}{% endif %}</p>
+                  <p class="field-note">{{ entity.kind }}{% if entity.role %} / {{ entity.role }}{% endif %}</p>
                   {% if entity.aliases %}
                     <p class="chapter-copy">Aliases: {{ entity.aliases | join(", ") }}</p>
                   {% endif %}
@@ -433,10 +663,10 @@
   <article class="panel">
     <div class="section-header">
       <div class="section-header-copy">
-        <h2>Progress events</h2>
+        <h2>Recent pipeline actions</h2>
         <p>Live worker updates appear here without changing the SSE payload shape.</p>
       </div>
-      <p>{{ run.events|length }} logged</p>
+      <p><span data-event-log-count>{{ run.events|length }}</span> logged</p>
     </div>
     <ul class="event-log" data-event-log>
       {% for event in run.events|sort(attribute='sequence') %}
@@ -447,10 +677,7 @@
           </div>
           <p class="event-copy">{{ event.payload.message or event.payload.title or event.payload.chapter_number or "Waiting for the next update." }}</p>
           {% if event.payload.provider_name or event.payload.model_name %}
-            <p class="field-note">
-              {{ event.payload.provider_name or run.provider_name }}
-              {% if event.payload.model_name %}· {{ event.payload.model_name }}{% endif %}
-            </p>
+            <p class="field-note">{{ event.payload.provider_name or run.provider_name }}{% if event.payload.model_name %} / {{ event.payload.model_name }}{% endif %}</p>
           {% endif %}
         </li>
       {% endfor %}

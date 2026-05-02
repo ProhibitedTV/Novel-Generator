@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from urllib.parse import urlencode
 
@@ -38,21 +39,375 @@ from ..settings import Settings
 router = APIRouter(tags=["ui"])
 
 RUN_STAGES = [
-    {"id": "queued", "label": "Queued", "description": "Waiting for the worker to pick up the run."},
-    {"id": "story_bible", "label": "Story bible", "description": "Building the book's core promise, cast, and system rules."},
-    {"id": "outline", "label": "Outline", "description": "Generating the chapter-by-chapter structure and ending path."},
-    {"id": "outline_review", "label": "Review outline", "description": "Paused so you can approve the structure before the long draft begins."},
-    {"id": "chapter_plan", "label": "Plan chapter", "description": "Turning the approved outline into concrete scene beats."},
-    {"id": "chapter_draft", "label": "Draft chapter", "description": "Writing prose for the current chapter."},
-    {"id": "chapter_revision", "label": "Revise chapter", "description": "Running one editorial cleanup pass when the critique says it needs it."},
-    {"id": "chapter_summary", "label": "Update continuity", "description": "Saving the chapter summary and run-level continuity ledger."},
-    {"id": "manuscript_qa", "label": "Editorial QA", "description": "Checking the full manuscript for repetition, continuity drift, and ending shape."},
-    {"id": "export", "label": "Export", "description": "Rendering manuscript and QA artifacts."},
-    {"id": "completed", "label": "Complete", "description": "Artifacts are ready and the run is done."},
-    {"id": "failed", "label": "Failed", "description": "The run stopped because something went wrong."},
-    {"id": "canceled", "label": "Canceled", "description": "The run was stopped before it finished."},
+    {
+        "id": "queued",
+        "label": "Queued",
+        "description": "Waiting for the worker to pick up the run.",
+        "why": "This usually means another run is active or the worker has not started the next long generation step yet.",
+        "result": "No manuscript text is being generated yet, but the run settings and routing snapshot are locked in.",
+    },
+    {
+        "id": "story_bible",
+        "label": "Story bible",
+        "description": "Building the book's core promise, cast, and system rules.",
+        "why": "The model is turning the brief into canon, ideology, pacing rules, and continuity anchors for the whole manuscript.",
+        "result": "A structured story bible should appear here with the logline, cast, canon registry, and conflict ladder.",
+    },
+    {
+        "id": "outline",
+        "label": "Outline",
+        "description": "Generating the chapter-by-chapter structure and ending path.",
+        "why": "This stage lays down the chapter contract for the whole run, so it can take time to balance pacing, reversals, and ending promises.",
+        "result": "Each chapter should gain an objective, obstacle, cost, character turn, and concrete ending hook.",
+    },
+    {
+        "id": "outline_review",
+        "label": "Review outline",
+        "description": "Paused so you can approve the structure before the long draft begins.",
+        "why": "The worker is intentionally stopped here so you can catch structural problems before spending hours on full chapter drafting.",
+        "result": "Approve the outline to continue, or cancel and edit the project if the structure is off.",
+    },
+    {
+        "id": "chapter_plan",
+        "label": "Plan chapter",
+        "description": "Turning the approved outline into concrete scene beats.",
+        "why": "The system is defining the specific attempt, complication, interpersonal conflict, and ending delivery for the active chapter.",
+        "result": "The current chapter contract should fill in with scene-level beats and costs.",
+    },
+    {
+        "id": "chapter_draft",
+        "label": "Draft chapter",
+        "description": "Writing prose for the current chapter.",
+        "why": "This is usually the longest stage because the model is producing full prose while obeying the story bible, canon, pacing rules, and latest continuity ledger.",
+        "result": "Word count should climb and the chapter preview will become available after the draft is saved.",
+    },
+    {
+        "id": "chapter_revision",
+        "label": "Revise chapter",
+        "description": "Running one editorial cleanup pass when the critique says it needs it.",
+        "why": "The worker only spends extra time here when the draft needs a targeted repair for endings, continuity, emotional depth, or low-cost solutions.",
+        "result": "Quality signals and revision triggers should explain what the repair pass is trying to fix.",
+    },
+    {
+        "id": "chapter_summary",
+        "label": "Update continuity",
+        "description": "Saving the chapter summary and run-level continuity ledger.",
+        "why": "The system is freezing what changed so later chapters do not drift on canon, open promises, emotional fallout, or world state.",
+        "result": "Continuity highlights should update with the latest chapter outcome, world state, and named-entity changes.",
+    },
+    {
+        "id": "manuscript_qa",
+        "label": "Editorial QA",
+        "description": "Checking the full manuscript for repetition, continuity drift, and ending shape.",
+        "why": "This stage reads the manuscript as a whole and merges model critique with deterministic lint findings.",
+        "result": "A QA report artifact should appear with strengths, warnings, and structural risks.",
+    },
+    {
+        "id": "export",
+        "label": "Export",
+        "description": "Rendering manuscript and QA artifacts.",
+        "why": "The worker is packaging the final manuscript files and editorial report so they can be downloaded later.",
+        "result": "Markdown, DOCX, and QA artifacts should attach to the run.",
+    },
+    {
+        "id": "completed",
+        "label": "Complete",
+        "description": "Artifacts are ready and the run is done.",
+        "why": "All requested chapters, continuity checkpoints, QA passes, and exports are finished.",
+        "result": "Use the artifacts and chapter QA to decide whether to rerun, regenerate from a chapter, or revise manually.",
+    },
+    {
+        "id": "failed",
+        "label": "Failed",
+        "description": "The run stopped because something went wrong.",
+        "why": "A provider error, parse failure, validation problem, or unrecoverable pipeline issue interrupted the run.",
+        "result": "Check the latest events and error message to see where it failed before rerunning.",
+    },
+    {
+        "id": "canceled",
+        "label": "Canceled",
+        "description": "The run was stopped before it finished.",
+        "why": "Cancellation is usually used when the outline or early chapter signals say the run is not worth finishing.",
+        "result": "You can rerun with the same settings or edit the project before trying again.",
+    },
 ]
 TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
+RUN_STAGE_LOOKUP = {stage["id"]: stage for stage in RUN_STAGES}
+RUN_STAGE_PROGRESS_ORDER = [
+    "queued",
+    "story_bible",
+    "outline",
+    "outline_review",
+    "chapter_plan",
+    "chapter_draft",
+    "chapter_revision",
+    "chapter_summary",
+    "manuscript_qa",
+    "export",
+    "completed",
+]
+QUALITY_SIGNAL_DEFS = [
+    {"field": "forward_motion_score", "label": "Forward motion", "lower_is_better": False},
+    {"field": "ending_concreteness_score", "label": "Ending concreteness", "lower_is_better": False},
+    {"field": "cost_consequence_realism_score", "label": "Cost realism", "lower_is_better": False},
+    {"field": "emotional_depth_score", "label": "Emotional depth", "lower_is_better": False},
+    {"field": "side_character_independence_score", "label": "Side-character agency", "lower_is_better": False},
+    {"field": "proper_noun_continuity_score", "label": "Proper-noun continuity", "lower_is_better": False},
+    {"field": "ideology_clarity_score", "label": "Ideology clarity", "lower_is_better": False},
+    {"field": "civilian_texture_score", "label": "Civilian texture", "lower_is_better": False},
+    {"field": "repetition_risk_score", "label": "Repetition risk", "lower_is_better": True},
+]
+
+
+def _score_state(score: int, *, lower_is_better: bool) -> tuple[str, str]:
+    if lower_is_better:
+        if score <= 3:
+            return "healthy", "Low"
+        if score <= 5:
+            return "watch", "Watch"
+        return "risk", "High"
+    if score >= 8:
+        return "healthy", "Strong"
+    if score >= 6:
+        return "steady", "Healthy"
+    if score >= 4:
+        return "watch", "Watch"
+    return "risk", "Weak"
+
+
+def _sorted_run_events(run: GenerationRun) -> list[Any]:
+    return sorted(run.events, key=lambda item: item.sequence)
+
+
+def _sorted_run_chapters(run: GenerationRun) -> list[Any]:
+    return sorted(run.chapters, key=lambda item: item.chapter_number)
+
+
+def _normalize_run_stage(run: GenerationRun) -> str:
+    if run.status == RunStatus.AWAITING_APPROVAL:
+        return "outline_review"
+    if run.status == RunStatus.COMPLETED:
+        return "completed"
+    if run.status == RunStatus.FAILED:
+        return "failed"
+    if run.status == RunStatus.CANCELED:
+        return "canceled"
+    if run.current_step in {"", "starting", "recovered", None}:
+        return "queued"
+    return run.current_step
+
+
+def _stage_context(run: GenerationRun) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    stage_id = _normalize_run_stage(run)
+    current_stage = RUN_STAGE_LOOKUP.get(stage_id, RUN_STAGE_LOOKUP["queued"])
+    next_stage: dict[str, Any] | None = None
+    if stage_id in RUN_STAGE_PROGRESS_ORDER:
+        index = RUN_STAGE_PROGRESS_ORDER.index(stage_id)
+        if index + 1 < len(RUN_STAGE_PROGRESS_ORDER):
+            next_stage = RUN_STAGE_LOOKUP[RUN_STAGE_PROGRESS_ORDER[index + 1]]
+    return current_stage, next_stage
+
+
+def _safe_plan(chapter: Any | None) -> dict[str, Any]:
+    if chapter is None or not chapter.plan:
+        return {}
+    try:
+        parsed = json.loads(chapter.plan)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _latest_route_context(run: GenerationRun) -> dict[str, str]:
+    for event in reversed(_sorted_run_events(run)):
+        payload = event.payload or {}
+        provider_name = str(payload.get("provider_name", "") or "").strip()
+        model_name = str(payload.get("model_name", "") or "").strip()
+        if provider_name or model_name:
+            return {
+                "provider_name": provider_name or run.provider_name,
+                "model_name": model_name or run.model_name,
+            }
+    return {"provider_name": run.provider_name, "model_name": run.model_name}
+
+
+def _chapter_for_dashboard(run: GenerationRun) -> Any | None:
+    chapters = _sorted_run_chapters(run)
+    if not chapters:
+        return None
+    if run.current_chapter:
+        for chapter in chapters:
+            if chapter.chapter_number == run.current_chapter:
+                return chapter
+    for chapter in chapters:
+        if chapter.status != ChapterStatus.COMPLETED:
+            return chapter
+    return chapters[-1]
+
+
+def _latest_quality_chapter(run: GenerationRun, preferred: Any | None = None) -> Any | None:
+    if preferred is not None and preferred.qa_notes:
+        return preferred
+    for chapter in reversed(_sorted_run_chapters(run)):
+        if chapter.qa_notes:
+            return chapter
+    return preferred
+
+
+def _latest_continuity_chapter(run: GenerationRun, preferred: Any | None = None) -> Any | None:
+    if preferred is not None and preferred.continuity_update:
+        return preferred
+    for chapter in reversed(_sorted_run_chapters(run)):
+        if chapter.continuity_update:
+            return chapter
+    return preferred
+
+
+def _outline_entry(run: GenerationRun, chapter_number: int | None) -> dict[str, Any] | None:
+    if chapter_number is None:
+        return None
+    for item in list(run.outline or []):
+        if int(item.get("chapter_number", 0) or 0) == chapter_number:
+            return item
+    return None
+
+
+def _current_contract_context(run: GenerationRun) -> tuple[dict[str, Any] | None, Any | None]:
+    chapter = _chapter_for_dashboard(run)
+    if chapter is None:
+        return None, None
+    outline = _outline_entry(run, chapter.chapter_number) or {}
+    ending_hook = outline.get("concrete_ending_hook") or {}
+    plan = _safe_plan(chapter)
+    contract = {
+        "chapter_number": chapter.chapter_number,
+        "title": chapter.title,
+        "status": chapter.status.value,
+        "objective": outline.get("objective", chapter.outline_summary),
+        "primary_obstacle": outline.get("primary_obstacle", ""),
+        "character_turn": outline.get("character_turn", ""),
+        "cost_if_success": outline.get("cost_if_success", ""),
+        "side_character_friction": outline.get("side_character_friction", ""),
+        "chapter_mode": outline.get("chapter_mode", ""),
+        "civilian_life_detail": outline.get("civilian_life_detail", ""),
+        "emotional_reveal": outline.get("emotional_reveal", ""),
+        "ideology_pressure": outline.get("ideology_pressure", ""),
+        "ending_trigger": ending_hook.get("trigger", ""),
+        "ending_visible_actor": ending_hook.get("visible_object_or_actor", ""),
+        "ending_next_problem": ending_hook.get("next_problem", ""),
+        "attempt": plan.get("attempt", ""),
+        "complication": plan.get("complication", ""),
+        "price_paid": plan.get("price_paid", ""),
+        "partial_failure_mode": plan.get("partial_failure_mode", ""),
+        "ending_hook_delivery": plan.get("ending_hook_delivery", ""),
+        "emotional_anchor": plan.get("emotional_anchor", ""),
+        "civilian_texture": plan.get("civilian_texture", ""),
+        "ideology_clash": plan.get("ideology_clash", ""),
+        "primary_interpersonal_conflict": plan.get("primary_interpersonal_conflict", ""),
+    }
+    return contract, chapter
+
+
+def _quality_signal_rows(chapter: Any | None) -> list[dict[str, Any]]:
+    if chapter is None or not chapter.qa_notes:
+        return []
+    qa_notes = chapter.qa_notes or {}
+    rows: list[dict[str, Any]] = []
+    for item in QUALITY_SIGNAL_DEFS:
+        score = int(qa_notes.get(item["field"], 0) or 0)
+        tone, state_label = _score_state(score, lower_is_better=bool(item["lower_is_better"]))
+        rows.append(
+            {
+                "label": item["label"],
+                "score": score,
+                "tone": tone,
+                "state_label": state_label,
+                "lower_is_better": bool(item["lower_is_better"]),
+            }
+        )
+    return rows
+
+
+def _revision_trigger_rows(chapter: Any | None) -> list[dict[str, str]]:
+    if chapter is None or not chapter.qa_notes:
+        return []
+    qa_notes = chapter.qa_notes or {}
+    rows: list[dict[str, str]] = []
+    repair_scope = str(qa_notes.get("repair_scope", "none") or "none").strip()
+    if repair_scope and repair_scope != "none":
+        rows.append({"tone": "info", "text": f"Repair scope used: {repair_scope.replace('_', ' ')}."})
+    for item in qa_notes.get("blocking_issues", []) or []:
+        rows.append({"tone": "error", "text": str(item)})
+    for item in qa_notes.get("soft_warnings", []) or []:
+        rows.append({"tone": "warning", "text": str(item)})
+    for item in qa_notes.get("focus", []) or []:
+        rows.append({"tone": "neutral", "text": str(item)})
+    deduped: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if row["text"] in seen:
+            continue
+        seen.add(row["text"])
+        deduped.append(row)
+    return deduped[:8]
+
+
+def _continuity_snapshot(run: GenerationRun, chapter: Any | None) -> dict[str, Any] | None:
+    source = _latest_continuity_chapter(run, preferred=chapter)
+    ledger = run.continuity_ledger or {}
+    if source is None and not ledger:
+        return None
+    update = (source.continuity_update or {}) if source is not None else {}
+    entity_changes = [f"{name}: {state}" for name, state in (update.get("entity_state_changes", {}) or {}).items()]
+    open_promises = [f"{name}: {state}" for name, state in (update.get("open_promises_by_name", {}) or {}).items()]
+    emotional_loops = [f"{name}: {state}" for name, state in (update.get("emotional_open_loops", {}) or {}).items()]
+    trust_fractures = [f"{name}: {state}" for name, state in (update.get("trust_fractures", {}) or {}).items()]
+    memory_damage = [f"{name}: {state}" for name, state in (update.get("memory_damage", {}) or {}).items()]
+    return {
+        "chapter_number": source.chapter_number if source is not None else None,
+        "chapter_outcome": update.get("chapter_outcome", ""),
+        "timeline_entry": update.get("timeline_entry", ""),
+        "current_patch_status": update.get("current_patch_status", ledger.get("current_patch_status", "")),
+        "world_state": update.get("world_state", ledger.get("world_state", "")),
+        "entity_changes": entity_changes,
+        "open_promises": open_promises,
+        "emotional_loops": emotional_loops,
+        "trust_fractures": trust_fractures,
+        "memory_damage": memory_damage,
+        "civilian_pressure_points": list(update.get("civilian_pressure_points", []) or []),
+    }
+
+
+def _run_word_count(run: GenerationRun) -> int:
+    return sum(int(chapter.word_count or 0) for chapter in run.chapters)
+
+
+def _word_progress_percent(run: GenerationRun) -> int:
+    if run.target_word_count <= 0:
+        return 0
+    return min(100, int(round((_run_word_count(run) / run.target_word_count) * 100)))
+
+
+def _run_dashboard_context(run: GenerationRun) -> dict[str, Any]:
+    current_stage, next_stage = _stage_context(run)
+    current_contract, dashboard_chapter = _current_contract_context(run)
+    quality_chapter = _latest_quality_chapter(run, preferred=dashboard_chapter)
+    quality_source = quality_chapter.chapter_number if quality_chapter is not None and quality_chapter.qa_notes else None
+    continuity = _continuity_snapshot(run, dashboard_chapter)
+    return {
+        "current_stage_context": current_stage,
+        "next_stage_context": next_stage,
+        "current_route_context": _latest_route_context(run),
+        "current_contract": current_contract,
+        "quality_signal_rows": _quality_signal_rows(quality_chapter),
+        "quality_source_chapter": quality_source,
+        "revision_trigger_rows": _revision_trigger_rows(quality_chapter),
+        "continuity_snapshot": continuity,
+        "total_run_words": _run_word_count(run),
+        "word_progress_percent": _word_progress_percent(run),
+        "run_stage_data": RUN_STAGES,
+        "event_count": len(run.events),
+    }
 
 
 def _redirect(
@@ -1250,6 +1605,7 @@ def run_detail(
             "story_bible": run.story_bible or {},
             "continuity_ledger": run.continuity_ledger or {},
             **_artifact_context(run),
+            **_run_dashboard_context(run),
         },
     )
 

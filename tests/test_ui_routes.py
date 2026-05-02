@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import Artifact, RunStatus
 from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, get_project, get_run
@@ -213,6 +215,12 @@ def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> 
     assert 'data-run-detail' in response.text
     assert 'data-run-stepper' in response.text
     assert 'data-event-log' in response.text
+    assert 'data-run-stages-json' in response.text
+    assert 'data-run-elapsed' in response.text
+    assert "What The Worker Is Doing" in response.text
+    assert "Current Chapter Contract" in response.text
+    assert "Quality Signals" in response.text
+    assert "Continuity Highlights" in response.text
 
 
 def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> None:
@@ -333,6 +341,39 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
         ]
         create_chapters_from_outline(session, run)
         chapter = run.chapters[0]
+        run.status = RunStatus.RUNNING
+        run.current_step = "chapter_revision"
+        run.current_chapter = 1
+        chapter.plan = json.dumps(
+            {
+                "attempt": "Nora spoofs the hatch sensor to buy ten seconds.",
+                "complication": "Jun refuses to follow her if she burns the safety fuse.",
+                "price_paid": "The spoof exposes their hiding place to the audit net.",
+                "emotional_anchor": "Nora remembers the operator she failed to save.",
+                "civilian_texture": "Children shelter in a maintenance chapel nearby.",
+                "ideology_clash": "Jun wants safety even if it means obedience.",
+            }
+        )
+        chapter.summary = "Nora reaches the hatch, but the audit net tracks the spoof."
+        chapter.continuity_update = {
+            "chapter_outcome": "Nora escapes the hatch but exposes the team.",
+            "current_patch_status": "Peace Patch replication paused at the hatch cluster.",
+            "character_states": {"Nora": "committed", "Jun": "wavering"},
+            "world_state": "Audit drones are narrowing the search grid.",
+            "open_threads": ["Who signed the patch"],
+            "resolved_threads": [],
+            "timeline_entry": "The hatch spoof buys a brief escape window.",
+            "timeline": ["The hatch spoof buys a brief escape window."],
+            "new_entities_introduced": [],
+            "entity_state_changes": {"Audit Net": "tracking Nora's spoof signature"},
+            "open_promises_by_name": {"Jun": "Will he betray Nora to preserve station safety?"},
+            "ideology_state_by_character": {"Jun": "Safety first", "Nora": "Consent first"},
+            "ideology_shift_notes": {},
+            "memory_damage": {},
+            "trust_fractures": {"Nora/Jun": "Trust is eroding under pressure."},
+            "civilian_pressure_points": ["Families are sheltering near the maintenance chapel."],
+            "emotional_open_loops": {"Nora": "She cannot forget the last operator she failed to save."},
+        }
         chapter.qa_notes = {
             "strengths": ["Forward motion holds."],
             "warnings": ["The ending still feels abstract."],
@@ -356,6 +397,11 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
     assert "Blocking issues" in response.text
     assert "Repair scope" in response.text
     assert "Ending concreteness: 4/10" in response.text
+    assert "Repair scope used: targeted scene and ending." in response.text
+    assert "Nora spoofs the hatch sensor to buy ten seconds." in response.text
+    assert "Peace Patch replication paused at the hatch cluster." in response.text
+    assert "Audit Net" in response.text
+    assert "tracking Nora" in response.text
 
 
 def test_project_detail_renders_cleanup_controls_for_finished_runs(client, monkeypatch) -> None:
