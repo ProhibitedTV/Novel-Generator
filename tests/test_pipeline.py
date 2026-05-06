@@ -157,6 +157,7 @@ def _critique_json(
     revision_required: bool,
     ending_hook_type: str | None = None,
     scene_turn_resolution_score: int | None = None,
+    technical_escalation_fatigue_score: int = 0,
 ) -> str:
     return json.dumps(
         {
@@ -178,6 +179,7 @@ def _critique_json(
             "emotional_depth_score": 7 if revision_required else 8,
             "ideology_clarity_score": 7 if revision_required else 8,
             "civilian_texture_score": 6 if revision_required else 8,
+            "technical_escalation_fatigue_score": technical_escalation_fatigue_score,
             "blocking_issues": ["The ending is still too abstract."] if revision_required else [],
             "soft_warnings": ["Tarin should push back harder."] if revision_required else [],
             "repair_scope": "targeted_scene_and_ending" if revision_required else "none",
@@ -528,6 +530,57 @@ def test_ending_score_triggers_targeted_scene_revision(configured_environment) -
                         ending_hook_type="outline_summary",
                         scene_turn_resolution_score=4,
                     ),
+                    (
+                        "Iris stopped at the rail while Tarin blocked the route with his shoulder. "
+                        "The visible actor 1 sealed the corridor behind them, and Iris handed Tarin the burned key."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris accepts the cost of the sealed corridor and gives Tarin the key.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        chapter = refreshed.chapters[0]
+        assert refreshed.status == RunStatus.COMPLETED
+        assert chapter.content.startswith("Iris stopped at the rail")
+        assert any(
+            event.event_type == "chapter_revision_started"
+            and event.payload.get("repair_scope") == "targeted_scene_and_ending"
+            for event in refreshed.events
+        )
+
+
+def test_technical_fatigue_score_triggers_targeted_revision(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    (
+                        "Iris put the burned key into Tarin's hand. "
+                        "Trigger 1 lands when the visible actor 1 seals the corridor, leaving only route 1."
+                    ),
+                    _critique_json(revision_required=False, technical_escalation_fatigue_score=8),
                     (
                         "Iris stopped at the rail while Tarin blocked the route with his shoulder. "
                         "The visible actor 1 sealed the corridor behind them, and Iris handed Tarin the burned key."

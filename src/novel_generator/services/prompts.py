@@ -456,6 +456,9 @@ def build_chapter_draft_messages(
                 "- do not repeat the inciting incident unless the situation has materially changed\n"
                 "- the chapter must change the external situation and at least one character state\n"
                 "- if a technical solution works, show the concrete cost, fallout, or exposure on the page\n"
+                "- use at most one primary system-crisis mechanic; avoid stacking lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, and countdown beats in the same chapter\n"
+                "- when technical pressure appears, translate it into human-visible consequences: changed options, endangered civilians, fractured trust, physical danger, political constraint, or emotional cost\n"
+                "- if the recent context already used alarms, lockdowns, quarantine, countdowns, reserve percentages, or warning banners, make the next major obstacle interpersonal, political, physical, civilian, or emotional\n"
                 "- if side_character_friction exists, the side character must push back from their own agenda\n"
                 "- keep names, aliases, systems, projects, and locations consistent with the canon registry\n"
                 "- if chapter_mode is breather or aftermath, make face-to-face emotional conflict the primary motion instead of another terminal emergency\n"
@@ -540,6 +543,7 @@ def build_chapter_critique_messages(
                 '  "sentence_rhythm_score": 0,\n'
                 '  "sensory_specificity_score": 0,\n'
                 '  "dialogue_tension_score": 0,\n'
+                '  "technical_escalation_fatigue_score": 0,\n'
                 '  "blocking_issues": ["string"],\n'
                 '  "soft_warnings": ["string"],\n'
                 '  "genre_contract_findings": ["string"],\n'
@@ -547,7 +551,7 @@ def build_chapter_critique_messages(
                 "}\n\n"
                 "Rules:\n"
                 "- classify ending_hook_type as concrete_action_hook when the final beat is a visible event/action/reversal, resolved_scene_turn when it quietly completes the scene turn with a tangible decision or state change, abstract_cliffhanger when it only gestures at future stakes, image_or_feeling_beat when it ends on mood/image without external consequence, or outline_summary when it uses planning language such as 'next problem' or 'next step'\n"
-                "- set revision_required to true if the chapter has an abstract ending, outline-summary ending, image/feeling-only ending, unresolved immediate scene turn, zero-cost major solution, repeated premise beat, side character who only helps or warns, proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
+                "- set revision_required to true if the chapter has an abstract ending, outline-summary ending, image/feeling-only ending, unresolved immediate scene turn, zero-cost major solution, repeated emergency mechanics, repeated premise beat, side character who only helps or warns, proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
                 "- use repair_scope 'voice_and_texture' when the main problem is flat prose, samey dialogue, repeated sentence rhythm, weak sensory specificity, or poor style-profile alignment\n"
                 "- use repair_scope 'targeted_scene_and_ending' for ending, cost, repetition-fatigue, or side-character pressure problems\n"
                 "- use repair_scope 'full_chapter' only when continuity or premise repetition is severe\n"
@@ -559,6 +563,8 @@ def build_chapter_critique_messages(
                 "- genre_contract_score should be higher when the chapter clearly serves the selected genre contract\n"
                 "- style_alignment_score, voice_distinctness_score, sentence_rhythm_score, sensory_specificity_score, and dialogue_tension_score should be higher when the prose obeys the style profile\n"
                 "- set revision_required to true if any style score is 5 or lower\n"
+                "- technical_escalation_fatigue_score should be higher when the chapter stacks or repeats lockdowns, quarantines, reboots, alarms, warning banners, reserve percentages, core temperature spikes, critical failures, drone breaches, overrides, or countdowns\n"
+                "- set revision_required to true if technical_escalation_fatigue_score is 6 or higher, especially when the technical stakes are not translated into interpersonal, political, physical, civilian, or emotional consequences\n"
                 "- genre_contract_findings must call out any missing or especially strong profile-specific expectations\n"
                 "- include profile-specific lint focus: "
                 + "; ".join(profile.lint_focus)
@@ -616,6 +622,9 @@ def build_chapter_revision_messages(
                 "- follow the prose style profile's narrative_voice, sentence_rhythm, imagery_palette, dialogue_rules, character_voice_map, and avoid list\n"
                 "- do not copy exact language from any user-provided style reference\n"
                 "- show a real price or fallout if a technical solution succeeds\n"
+                "- if technical_escalation_fatigue_score is 6 or higher, remove repeated alarm-console escalation and replace it with interpersonal, political, physical, civilian, or emotional pressure while preserving the plot outcome\n"
+                "- avoid repeating lockdown, quarantine, reboot, alarm, warning banner, reserve percentage, core temperature, critical failure, drone breach, override, or countdown mechanics from adjacent chapters unless the story bible marks one continuous act-level sequence\n"
+                "- translate any remaining technical stakes into a visible human consequence on the page\n"
                 "- make side characters push back from their own agendas rather than existing only to help or warn\n"
                 "- restore any missing emotional fallout, civilian texture, or ideology clash that the plan called for\n"
                 "- fix any genre_contract_findings and preserve the chapter's genre_specific_focus\n"
@@ -778,7 +787,7 @@ def build_manuscript_qa_messages(
                 '  "genre_contract_notes": ["string"]\n'
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
-                "proper-noun drift, emotional pacing, ideology blur, civilian-life absence, technical alarm fatigue, and whether the manuscript delivers on the ending promise. "
+                "proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)
             ),

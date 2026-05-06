@@ -418,6 +418,7 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "sentence_rhythm_score": 7,
           "sensory_specificity_score": 8,
           "dialogue_tension_score": 4,
+          "technical_escalation_fatigue_score": 7,
           "blocking_issues": ["The ending does not land on the planned object/action beat."],
           "soft_warnings": ["Tarin could resist harder in scene two."],
           "genre_contract_findings": ["The chapter plants one clue but needs a cleaner deduction turn."],
@@ -462,6 +463,7 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert critique.genre_contract_score == 7
     assert critique.voice_distinctness_score == 5
     assert critique.dialogue_tension_score == 4
+    assert critique.technical_escalation_fatigue_score == 7
     assert continuity.genre_state["clue_chain"].startswith("The first planted clue")
 
 
@@ -489,6 +491,7 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
           "sentence_rhythm_score": 65,
           "sensory_specificity_score": 70,
           "dialogue_tension_score": 35,
+          "technical_escalation_fatigue_score": 75,
           "blocking_issues": [],
           "soft_warnings": [],
           "repair_scope": "none"
@@ -512,6 +515,7 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
     assert critique.sentence_rhythm_score == 7
     assert critique.sensory_specificity_score == 7
     assert critique.dialogue_tension_score == 4
+    assert critique.technical_escalation_fatigue_score == 8
 
 
 def test_prompt_builders_include_prose_voice_profile() -> None:
@@ -634,6 +638,7 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
           "sentence_rhythm_score": 4,
           "sensory_specificity_score": 5,
           "dialogue_tension_score": 4,
+          "technical_escalation_fatigue_score": 8,
           "blocking_issues": [],
           "soft_warnings": ["The prose is too generic."],
           "repair_scope": "voice_and_texture"
@@ -652,13 +657,18 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "character_voice_map" in draft_prompt
     assert "final paragraph must include" in draft_prompt
     assert "visible consequence" in draft_prompt
+    assert "at most one primary system-crisis mechanic" in draft_prompt
+    assert "human-visible consequences" in draft_prompt
     assert "style_alignment_score" in critique_prompt
     assert "ending_hook_type" in critique_prompt
     assert "scene_turn_resolution_score" in critique_prompt
+    assert "technical_escalation_fatigue_score" in critique_prompt
     assert "abstract_cliffhanger" in critique_prompt
     assert "next problem" in critique_prompt
+    assert "lockdowns, quarantines, reboots, alarms" in critique_prompt
     assert "voice_and_texture" in critique_prompt
     assert "concrete external action" in revision_prompt
+    assert "remove repeated alarm-console escalation" in revision_prompt
     assert "voice_and_texture" in revision_prompt
     assert "do not copy exact language" in revision_prompt
 

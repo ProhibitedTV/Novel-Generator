@@ -190,6 +190,7 @@ QUALITY_SIGNAL_DEFS = [
     {"field": "sensory_specificity_score", "label": "Sensory specificity", "lower_is_better": False, "default": 10},
     {"field": "dialogue_tension_score", "label": "Dialogue tension", "lower_is_better": False, "default": 10},
     {"field": "repetition_risk_score", "label": "Repetition risk", "lower_is_better": True},
+    {"field": "technical_escalation_fatigue_score", "label": "Technical fatigue", "lower_is_better": True},
 ]
 COMPARISON_CATEGORY_DEFS = [
     {
@@ -243,9 +244,9 @@ COMPARISON_CATEGORY_DEFS = [
     {
         "id": "technical",
         "label": "Technical fatigue",
-        "field": None,
-        "threshold": 0,
-        "mode": "keyword",
+        "field": "technical_escalation_fatigue_score",
+        "threshold": 6,
+        "mode": "high",
         "keywords": ["technical emergency", "alarm fatigue", "lockdown", "quarantine"],
     },
     {

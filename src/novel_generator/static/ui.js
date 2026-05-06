@@ -345,6 +345,7 @@ function setupRunDetail() {
     { field: "sensory_specificity_score", label: "Sensory specificity", lowerIsBetter: false, defaultScore: 10 },
     { field: "dialogue_tension_score", label: "Dialogue tension", lowerIsBetter: false, defaultScore: 10 },
     { field: "repetition_risk_score", label: "Repetition risk", lowerIsBetter: true },
+    { field: "technical_escalation_fatigue_score", label: "Technical fatigue", lowerIsBetter: true },
   ];
   const terminalStatuses = new Set(["completed", "failed", "canceled"]);
   const reviewStatuses = new Set(["awaiting_approval"]);

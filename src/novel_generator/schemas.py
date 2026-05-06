@@ -309,6 +309,7 @@ class ChapterCritique(BaseModel):
     sentence_rhythm_score: int = Field(default=10, ge=0, le=10)
     sensory_specificity_score: int = Field(default=10, ge=0, le=10)
     dialogue_tension_score: int = Field(default=10, ge=0, le=10)
+    technical_escalation_fatigue_score: int = Field(default=0, ge=0, le=10)
     blocking_issues: list[str] = Field(default_factory=list)
     soft_warnings: list[str] = Field(default_factory=list)
     genre_contract_findings: list[str] = Field(default_factory=list)
@@ -331,6 +332,7 @@ class ChapterCritique(BaseModel):
         "sentence_rhythm_score",
         "sensory_specificity_score",
         "dialogue_tension_score",
+        "technical_escalation_fatigue_score",
         mode="before",
     )
     @classmethod

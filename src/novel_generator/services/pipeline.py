@@ -292,6 +292,7 @@ def _style_score_warnings(critique: ChapterCritique) -> list[str]:
 
 ENDING_REPAIR_TYPES = {"abstract_cliffhanger", "image_or_feeling_beat", "outline_summary"}
 ENDING_REPAIR_THRESHOLD = 5
+TECHNICAL_FATIGUE_REPAIR_THRESHOLD = 6
 
 
 def _ending_score_warnings(critique: ChapterCritique) -> list[str]:
@@ -309,11 +310,23 @@ def _ending_score_warnings(critique: ChapterCritique) -> list[str]:
     return warnings
 
 
+def _technical_fatigue_warnings(critique: ChapterCritique) -> list[str]:
+    if critique.technical_escalation_fatigue_score < TECHNICAL_FATIGUE_REPAIR_THRESHOLD:
+        return []
+    return [
+        "Technical escalation fatigue needs a targeted repair: "
+        f"fatigue score {critique.technical_escalation_fatigue_score}/10."
+    ]
+
+
 def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLintResult) -> ChapterCritique:
     style_warnings = _style_score_warnings(critique)
     ending_warnings = _ending_score_warnings(critique)
+    technical_warnings = _technical_fatigue_warnings(critique)
     blocking_issues = _dedupe([*critique.blocking_issues, *lint_result.blocking_issues])
-    soft_warnings = _dedupe([*critique.soft_warnings, *lint_result.soft_warnings, *style_warnings, *ending_warnings])
+    soft_warnings = _dedupe(
+        [*critique.soft_warnings, *lint_result.soft_warnings, *style_warnings, *ending_warnings, *technical_warnings]
+    )
     warnings = _dedupe([*critique.warnings, *soft_warnings])
     focus = _dedupe([*critique.focus, *blocking_issues[:2], *soft_warnings[:2]])
     revision_required = (
@@ -322,11 +335,13 @@ def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLin
         or bool(blocking_issues)
         or bool(style_warnings)
         or bool(ending_warnings)
+        or bool(technical_warnings)
     )
     repair_scope = _resolve_repair_scope(
         critique.repair_scope,
         lint_result.repair_scope,
         "targeted_scene_and_ending" if ending_warnings else "none",
+        "targeted_scene_and_ending" if technical_warnings else "none",
         "voice_and_texture" if style_warnings else "none",
     )
     return critique.model_copy(

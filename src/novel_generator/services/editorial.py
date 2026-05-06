@@ -263,6 +263,29 @@ TECHNICAL_FATIGUE_TERMS = [
     "life support warning",
 ]
 
+TECHNICAL_FATIGUE_PATTERNS = {
+    "override": [r"\boverride(?:s|d|ing)?\b"],
+    "backdoor": [r"\bbackdoor(?:s|ed|ing)?\b"],
+    "lockdown": [r"\blockdown(?:s)?\b", r"\blocked down\b"],
+    "quarantine": [r"\bquarantine(?:s|d|ing)?\b"],
+    "reboot": [r"\breboot(?:s|ed|ing)?\b", r"\brestart(?:s|ed|ing)?\b"],
+    "alarm": [r"\balarm(?:s|ed|ing)?\b", r"\bsiren(?:s)?\b"],
+    "warning banner": [r"\bwarning banner(?:s)?\b", r"\bwarning(?:s)?\b", r"\bred warning\b"],
+    "emergency reserve": [
+        r"\bemergency reserve(?:s)?\b",
+        r"\breserve (?:power|drain|battery|percent|percentage)\b",
+        r"\breserve(?:s)? (?:dropped|falling|failed|gone)\b",
+    ],
+    "core temperature": [r"\bcore temperature\b", r"\btemperature spike(?:s|d)?\b"],
+    "critical failure": [r"\bcritical failure(?:s)?\b", r"\bfailure warning(?:s)?\b"],
+    "drone breach": [r"\bdrone breach(?:es)?\b", r"\bdrone(?:s)? (?:breached|entered|forced|reached|cut)\b"],
+    "countdown": [r"\bcountdown(?:s)?\b"],
+    "emergency wipe": [r"\bemergency wipe\b"],
+    "safe mode": [r"\bsafe[- ]mode\b"],
+    "power failure": [r"\bpower failure\b"],
+    "life support": [r"\blife[- ]support warning\b", r"\blife support\b"],
+}
+
 COST_KEYWORDS = [
     "burned",
     "locked out",
@@ -287,6 +310,29 @@ COST_KEYWORDS = [
     "cost",
     "price",
 ]
+
+HUMAN_CONSEQUENCE_TERMS = {
+    "argument",
+    "betrayed",
+    "bleeding",
+    "children",
+    "civilian",
+    "civilians",
+    "crowd",
+    "evacuated",
+    "families",
+    "family",
+    "fear",
+    "fracture",
+    "injured",
+    "lost",
+    "medic",
+    "panic",
+    "refused",
+    "shelter",
+    "trust",
+    "workers",
+}
 
 FILTER_VERBS = [
     "felt",
@@ -498,6 +544,47 @@ def _meaningful_terms(text: str) -> set[str]:
         for term in re.findall(r"[a-z0-9][a-z0-9\-']+", text.lower())
         if len(term) > 2 and term not in MEANINGFUL_TERM_IGNORES
     }
+
+
+def _technical_fatigue_hits(text: str) -> Counter[str]:
+    lowered = text.lower()
+    hits: Counter[str] = Counter()
+    for label, patterns in TECHNICAL_FATIGUE_PATTERNS.items():
+        count = sum(len(re.findall(pattern, lowered)) for pattern in patterns)
+        if count:
+            hits[label] = count
+    return hits
+
+
+def _technical_fatigue_score(hits: Counter[str], adjacent_overlap_count: int = 0) -> int:
+    if not hits:
+        return 0
+    unique_hits = len(hits)
+    total_hits = sum(hits.values())
+    repeated_hits = max(0, total_hits - unique_hits)
+    return min(10, unique_hits * 2 + repeated_hits + adjacent_overlap_count * 2)
+
+
+def _technical_fatigue_labels(hits: Counter[str], limit: int = 5) -> list[str]:
+    return sorted(hits, key=lambda label: (-hits[label], label))[:limit]
+
+
+def _adjacent_prior_chapter(chapter_number: int, prior_chapters: list[ChapterDraft]) -> ChapterDraft | None:
+    candidates = [
+        previous
+        for previous in prior_chapters
+        if previous.chapter_number < chapter_number and (previous.content or "")
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda previous: previous.chapter_number)
+
+
+def _has_human_visible_consequence(text: str) -> bool:
+    lowered = text.lower()
+    terms = set(_normalized_words(text))
+    cost_terms = [keyword for keyword in COST_KEYWORDS if keyword not in {"alarm", "alarms"}]
+    return bool(terms & HUMAN_CONSEQUENCE_TERMS) or any(keyword in lowered for keyword in cost_terms)
 
 
 def _sentences(text: str) -> list[str]:
@@ -897,19 +984,37 @@ def lint_chapter(
         result.needs_repair = True
         result.repair_scope = result.repair_scope if result.repair_scope != "none" else "targeted_scene_and_ending"
 
-    fatigue_hits = [term for term in TECHNICAL_FATIGUE_TERMS if term in lowered]
-    if len(fatigue_hits) > 2:
+    fatigue_hits = _technical_fatigue_hits(content)
+    adjacent_chapter = _adjacent_prior_chapter(chapter.chapter_number, prior_chapters)
+    adjacent_hits = _technical_fatigue_hits(adjacent_chapter.content or "") if adjacent_chapter else Counter()
+    adjacent_overlap = set(fatigue_hits) & set(adjacent_hits)
+    fatigue_score = _technical_fatigue_score(fatigue_hits, len(adjacent_overlap))
+    if fatigue_score >= 6:
+        labels = _technical_fatigue_labels(fatigue_hits)
         message = (
             f"Chapter {chapter.chapter_number} leans on too many technical emergency beats at once: "
-            + ", ".join(fatigue_hits[:4])
-            + "."
+            + ", ".join(labels)
+            + ". Shift pressure toward interpersonal, political, physical, civilian, or emotional consequences."
         )
         if chapter_mode in BREATHER_MODES:
             result.blocking_issues.append(message)
-            result.needs_repair = True
-            result.repair_scope = "targeted_scene_and_ending"
         else:
             result.soft_warnings.append(message)
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+    if len(adjacent_overlap) >= 2:
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} repeats technical emergency mechanics from adjacent chapter "
+            f"{adjacent_chapter.chapter_number}: {', '.join(sorted(adjacent_overlap)[:5])}."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+    if fatigue_score >= 4 and not _has_human_visible_consequence(content):
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} uses system-crisis pressure without a human-visible consequence."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
 
     if ledger.get("memory_damage"):
         memory_terms = _meaningful_terms(str(ledger.get("memory_damage")))
@@ -1024,6 +1129,10 @@ def manuscript_quality_notes(
     }
 
     manuscript_text = "\n\n".join(chapter.content or "" for chapter in chapters).lower()
+    chapter_fatigue_hits = {
+        chapter.chapter_number: _technical_fatigue_hits(chapter.content or "")
+        for chapter in chapters
+    }
     for chapter in chapters:
         qa = chapter.qa_notes or {}
         warnings = [*qa.get("warnings", []), *qa.get("soft_warnings", []), *qa.get("blocking_issues", [])]
@@ -1057,7 +1166,11 @@ def manuscript_quality_notes(
             notes["proper_noun_continuity_findings"].append(
                 f"Chapter {chapter.chapter_number} raised proper-noun continuity concerns."
             )
-        if "technical emergency beats" in lowered_warnings:
+        if (
+            qa.get("technical_escalation_fatigue_score", 0) >= 6
+            or "technical emergency beats" in lowered_warnings
+            or "system-crisis pressure" in lowered_warnings
+        ):
             notes["technical_escalation_fatigue_findings"].append(
                 f"Chapter {chapter.chapter_number} may be too dense with emergency-system language."
             )
@@ -1079,6 +1192,33 @@ def manuscript_quality_notes(
                 notes["proper_noun_continuity_findings"].append(
                     f"Chapter {chapter.chapter_number} introduced unapproved canon entity '{name}'."
                 )
+
+    sorted_chapters = sorted(chapters, key=lambda item: item.chapter_number)
+    for previous, current in zip(sorted_chapters, sorted_chapters[1:]):
+        previous_hits = chapter_fatigue_hits.get(previous.chapter_number, Counter())
+        current_hits = chapter_fatigue_hits.get(current.chapter_number, Counter())
+        overlap = set(previous_hits) & set(current_hits)
+        if len(overlap) >= 2:
+            notes["technical_escalation_fatigue_findings"].append(
+                f"Chapters {previous.chapter_number}-{current.chapter_number} repeat emergency mechanics: "
+                + ", ".join(sorted(overlap)[:5])
+                + "."
+            )
+
+    mechanic_chapter_counts: Counter[str] = Counter()
+    for hits in chapter_fatigue_hits.values():
+        mechanic_chapter_counts.update(hits.keys())
+    repeated_mechanics = [
+        mechanic
+        for mechanic, chapter_count in mechanic_chapter_counts.items()
+        if chapter_count >= 3
+    ]
+    if repeated_mechanics:
+        notes["technical_escalation_fatigue_findings"].append(
+            "Manuscript repeatedly returns to the same emergency mechanics: "
+            + ", ".join(sorted(repeated_mechanics)[:6])
+            + "."
+        )
 
     if bible:
         for entity in bible.get("canon_registry") or []:

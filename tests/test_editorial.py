@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from novel_generator.models import ChapterDraft, ChapterStatus
-from novel_generator.services.editorial import detect_canonical_entity_collisions, lint_chapter
+from novel_generator.services.editorial import detect_canonical_entity_collisions, lint_chapter, manuscript_quality_notes
 
 
 def _story_bible() -> dict:
@@ -281,6 +281,86 @@ def test_lint_flags_technical_escalation_fatigue() -> None:
     result = lint_chapter(chapter, systems_outline, _plan(), _story_bible(), _ledger(), [])
 
     assert any("technical emergency beats" in item.lower() for item in result.soft_warnings)
+
+
+def test_lint_flags_adjacent_technical_emergency_repetition() -> None:
+    prior = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Mara discovers the patch.",
+        content=(
+            "The lockdown slammed through the archive. An alarm cut over the speakers. "
+            "A countdown opened above the console before Mara dragged the families into the shelter."
+        ),
+        status=ChapterStatus.COMPLETED,
+    )
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "The lockdown returned before Nadia could seal the hatch. A fresh alarm split the corridor, "
+            "and another countdown blinked over the console while shelter families pressed against the wall. "
+            "A drone stopped outside the hatch. Its lens turned blue. It spoke in Nadia's voice."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, {**_outline_entry(), "chapter_mode": "systems_crisis"}, _plan(), _story_bible(), _ledger(), [prior])
+
+    assert result.needs_repair is True
+    assert result.repair_scope == "targeted_scene_and_ending"
+    assert any("adjacent chapter" in item.lower() for item in result.soft_warnings)
+
+
+def test_lint_flags_system_crisis_without_human_visible_consequence() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "The lockdown started. A quarantine warning banner replaced the console. "
+            "The countdown resumed and reserve power dropped. "
+            "A drone stopped outside the hatch. Its lens turned blue. It spoke in Nadia's voice."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, {**_outline_entry(), "chapter_mode": "systems_crisis"}, _plan(), _story_bible(), _ledger(), [])
+
+    assert result.needs_repair is True
+    assert any("human-visible consequence" in item.lower() for item in result.soft_warnings)
+
+
+def test_manuscript_quality_notes_tracks_repeated_emergency_mechanics() -> None:
+    chapters = [
+        ChapterDraft(
+            chapter_number=1,
+            title="Signal",
+            outline_summary="Mara discovers the patch.",
+            content="A lockdown hit the vault. An alarm started while a countdown opened over the console.",
+            status=ChapterStatus.COMPLETED,
+        ),
+        ChapterDraft(
+            chapter_number=2,
+            title="Watchdog",
+            outline_summary="Mara proves the patch is manipulating compliance.",
+            content="The lockdown returned. A second alarm cut across the hatch as the countdown resumed.",
+            status=ChapterStatus.COMPLETED,
+        ),
+        ChapterDraft(
+            chapter_number=3,
+            title="Source",
+            outline_summary="Mara finds the source.",
+            content="Another alarm rang when the lockdown sealed the source chamber.",
+            status=ChapterStatus.COMPLETED,
+        ),
+    ]
+
+    notes = manuscript_quality_notes(chapters, _story_bible())
+
+    assert any("Chapters 1-2 repeat emergency mechanics" in item for item in notes["technical_escalation_fatigue_findings"])
+    assert any("Manuscript repeatedly returns" in item for item in notes["technical_escalation_fatigue_findings"])
 
 
 def test_lint_flags_prose_voice_and_style_avoid_problems() -> None:

@@ -145,6 +145,7 @@ def seed_project_with_completed_compare_runs() -> tuple[str, list[str]]:
                     "ideology_clarity_score": 7 if index == 1 else 6,
                     "civilian_texture_score": 7 if index == 1 else 5,
                     "genre_contract_score": 8 if index == 1 else 5,
+                    "technical_escalation_fatigue_score": 2 if index == 1 else 7,
                     "blocking_issues": ["Chapter ending is abstract."] if index == 2 else [],
                     "soft_warnings": ["Technical emergency beats repeat."] if index == 2 else [],
                     "genre_contract_findings": ["The draft needs a cleaner serial hook."] if index == 2 else [],
@@ -539,6 +540,7 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
             "side_character_independence_score": 5,
             "proper_noun_continuity_score": 9,
             "repetition_risk_score": 3,
+            "technical_escalation_fatigue_score": 7,
             "blocking_issues": ["Chapter 1 ends in an abstract thesis statement instead of a concrete hook."],
             "soft_warnings": ["Chapter 1 may still need stronger side-character friction."],
             "repair_scope": "targeted_scene_and_ending",
@@ -553,6 +555,7 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
     assert "Ending concreteness: 4/10" in response.text
     assert "Ending type: abstract_cliffhanger" in response.text
     assert "Scene turn resolved: 4/10" in response.text
+    assert "Technical fatigue: 7/10" in response.text
     assert "Repair scope used: targeted scene and ending." in response.text
     assert "Nora spoofs the hatch sensor to buy ten seconds." in response.text
     assert "Peace Patch replication paused at the hatch cluster." in response.text
