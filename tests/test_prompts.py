@@ -16,6 +16,7 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
     parsed = parse_story_bible(
         """```json
         {
+          "genre_profile": "mystery",
           "logline": "An archivist finds a living map under a failing city.",
           "theme": "Memory without agency becomes a prison.",
           "act_plan": ["Discovery", "Descent", "Confrontation"],
@@ -42,6 +43,7 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
           "world_rules": ["The city records memory in living stone."],
           "core_system_rules": ["Maps can rewrite routes and memories."],
           "prose_guardrails": ["No abstract ending thesis statements."],
+          "genre_contract": ["Each reveal should be fairly planted."],
           "ending_promise": "The city survives only if Iris gives up control."
         }
         ```"""
@@ -51,6 +53,8 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
     assert parsed.cast[0].name == "Iris"
     assert parsed.character_agendas[0].line_in_sand.startswith("She will not erase")
     assert parsed.canon_registry[0].name == "Living Map"
+    assert parsed.genre_profile == "mystery"
+    assert parsed.genre_contract == ["Each reveal should be fairly planted."]
     assert parsed.ending_promise.endswith("control.")
 
 
@@ -370,7 +374,9 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "emotional_anchor": "Iris feels the cost of losing her archive identity.",
           "civilian_texture": "A worker passes a tea tin through the vent to Tarin.",
           "ideology_clash": "Tarin argues that survival without consent is still surrender.",
-          "primary_interpersonal_conflict": "Tarin accuses Iris of treating people like systems."
+          "primary_interpersonal_conflict": "Tarin accuses Iris of treating people like systems.",
+          "genre_specific_focus": "Keep the clue chain fair and visible.",
+          "genre_specific_beats": ["Iris misreads a planted clue", "Tarin notices the missing map seam"]
         }
         """
     )
@@ -390,8 +396,10 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "emotional_depth_score": 7,
           "ideology_clarity_score": 8,
           "civilian_texture_score": 6,
+          "genre_contract_score": 7,
           "blocking_issues": ["The ending does not land on the planned object/action beat."],
           "soft_warnings": ["Tarin could resist harder in scene two."],
+          "genre_contract_findings": ["The chapter plants one clue but needs a cleaner deduction turn."],
           "repair_scope": "targeted_scene_and_ending"
         }
         """
@@ -415,7 +423,8 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "memory_damage": {"Iris": "She loses the smell-memory of rain after decryption."},
           "trust_fractures": {"Iris/Tarin": "Tarin no longer trusts Iris to weigh collateral costs."},
           "civilian_pressure_points": ["Families in the shelter lose archive access and heating."],
-          "emotional_open_loops": {"Iris": "She fears she is choosing freedom with a damaged self."}
+          "emotional_open_loops": {"Iris": "She fears she is choosing freedom with a damaged self."},
+          "genre_state": {"clue_chain": "The first planted clue has been misread."}
         }
         """
     )
@@ -426,6 +435,9 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert plan.ideology_clash.startswith("Tarin argues")
     assert critique.ideology_clarity_score == 8
     assert continuity.memory_damage["Iris"].startswith("She loses")
+    assert plan.genre_specific_focus.startswith("Keep the clue chain")
+    assert critique.genre_contract_score == 7
+    assert continuity.genre_state["clue_chain"].startswith("The first planted clue")
 
 
 def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:

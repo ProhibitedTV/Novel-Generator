@@ -61,6 +61,10 @@
           <span class="detail-value long-value">{{ run.provider_name }} / {{ run.model_name }}</span>
         </div>
         <div class="detail-item inline-detail">
+          <span class="detail-label">Genre profile</span>
+          <span class="detail-value">{{ run_genre_profile.label }}</span>
+        </div>
+        <div class="detail-item inline-detail">
           <span class="detail-label">Status</span>
           <span class="badge status-{{ run.status.value }}" data-run-status-label>{{ run.status.value.replace("_", " ") }}</span>
         </div>
@@ -226,6 +230,21 @@
             <p class="chapter-copy" data-contract-ideology>{{ (current_contract.ideology_pressure or current_contract.ideology_clash) if current_contract else "-" }}</p>
           </div>
           <div class="detail-item">
+            <span class="detail-label">Genre focus</span>
+            <p class="chapter-copy" data-contract-genre-focus>{% if current_contract %}{{ current_contract.genre_specific_focus or current_contract.genre_state_change or "-" }}{% else %}-{% endif %}</p>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Genre beats</span>
+            <p class="chapter-copy" data-contract-genre-beats>
+              {% if current_contract %}
+                {% set genre_beats = current_contract.planned_genre_specific_beats or current_contract.genre_specific_beats %}
+                {{ genre_beats | join(" / ") if genre_beats else "-" }}
+              {% else %}
+                -
+              {% endif %}
+            </p>
+          </div>
+          <div class="detail-item">
             <span class="detail-label">Attempt and complication</span>
             <p class="chapter-copy" data-contract-attempt>{% if current_contract %}{{ current_contract.attempt or "-" }} / {{ current_contract.complication or "-" }}{% else %}-{% endif %}</p>
           </div>
@@ -343,6 +362,14 @@
               {% endfor %}
             </ul>
           </div>
+          <div class="detail-item">
+            <span class="detail-label">Genre state</span>
+            <ul class="bullet-list" data-continuity-genre-state>
+              {% for item in continuity_snapshot.genre_state %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
         {% endif %}
       </div>
       <p class="empty-state{% if continuity_snapshot %} is-hidden{% endif %}" data-continuity-empty>Continuity highlights will appear after the first completed chapter checkpoint.</p>
@@ -441,6 +468,10 @@
       </div>
       {% if story_bible %}
         <div class="story-bible-grid">
+          <div class="detail-item">
+            <span class="detail-label">Genre profile</span>
+            <p class="chapter-copy">{{ run_genre_profile.label }}</p>
+          </div>
           <div class="detail-item">
             <span class="detail-label">Logline</span>
             <p class="chapter-copy">{{ story_bible.logline }}</p>
@@ -545,6 +576,19 @@
           </div>
         {% endif %}
 
+        {% if story_bible.genre_contract %}
+          <div class="support-block">
+            <div class="section-header-copy">
+              <h3>Genre contract</h3>
+            </div>
+            <ul class="bullet-list">
+              {% for item in story_bible.genre_contract %}
+                <li>{{ item }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+
         {% if story_bible.prose_guardrails %}
           <div class="support-block">
             <div class="section-header-copy">
@@ -635,6 +679,14 @@
                 <div class="detail-item">
                   <span class="detail-label">Side-character friction</span>
                   <p class="chapter-copy">{{ entry.side_character_friction or "-" }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Genre state change</span>
+                  <p class="chapter-copy">{{ entry.genre_state_change or "-" }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Genre beats</span>
+                  <p class="chapter-copy">{{ entry.genre_specific_beats | join(" / ") if entry.genre_specific_beats else "-" }}</p>
                 </div>
                 <div class="detail-item">
                   <span class="detail-label">Concrete ending hook</span>

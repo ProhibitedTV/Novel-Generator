@@ -261,6 +261,7 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
                     "trust_fractures": deepcopy(latest.get("trust_fractures", {})),
                     "civilian_pressure_points": deepcopy(latest.get("civilian_pressure_points", [])),
                     "emotional_open_loops": deepcopy(latest.get("emotional_open_loops", {})),
+                    "genre_state": deepcopy(latest.get("genre_state", {})),
                 }
             session.flush()
         else:

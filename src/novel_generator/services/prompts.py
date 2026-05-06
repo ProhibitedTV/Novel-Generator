@@ -17,13 +17,46 @@ from ..schemas import (
     StoryBible,
     StructuredOutlineEntry,
 )
+from .genre_profiles import GenreProfile, genre_profile
+
+
+def _project_genre_profile(project: Project) -> GenreProfile:
+    brief = project.story_brief or {}
+    return genre_profile(brief.get("genre_profile"))
+
+
+def _story_bible_genre_profile(story_bible: StoryBible | dict[str, Any]) -> GenreProfile:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    return genre_profile(bible.get("genre_profile"))
+
+
+def _genre_profile_payload(profile: GenreProfile) -> dict[str, Any]:
+    return {
+        "id": profile.id,
+        "label": profile.label,
+        "description": profile.description,
+        "story_bible_focus": profile.story_bible_focus,
+        "outline_focus": profile.outline_focus,
+        "drafting_focus": profile.drafting_focus,
+        "continuity_focus": profile.continuity_focus,
+        "lint_focus": profile.lint_focus,
+        "qa_focus": profile.qa_focus,
+        "genre_contract": profile.genre_contract,
+        "default_genre_state": profile.default_genre_state,
+    }
+
+
+def _genre_profile_block(profile: GenreProfile) -> str:
+    return json.dumps(_genre_profile_payload(profile), indent=2)
 
 
 def _story_brief_lines(project: Project) -> str:
     brief = project.story_brief or {}
+    profile = genre_profile(brief.get("genre_profile"))
     lines = [
         f"Premise: {project.premise}",
         f"Notes: {project.notes or 'None provided.'}",
+        f"Genre profile: {profile.label} ({profile.id})",
         f"Setting: {brief.get('setting') or 'Not specified.'}",
         f"Tone: {brief.get('tone') or 'Not specified.'}",
         f"Protagonist: {brief.get('protagonist') or 'Not specified.'}",
@@ -109,11 +142,13 @@ def outline_summary_from_entry(entry: StructuredOutlineEntry | dict[str, Any]) -
         f"Reveal: {item.get('reveal', '').strip()}",
         f"Cost if success: {item.get('cost_if_success', '').strip()}",
         f"Ending state: {item.get('ending_state', '').strip()}",
+        f"Genre state: {item.get('genre_state_change', '').strip()}",
     ]
     return " ".join(part for part in parts if part and not part.endswith(":")).strip()
 
 
 def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dict[str, str]]:
+    profile = _project_genre_profile(project)
     return [
         {
             "role": "system",
@@ -128,8 +163,10 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 f"Design a story bible for the novel '{project.title}'.\n"
                 f"Total target words: {run.target_word_count}. Requested chapters: {run.requested_chapters}.\n"
                 f"{_story_brief_lines(project)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 "Return a JSON object with exactly these keys:\n"
                 "{\n"
+                f'  "genre_profile": "{profile.id}",\n'
                 '  "logline": "string",\n'
                 '  "theme": "string",\n'
                 '  "act_plan": ["Act I purpose", "Act II purpose", "Act III purpose"],\n'
@@ -159,13 +196,19 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 '  "world_rules": ["rule 1", "rule 2"],\n'
                 '  "core_system_rules": ["system rule 1", "system rule 2"],\n'
                 '  "prose_guardrails": ["specific warning 1", "specific warning 2"],\n'
+                '  "genre_contract": ["profile-specific promise 1", "profile-specific promise 2"],\n'
                 '  "ending_promise": "string"\n'
                 "}\n\n"
                 "Requirements:\n"
+                f"- set genre_profile to '{profile.id}'\n"
+                "- genre_contract must adapt the selected genre profile into concrete promises for this specific book\n"
                 "- make the protagonist, antagonist, and supporting cast distinct in goal, fear, and moral boundary\n"
                 "- each major character agenda must include a stable ideological belief, a private pressure point, and a predictable stress response\n"
                 "- include only recurring canonical entities in canon_registry and keep names stable\n"
                 "- build a clean escalation ladder toward one primary ending, not multiple competing finales\n"
+                "- include profile-specific story bible focus: "
+                + "; ".join(profile.story_bible_focus)
+                + "\n"
                 "- prose_guardrails must explicitly discourage repeated atmospheric phrasing, thesis-statement endings, zero-cost technical wins, and nonstop alarm escalation without breathers\n"
                 "- keep the tone and world rules specific enough to govern later chapters"
             ),
@@ -175,6 +218,7 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
 
 def build_outline_messages(project: Project, run: GenerationRun, story_bible: StoryBible | dict[str, Any]) -> list[dict[str, str]]:
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    profile = _story_bible_genre_profile(bible)
     minimum_setbacks = max(1, math.ceil(run.requested_chapters * 0.3))
     midpoint_start = max(2, math.ceil(run.requested_chapters * 0.4))
     midpoint_end = max(midpoint_start, math.floor(run.requested_chapters * 0.7))
@@ -197,6 +241,7 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 f"Create a {run.requested_chapters}-chapter outline for '{project.title}'.\n"
                 f"{_story_brief_lines(project)}\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 "Return a JSON object in this shape:\n"
                 "{\n"
                 '  "chapters": [\n'
@@ -221,7 +266,9 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 '      "chapter_mode": "investigation|systems_crisis|breather|aftermath|confrontation|reversal",\n'
                 '      "civilian_life_detail": "string",\n'
                 '      "emotional_reveal": "string",\n'
-                '      "ideology_pressure": "string"\n'
+                '      "ideology_pressure": "string",\n'
+                '      "genre_specific_beats": ["profile-specific beat 1", "profile-specific beat 2"],\n'
+                '      "genre_state_change": "string"\n'
                 "    }\n"
                 "  ]\n"
                 "}\n\n"
@@ -240,7 +287,12 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 "- breather and aftermath chapters must center face-to-face conflict, civilian-life texture, and ideology pressure rather than another terminal emergency\n"
                 "- civilian_life_detail must name one concrete detail of ordinary life in the world\n"
                 "- emotional_reveal must expose a vulnerable truth, memory consequence, or personal motive\n"
-                "- ideology_pressure must state which belief gets tested in the chapter"
+                "- ideology_pressure must state which belief gets tested in the chapter\n"
+                "- genre_specific_beats must show how this chapter serves the selected genre contract\n"
+                "- genre_state_change must update one tracked genre pressure, such as clue state, relationship trust, dread level, community trust, or hook pressure\n"
+                "- include profile-specific outline focus: "
+                + "; ".join(profile.outline_focus)
+                + "\n"
                 "- preserve one clean climax and one primary ending in the final chapter"
             ),
         },
@@ -270,6 +322,7 @@ def build_chapter_plan_messages(
     entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    profile = _story_bible_genre_profile(bible)
     relevant_canon = _filter_canon_registry(bible, entry, ledger)
     return [
         {
@@ -286,6 +339,7 @@ def build_chapter_plan_messages(
                 f"Chapter target: {run.min_words_per_chapter}-{run.max_words_per_chapter} words\n"
                 f"Recent prose summary:\n{prior_context}\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Relevant canon registry for this chapter:\n{json.dumps(relevant_canon, indent=2)}\n\n"
                 f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Current chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
@@ -304,7 +358,9 @@ def build_chapter_plan_messages(
                 '  "emotional_anchor": "string",\n'
                 '  "civilian_texture": "string",\n'
                 '  "ideology_clash": "string",\n'
-                '  "primary_interpersonal_conflict": "string"\n'
+                '  "primary_interpersonal_conflict": "string",\n'
+                '  "genre_specific_focus": "string",\n'
+                '  "genre_specific_beats": ["profile-specific beat 1", "profile-specific beat 2"]\n'
                 "}\n\n"
                 "Rules:\n"
                 "- include 4 to 6 concrete scene beats\n"
@@ -315,6 +371,11 @@ def build_chapter_plan_messages(
                 "- emotional_anchor must describe the human feeling the chapter lingers on\n"
                 "- civilian_texture must surface a specific detail of lived daily life\n"
                 "- ideology_clash must name the belief conflict driving the chapter\n"
+                "- genre_specific_focus must state the selected genre contract this chapter is paying off or complicating\n"
+                "- genre_specific_beats must be concrete scene beats, not labels\n"
+                "- include profile-specific planning focus: "
+                + "; ".join(profile.drafting_focus)
+                + "\n"
                 "- the ending_hook_delivery must describe the specific final beat that lands the outline's concrete_ending_hook"
             ),
         },
@@ -335,6 +396,7 @@ def build_chapter_draft_messages(
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
+    profile = _story_bible_genre_profile(bible)
     relevant_canon = _filter_canon_registry(bible, entry, ledger, chapter_plan)
     return [
         {
@@ -351,6 +413,7 @@ def build_chapter_draft_messages(
                 f"Write chapter {chapter.chapter_number} titled '{chapter.title}'.\n"
                 f"Target word range: {run.min_words_per_chapter}-{run.max_words_per_chapter}\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Relevant canon registry:\n{json.dumps(relevant_canon, indent=2)}\n\n"
                 f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Recent prose summary:\n{prior_context}\n\n"
@@ -367,6 +430,10 @@ def build_chapter_draft_messages(
                 "- include the civilian_life_detail and emotional_reveal explicitly on the page\n"
                 "- make the ideology_pressure visible in dialogue, argument, or a choice under pressure\n"
                 "- if the continuity ledger shows memory damage or trust fractures, carry those consequences into behavior and dialogue\n"
+                "- pay off the chapter plan's genre_specific_focus and genre_specific_beats on the page\n"
+                "- honor profile-specific drafting focus: "
+                + "; ".join(profile.drafting_focus)
+                + "\n"
                 "- limit new system acronyms in breather or aftermath chapters unless absolutely necessary\n"
                 "- do not introduce abstract chapter endings about destiny, choices, or the future hanging in the balance\n"
                 "- end in the exact story state promised by ending_state and land the concrete ending hook with a visible actor, object, or event\n"
@@ -390,6 +457,7 @@ def build_chapter_critique_messages(
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
+    profile = _story_bible_genre_profile(bible)
     return [
         {
             "role": "system",
@@ -402,6 +470,7 @@ def build_chapter_critique_messages(
             "content": (
                 f"Review chapter {chapter.chapter_number} of '{project.title}'.\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Continuity ledger before update:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
@@ -422,8 +491,10 @@ def build_chapter_critique_messages(
                 '  "emotional_depth_score": 0,\n'
                 '  "ideology_clarity_score": 0,\n'
                 '  "civilian_texture_score": 0,\n'
+                '  "genre_contract_score": 0,\n'
                 '  "blocking_issues": ["string"],\n'
                 '  "soft_warnings": ["string"],\n'
+                '  "genre_contract_findings": ["string"],\n'
                 '  "repair_scope": "none|targeted_scene_and_ending|full_chapter"\n'
                 "}\n\n"
                 "Rules:\n"
@@ -433,6 +504,11 @@ def build_chapter_critique_messages(
                 "- all score fields must be whole numbers from 0 to 10, not percentages\n"
                 "- forward_motion_score, ending_concreteness_score, cost_consequence_realism_score, side_character_independence_score, and proper_noun_continuity_score should be higher when the draft is stronger\n"
                 "- emotional_depth_score, ideology_clarity_score, and civilian_texture_score should be higher when the chapter creates human texture and belief conflict\n"
+                "- genre_contract_score should be higher when the chapter clearly serves the selected genre contract\n"
+                "- genre_contract_findings must call out any missing or especially strong profile-specific expectations\n"
+                "- include profile-specific lint focus: "
+                + "; ".join(profile.lint_focus)
+                + "\n"
                 "- repetition_risk_score should be higher when repetition risk is worse"
             ),
         },
@@ -454,6 +530,7 @@ def build_chapter_revision_messages(
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
     notes = critique if isinstance(critique, dict) else critique.model_dump()
+    profile = _story_bible_genre_profile(bible)
     return [
         {
             "role": "system",
@@ -466,6 +543,7 @@ def build_chapter_revision_messages(
             "content": (
                 f"Revise chapter {chapter.chapter_number} of '{project.title}'.\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
@@ -478,6 +556,10 @@ def build_chapter_revision_messages(
                 "- show a real price or fallout if a technical solution succeeds\n"
                 "- make side characters push back from their own agendas rather than existing only to help or warn\n"
                 "- restore any missing emotional fallout, civilian texture, or ideology clash that the plan called for\n"
+                "- fix any genre_contract_findings and preserve the chapter's genre_specific_focus\n"
+                "- honor profile-specific drafting focus: "
+                + "; ".join(profile.drafting_focus)
+                + "\n"
                 "- if this is a breather or aftermath chapter, ensure the chapter breathes and does not become another pure console sequence\n"
                 "- end on a concrete next problem, not a thesis sentence about the future or a choice\n"
                 "- keep names and roles consistent with the canon registry and continuity ledger\n"
@@ -515,6 +597,7 @@ def build_continuity_update_messages(
 ) -> list[dict[str, str]]:
     ledger = current_ledger if isinstance(current_ledger, dict) else current_ledger.model_dump()
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    profile = _story_bible_genre_profile(bible)
     relevant_canon = _filter_canon_registry(
         bible,
         {"outline_summary": chapter.outline_summary, "chapter_number": chapter.chapter_number},
@@ -532,6 +615,7 @@ def build_continuity_update_messages(
             "content": (
                 f"Update the continuity ledger for chapter {chapter.chapter_number} of '{project.title}'.\n\n"
                 f"Current ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Relevant canon registry:\n{json.dumps(relevant_canon, indent=2)}\n\n"
                 f"Chapter summary:\n{chapter.summary or ''}\n\n"
                 "Return a JSON object with exactly these keys:\n"
@@ -559,7 +643,8 @@ def build_continuity_update_messages(
                 '  "memory_damage": {"Character": "what memory or cognition was damaged"},\n'
                 '  "trust_fractures": {"Relationship": "what trust was damaged"},\n'
                 '  "civilian_pressure_points": ["concrete civilian consequence"],\n'
-                '  "emotional_open_loops": {"Character": "unresolved emotional burden"}\n'
+                '  "emotional_open_loops": {"Character": "unresolved emotional burden"},\n'
+                '  "genre_state": {"profile state key": "current state after this chapter"}\n'
                 "}\n\n"
                 "Rules:\n"
                 "- keep unresolved threads alive unless the chapter truly resolves them\n"
@@ -568,7 +653,10 @@ def build_continuity_update_messages(
                 "- only list intentionally new canonical entities in new_entities_introduced\n"
                 "- explicitly track which named entities changed state and which open promises are still live\n"
                 "- if a character's belief is contradicted, mark whether that contradiction is intentional in ideology_shift_notes\n"
-                "- preserve memory damage, trust fractures, civilian harm, and unresolved emotional fallout unless the chapter truly heals them"
+                "- preserve memory damage, trust fractures, civilian harm, and unresolved emotional fallout unless the chapter truly heals them\n"
+                "- update genre_state using the selected profile's continuity focus and default_genre_state\n"
+                "- include profile-specific continuity focus: "
+                + "; ".join(profile.continuity_focus)
             ),
         },
     ]
@@ -581,6 +669,7 @@ def build_manuscript_qa_messages(
     chapters: list[ChapterDraft],
 ) -> list[dict[str, str]]:
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    profile = _story_bible_genre_profile(bible)
     chapter_payload = [
         {
             "chapter_number": chapter.chapter_number,
@@ -603,6 +692,7 @@ def build_manuscript_qa_messages(
             "content": (
                 f"Review the manuscript for '{project.title}'.\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Deterministic lint findings:\n{json.dumps(lint_findings, indent=2)}\n\n"
                 f"Chapter summaries and QA notes:\n{json.dumps(chapter_payload, indent=2)}\n\n"
                 "Return a JSON object with exactly these keys:\n"
@@ -622,10 +712,13 @@ def build_manuscript_qa_messages(
                 '  "emotional_pacing_notes": ["string"],\n'
                 '  "ideology_consistency_findings": ["string"],\n'
                 '  "civilian_texture_findings": ["string"],\n'
-                '  "technical_escalation_fatigue_findings": ["string"]\n'
+                '  "technical_escalation_fatigue_findings": ["string"],\n'
+                '  "genre_contract_notes": ["string"]\n'
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, continuity instability, easy technical wins, side-character flatness, "
-                "proper-noun drift, emotional pacing, ideology blur, civilian-life absence, technical alarm fatigue, and whether the manuscript delivers on the ending promise."
+                "proper-noun drift, emotional pacing, ideology blur, civilian-life absence, technical alarm fatigue, and whether the manuscript delivers on the ending promise. "
+                "Genre contract notes must judge the selected profile: "
+                + "; ".join(profile.qa_focus or profile.genre_contract)
             ),
         },
     ]

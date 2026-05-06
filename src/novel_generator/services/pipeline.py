@@ -28,6 +28,7 @@ from .editorial import (
     render_qa_report_markdown,
 )
 from .exports import export_run_artifacts
+from .genre_profiles import genre_profile
 from .ollama import OllamaClient
 from .provider_errors import ProviderError, ProviderTransportError
 from .prompts import (
@@ -132,6 +133,7 @@ def _resolve_stage_route(
 
 
 def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
+    profile = genre_profile(story_bible.genre_profile)
     return ContinuityLedger(
         current_patch_status="No irreversible patch decision has been made yet.",
         character_states={
@@ -160,6 +162,7 @@ def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
             for agenda in story_bible.character_agendas
             if agenda.private_pressure
         },
+        genre_state=dict(profile.default_genre_state),
     )
 
 
@@ -208,6 +211,7 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
         trust_fractures={**current_ledger.trust_fractures, **update.trust_fractures},
         civilian_pressure_points=_dedupe([*current_ledger.civilian_pressure_points, *update.civilian_pressure_points]),
         emotional_open_loops={**current_ledger.emotional_open_loops, **update.emotional_open_loops},
+        genre_state={**current_ledger.genre_state, **update.genre_state},
     )
 
 
@@ -272,6 +276,13 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
         lambda: build_story_bible_messages(project, run),
         parse_story_bible,
         "story bible",
+    )
+    selected_profile = genre_profile((project.story_brief or {}).get("genre_profile"))
+    story_bible = story_bible.model_copy(
+        update={
+            "genre_profile": selected_profile.id,
+            "genre_contract": story_bible.genre_contract or list(selected_profile.genre_contract),
+        }
     )
     run.story_bible = story_bible.model_dump()
     run.continuity_ledger = _build_initial_ledger(story_bible).model_dump()
@@ -578,6 +589,9 @@ def _run_manuscript_qa(
                     *qa_report.technical_escalation_fatigue_findings,
                     *deterministic_notes["technical_escalation_fatigue_findings"],
                 ]
+            ),
+            "genre_contract_notes": _dedupe(
+                [*qa_report.genre_contract_notes, *deterministic_notes["genre_contract_notes"]]
             ),
         }
     )

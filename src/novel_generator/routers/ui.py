@@ -28,6 +28,7 @@ from ..repositories import (
     update_provider_config,
 )
 from ..schemas import ProjectCreate, ProjectUpdate, ProviderCapabilities, ProviderConfigUpdate, RunCreate
+from ..services.genre_profiles import genre_profile, genre_profile_options
 from ..services.openai_compatible import OpenAICompatibleClient
 from ..services.ollama import OllamaClient
 from ..services.provider_errors import ProviderError, ProviderTransportError
@@ -155,6 +156,7 @@ QUALITY_SIGNAL_DEFS = [
     {"field": "proper_noun_continuity_score", "label": "Proper-noun continuity", "lower_is_better": False},
     {"field": "ideology_clarity_score", "label": "Ideology clarity", "lower_is_better": False},
     {"field": "civilian_texture_score", "label": "Civilian texture", "lower_is_better": False},
+    {"field": "genre_contract_score", "label": "Genre contract", "lower_is_better": False, "default": 10},
     {"field": "repetition_risk_score", "label": "Repetition risk", "lower_is_better": True},
 ]
 
@@ -292,6 +294,8 @@ def _current_contract_context(run: GenerationRun) -> tuple[dict[str, Any] | None
         "civilian_life_detail": outline.get("civilian_life_detail", ""),
         "emotional_reveal": outline.get("emotional_reveal", ""),
         "ideology_pressure": outline.get("ideology_pressure", ""),
+        "genre_specific_beats": outline.get("genre_specific_beats", []),
+        "genre_state_change": outline.get("genre_state_change", ""),
         "ending_trigger": ending_hook.get("trigger", ""),
         "ending_visible_actor": ending_hook.get("visible_object_or_actor", ""),
         "ending_next_problem": ending_hook.get("next_problem", ""),
@@ -304,6 +308,8 @@ def _current_contract_context(run: GenerationRun) -> tuple[dict[str, Any] | None
         "civilian_texture": plan.get("civilian_texture", ""),
         "ideology_clash": plan.get("ideology_clash", ""),
         "primary_interpersonal_conflict": plan.get("primary_interpersonal_conflict", ""),
+        "genre_specific_focus": plan.get("genre_specific_focus", ""),
+        "planned_genre_specific_beats": plan.get("genre_specific_beats", []),
     }
     return contract, chapter
 
@@ -314,7 +320,7 @@ def _quality_signal_rows(chapter: Any | None) -> list[dict[str, Any]]:
     qa_notes = chapter.qa_notes or {}
     rows: list[dict[str, Any]] = []
     for item in QUALITY_SIGNAL_DEFS:
-        score = int(qa_notes.get(item["field"], 0) or 0)
+        score = int(qa_notes.get(item["field"], item.get("default", 0)) or 0)
         tone, state_label = _score_state(score, lower_is_better=bool(item["lower_is_better"]))
         rows.append(
             {
@@ -340,6 +346,8 @@ def _revision_trigger_rows(chapter: Any | None) -> list[dict[str, str]]:
         rows.append({"tone": "error", "text": str(item)})
     for item in qa_notes.get("soft_warnings", []) or []:
         rows.append({"tone": "warning", "text": str(item)})
+    for item in qa_notes.get("genre_contract_findings", []) or []:
+        rows.append({"tone": "neutral", "text": str(item)})
     for item in qa_notes.get("focus", []) or []:
         rows.append({"tone": "neutral", "text": str(item)})
     deduped: list[dict[str, str]] = []
@@ -363,6 +371,7 @@ def _continuity_snapshot(run: GenerationRun, chapter: Any | None) -> dict[str, A
     emotional_loops = [f"{name}: {state}" for name, state in (update.get("emotional_open_loops", {}) or {}).items()]
     trust_fractures = [f"{name}: {state}" for name, state in (update.get("trust_fractures", {}) or {}).items()]
     memory_damage = [f"{name}: {state}" for name, state in (update.get("memory_damage", {}) or {}).items()]
+    genre_state = [f"{name}: {state}" for name, state in (update.get("genre_state", ledger.get("genre_state", {})) or {}).items()]
     return {
         "chapter_number": source.chapter_number if source is not None else None,
         "chapter_outcome": update.get("chapter_outcome", ""),
@@ -375,6 +384,7 @@ def _continuity_snapshot(run: GenerationRun, chapter: Any | None) -> dict[str, A
         "trust_fractures": trust_fractures,
         "memory_damage": memory_damage,
         "civilian_pressure_points": list(update.get("civilian_pressure_points", []) or []),
+        "genre_state": genre_state,
     }
 
 
@@ -504,6 +514,7 @@ def _join_lines(values: list[str] | None) -> str:
 def _story_brief_form_values(story_brief: dict[str, Any] | None = None) -> dict[str, Any]:
     brief = story_brief or {}
     return {
+        "story_genre_profile": genre_profile(brief.get("genre_profile")).id,
         "story_setting": str(brief.get("setting", "") or ""),
         "story_tone": str(brief.get("tone", "") or ""),
         "story_protagonist": str(brief.get("protagonist", "") or ""),
@@ -519,6 +530,7 @@ def _story_brief_form_values(story_brief: dict[str, Any] | None = None) -> dict[
 
 def _story_brief_payload(values: dict[str, Any]) -> dict[str, Any]:
     return {
+        "genre_profile": values.get("story_genre_profile", ""),
         "setting": values.get("story_setting", ""),
         "tone": values.get("story_tone", ""),
         "protagonist": values.get("story_protagonist", ""),
@@ -911,6 +923,7 @@ def _project_new_context(
         "setup_steps": _onboarding_steps(provider_config, provider_status, projects),
         "form_values": form_payload,
         "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
+        "genre_profile_options": genre_profile_options(),
         "task_route_rows": _task_route_rows(form_payload),
         "form_errors": form_errors or {},
         "page_error": page_error,
@@ -939,9 +952,11 @@ def _project_detail_context(
         values=edit_values,
     )
     run_payload = _run_form_values(project, values=run_values)
+    project_profile = genre_profile((project.story_brief or {}).get("genre_profile"))
     return {
         "active_nav": "projects",
         "project": project,
+        "project_genre_profile": project_profile,
         **run_stats,
         "provider_config": provider_config,
         "provider_status": provider_status,
@@ -954,6 +969,7 @@ def _project_detail_context(
         "run_errors": run_errors or {},
         "run_task_route_rows": _task_route_rows(run_payload),
         "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
+        "genre_profile_options": genre_profile_options(),
         "page_error": page_error,
         "open_edit_form": open_edit_form or request.query_params.get("open_edit") == "1",
         "terminal_statuses": TERMINAL_STATUSES,
@@ -1083,6 +1099,7 @@ def create_project_ui(
     route_continuity_update_model: str = Form(""),
     route_manuscript_qa_provider: str = Form(""),
     route_manuscript_qa_model: str = Form(""),
+    story_genre_profile: str = Form("sci_fi_thriller"),
     story_setting: str = Form(""),
     story_tone: str = Form(""),
     story_protagonist: str = Form(""),
@@ -1124,6 +1141,7 @@ def create_project_ui(
         "route_continuity_update_model": route_continuity_update_model,
         "route_manuscript_qa_provider": route_manuscript_qa_provider,
         "route_manuscript_qa_model": route_manuscript_qa_model,
+        "story_genre_profile": story_genre_profile,
         "story_setting": story_setting,
         "story_tone": story_tone,
         "story_protagonist": story_protagonist,
@@ -1311,6 +1329,7 @@ def edit_project_ui(
     route_continuity_update_model: str = Form(""),
     route_manuscript_qa_provider: str = Form(""),
     route_manuscript_qa_model: str = Form(""),
+    story_genre_profile: str = Form("sci_fi_thriller"),
     story_setting: str = Form(""),
     story_tone: str = Form(""),
     story_protagonist: str = Form(""),
@@ -1356,6 +1375,7 @@ def edit_project_ui(
         "route_continuity_update_model": route_continuity_update_model,
         "route_manuscript_qa_provider": route_manuscript_qa_provider,
         "route_manuscript_qa_model": route_manuscript_qa_model,
+        "story_genre_profile": story_genre_profile,
         "story_setting": story_setting,
         "story_tone": story_tone,
         "story_protagonist": story_protagonist,
@@ -1588,6 +1608,7 @@ def run_detail(
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     completed_chapter_count = _chapter_completion_count(run)
+    run_profile = genre_profile((run.story_bible or {}).get("genre_profile") or (run.project.story_brief or {}).get("genre_profile"))
     return _render(
         request,
         "run_detail.html",
@@ -1595,6 +1616,7 @@ def run_detail(
             "active_nav": "projects",
             "run": run,
             "project": run.project,
+            "run_genre_profile": run_profile,
             "show_rerun": run.status in TERMINAL_STATUSES,
             "terminal_statuses": TERMINAL_STATUSES,
             "run_stages": RUN_STAGES,

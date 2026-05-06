@@ -24,6 +24,7 @@
     <div><dt>Target words</dt><dd>{{ project.desired_word_count }}</dd></div>
     <div><dt>Requested chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
     <div><dt>Chapter range</dt><dd>{{ project.min_words_per_chapter }}-{{ project.max_words_per_chapter }}</dd></div>
+    <div><dt>Genre profile</dt><dd>{{ project_genre_profile.label }}</dd></div>
     <div><dt>Preferred provider</dt><dd>{{ project.preferred_provider_name }}</dd></div>
     <div><dt>Preferred model</dt><dd class="long-value">{{ project.preferred_model }}</dd></div>
   </dl>
@@ -146,6 +147,16 @@
           <p>These structured notes give the v2 pipeline better material for the story bible, outline, continuity ledger, and ending control.</p>
         </div>
         <div class="grid compact">
+          <label>
+            Genre profile
+            <select name="story_genre_profile">
+              {% for option in genre_profile_options %}
+                <option value="{{ option.name }}" {% if edit_values.story_genre_profile == option.name %}selected{% endif %}>
+                  {{ option.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
           <label>
             Setting
             <input type="text" name="story_setting" value="{{ edit_values.story_setting }}">

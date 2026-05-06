@@ -468,6 +468,21 @@ def lint_chapter(
             result.needs_repair = True
             result.repair_scope = "targeted_scene_and_ending"
 
+    genre_expectations = [
+        *(entry.get("genre_specific_beats") or []),
+        entry.get("genre_state_change", ""),
+        chapter_plan.get("genre_specific_focus", ""),
+        *(chapter_plan.get("genre_specific_beats") or []),
+    ]
+    genre_terms = _meaningful_terms(" ".join(str(item) for item in genre_expectations if item))
+    if genre_terms:
+        content_terms = _meaningful_terms(content)
+        required_overlap = min(2, len(genre_terms))
+        if len(genre_terms & content_terms) < required_overlap:
+            result.soft_warnings.append(
+                f"Chapter {chapter.chapter_number} may be missing its planned genre-specific beat or state change."
+            )
+
     approved_nouns = _approved_proper_nouns(story_bible, entry, chapter_plan, continuity_ledger)
     candidate_nouns = _proper_noun_candidates(content)
     unknown_nouns = sorted(candidate for candidate in candidate_nouns if candidate not in approved_nouns)
@@ -602,6 +617,7 @@ def manuscript_quality_notes(
         "ideology_consistency_findings": [],
         "civilian_texture_findings": [],
         "technical_escalation_fatigue_findings": [],
+        "genre_contract_notes": [],
     }
 
     manuscript_text = "\n\n".join(chapter.content or "" for chapter in chapters).lower()
@@ -642,6 +658,12 @@ def manuscript_quality_notes(
             notes["technical_escalation_fatigue_findings"].append(
                 f"Chapter {chapter.chapter_number} may be too dense with emergency-system language."
             )
+        if qa.get("genre_contract_score", 10) <= 5 or "genre" in lowered_warnings:
+            notes["genre_contract_notes"].append(
+                f"Chapter {chapter.chapter_number} may need stronger delivery against the selected genre contract."
+            )
+        for item in qa.get("genre_contract_findings", []) or []:
+            notes["genre_contract_notes"].append(f"Chapter {chapter.chapter_number}: {item}")
         for phrase in STOCK_PHRASES:
             count = (chapter.content or "").lower().count(phrase)
             if count >= 2:
@@ -676,6 +698,7 @@ def manuscript_quality_notes(
     notes["ideology_consistency_findings"] = list(dict.fromkeys(notes["ideology_consistency_findings"]))
     notes["civilian_texture_findings"] = list(dict.fromkeys(notes["civilian_texture_findings"]))
     notes["technical_escalation_fatigue_findings"] = list(dict.fromkeys(notes["technical_escalation_fatigue_findings"]))
+    notes["genre_contract_notes"] = list(dict.fromkeys(notes["genre_contract_notes"]))
     return notes
 
 
@@ -740,6 +763,10 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Technical Escalation Fatigue",
         "",
         *([f"- {item}" for item in report.technical_escalation_fatigue_findings] or ["- No technical escalation fatigue findings recorded."]),
+        "",
+        "## Genre Contract",
+        "",
+        *([f"- {item}" for item in report.genre_contract_notes] or ["- No genre contract notes recorded."]),
         "",
         "## Deterministic Lint Findings",
         "",

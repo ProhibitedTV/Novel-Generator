@@ -125,6 +125,7 @@ def test_project_new_page_renders_story_brief_and_model_picker_hooks(client, mon
     assert response.status_code == 200
     assert 'data-model-input' in response.text
     assert 'data-model-choice' in response.text
+    assert 'name="story_genre_profile"' in response.text
     assert 'name="story_setting"' in response.text
     assert "What happens after this" in response.text
     assert "Setup progress" in response.text
@@ -154,6 +155,7 @@ def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatc
             "max_words_per_chapter": "800",
             "preferred_model": "test-model",
             "notes": "",
+            "story_genre_profile": "mystery",
             "story_setting": "Orbital city",
             "story_tone": "claustrophobic",
             "story_protagonist": "Nora",
@@ -169,6 +171,7 @@ def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatc
 
     assert response.status_code == 400
     assert "Max words per chapter must be greater than or equal to min words per chapter." in response.text
+    assert '<option value="mystery" selected>' in response.text
     assert 'value="Orbital city"' in response.text
     assert "Looping chapter restarts" in response.text
 

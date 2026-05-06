@@ -302,6 +302,8 @@ function setupRunDetail() {
   const contractEmotionalNode = document.querySelector("[data-contract-emotional-reveal]");
   const contractCivilianNode = document.querySelector("[data-contract-civilian]");
   const contractIdeologyNode = document.querySelector("[data-contract-ideology]");
+  const contractGenreFocusNode = document.querySelector("[data-contract-genre-focus]");
+  const contractGenreBeatsNode = document.querySelector("[data-contract-genre-beats]");
   const contractAttemptNode = document.querySelector("[data-contract-attempt]");
   const contractPriceNode = document.querySelector("[data-contract-price]");
   const contractEndingNode = document.querySelector("[data-contract-ending]");
@@ -321,6 +323,7 @@ function setupRunDetail() {
   const continuityPromisesNode = document.querySelector("[data-continuity-promises]");
   const continuityEmotionsNode = document.querySelector("[data-continuity-emotions]");
   const continuityCiviliansNode = document.querySelector("[data-continuity-civilians]");
+  const continuityGenreStateNode = document.querySelector("[data-continuity-genre-state]");
   const stageJsonNode = document.querySelector("[data-run-stages-json]");
   const stageData = stageJsonNode ? JSON.parse(stageJsonNode.textContent || "[]") : [];
   const stageLookup = Object.fromEntries(stageData.map((stage) => [stage.id, stage]));
@@ -334,6 +337,7 @@ function setupRunDetail() {
     { field: "proper_noun_continuity_score", label: "Proper-noun continuity", lowerIsBetter: false },
     { field: "ideology_clarity_score", label: "Ideology clarity", lowerIsBetter: false },
     { field: "civilian_texture_score", label: "Civilian texture", lowerIsBetter: false },
+    { field: "genre_contract_score", label: "Genre contract", lowerIsBetter: false, defaultScore: 10 },
     { field: "repetition_risk_score", label: "Repetition risk", lowerIsBetter: true },
   ];
   const terminalStatuses = new Set(["completed", "failed", "canceled"]);
@@ -511,6 +515,10 @@ function setupRunDetail() {
       civilianLifeDetail: outline.civilian_life_detail || "",
       emotionalReveal: outline.emotional_reveal || plan.emotional_anchor || "",
       ideologyPressure: outline.ideology_pressure || plan.ideology_clash || "",
+      genreFocus: plan.genre_specific_focus || outline.genre_state_change || "",
+      genreBeats: Array.isArray(plan.genre_specific_beats)
+        ? plan.genre_specific_beats
+        : (Array.isArray(outline.genre_specific_beats) ? outline.genre_specific_beats : []),
       attempt: plan.attempt || "",
       complication: plan.complication || "",
       pricePaid: plan.price_paid || plan.partial_failure_mode || "",
@@ -541,7 +549,7 @@ function setupRunDetail() {
       return [];
     }
     return qualityDefs.map((definition) => {
-      const score = Number(chapter.qa_notes?.[definition.field] || 0);
+      const score = Number(chapter.qa_notes?.[definition.field] ?? definition.defaultScore ?? 0);
       const state = scoreState(score, definition.lowerIsBetter);
       return {
         label: definition.label,
@@ -566,6 +574,9 @@ function setupRunDetail() {
     }
     for (const item of chapter.qa_notes?.soft_warnings || []) {
       rows.push({ tone: "warning", text: String(item) });
+    }
+    for (const item of chapter.qa_notes?.genre_contract_findings || []) {
+      rows.push({ tone: "neutral", text: String(item) });
     }
     for (const item of chapter.qa_notes?.focus || []) {
       rows.push({ tone: "neutral", text: String(item) });
@@ -603,6 +614,7 @@ function setupRunDetail() {
       openPromises: mapList(update.open_promises_by_name),
       emotionalLoops: mapList(update.emotional_open_loops),
       civilianPressure: Array.from(update.civilian_pressure_points || []),
+      genreState: mapList(update.genre_state || ledger.genre_state),
     };
   }
 
@@ -690,6 +702,12 @@ function setupRunDetail() {
     if (contractIdeologyNode) {
       contractIdeologyNode.textContent = contract.ideologyPressure || "-";
     }
+    if (contractGenreFocusNode) {
+      contractGenreFocusNode.textContent = contract.genreFocus || "-";
+    }
+    if (contractGenreBeatsNode) {
+      contractGenreBeatsNode.textContent = contract.genreBeats.length ? contract.genreBeats.join(" / ") : "-";
+    }
     if (contractAttemptNode) {
       contractAttemptNode.textContent = `${contract.attempt || "-"} / ${contract.complication || "-"}`;
     }
@@ -764,6 +782,7 @@ function setupRunDetail() {
     renderList(continuityPromisesNode, snapshot.openPromises, "No open promises recorded yet.");
     renderList(continuityEmotionsNode, snapshot.emotionalLoops, "No emotional fallout recorded yet.");
     renderList(continuityCiviliansNode, snapshot.civilianPressure, "No civilian pressure points recorded yet.");
+    renderList(continuityGenreStateNode, snapshot.genreState, "No genre state recorded yet.");
   }
 
   function updateElapsed() {

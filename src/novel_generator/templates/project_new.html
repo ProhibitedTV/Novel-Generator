@@ -66,6 +66,16 @@
         </div>
         <div class="grid compact">
           <label>
+            Genre profile
+            <select name="story_genre_profile">
+              {% for option in genre_profile_options %}
+                <option value="{{ option.name }}" {% if form_values.story_genre_profile == option.name %}selected{% endif %}>
+                  {{ option.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
             Setting
             <input type="text" name="story_setting" value="{{ form_values.story_setting }}" placeholder="Orbital archive city on the edge of collapse">
           </label>

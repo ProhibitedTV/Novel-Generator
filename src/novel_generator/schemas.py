@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .models import ChapterStatus, RunStatus
+from .services.genre_profiles import DEFAULT_GENRE_PROFILE, GENRE_PROFILES
 
 
 def _clean_list(value: Any) -> list[str]:
@@ -20,7 +21,15 @@ def _clean_list(value: Any) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+def _validate_genre_profile(value: Any) -> str:
+    key = str(value or DEFAULT_GENRE_PROFILE).strip() or DEFAULT_GENRE_PROFILE
+    if key not in GENRE_PROFILES:
+        raise ValueError("Choose one of the supported genre profiles.")
+    return key
+
+
 class StoryBrief(BaseModel):
+    genre_profile: str = DEFAULT_GENRE_PROFILE
     setting: str = ""
     tone: str = ""
     protagonist: str = ""
@@ -43,6 +52,11 @@ class StoryBrief(BaseModel):
         if value is None:
             return ""
         return str(value).strip()
+
+    @field_validator("genre_profile", mode="before")
+    @classmethod
+    def validate_genre_profile(cls, value: Any) -> str:
+        return _validate_genre_profile(value)
 
 
 class StoryCastMember(BaseModel):
@@ -83,6 +97,7 @@ class ConcreteEndingHook(BaseModel):
 
 
 class StoryBible(BaseModel):
+    genre_profile: str = DEFAULT_GENRE_PROFILE
     logline: str
     theme: str
     act_plan: list[str] = Field(default_factory=list)
@@ -93,12 +108,26 @@ class StoryBible(BaseModel):
     world_rules: list[str] = Field(default_factory=list)
     core_system_rules: list[str] = Field(default_factory=list)
     prose_guardrails: list[str] = Field(default_factory=list)
+    genre_contract: list[str] = Field(default_factory=list)
     ending_promise: str
 
-    @field_validator("act_plan", "conflict_ladder", "world_rules", "core_system_rules", "prose_guardrails", mode="before")
+    @field_validator(
+        "act_plan",
+        "conflict_ladder",
+        "world_rules",
+        "core_system_rules",
+        "prose_guardrails",
+        "genre_contract",
+        mode="before",
+    )
     @classmethod
     def validate_story_lists(cls, value: Any) -> list[str]:
         return _clean_list(value)
+
+    @field_validator("genre_profile", mode="before")
+    @classmethod
+    def validate_story_genre_profile(cls, value: Any) -> str:
+        return _validate_genre_profile(value)
 
 
 class StructuredOutlineEntry(BaseModel):
@@ -119,6 +148,13 @@ class StructuredOutlineEntry(BaseModel):
     civilian_life_detail: str = ""
     emotional_reveal: str = ""
     ideology_pressure: str = ""
+    genre_specific_beats: list[str] = Field(default_factory=list)
+    genre_state_change: str = ""
+
+    @field_validator("genre_specific_beats", mode="before")
+    @classmethod
+    def validate_genre_specific_beats(cls, value: Any) -> list[str]:
+        return _clean_list(value)
 
 
 class ContinuityLedger(BaseModel):
@@ -136,6 +172,7 @@ class ContinuityLedger(BaseModel):
     trust_fractures: dict[str, str] = Field(default_factory=dict)
     civilian_pressure_points: list[str] = Field(default_factory=list)
     emotional_open_loops: dict[str, str] = Field(default_factory=dict)
+    genre_state: dict[str, str] = Field(default_factory=dict)
 
 
 class ChapterPlan(BaseModel):
@@ -153,6 +190,13 @@ class ChapterPlan(BaseModel):
     civilian_texture: str = ""
     ideology_clash: str = ""
     primary_interpersonal_conflict: str = ""
+    genre_specific_focus: str = ""
+    genre_specific_beats: list[str] = Field(default_factory=list)
+
+    @field_validator("genre_specific_beats", mode="before")
+    @classmethod
+    def validate_plan_genre_specific_beats(cls, value: Any) -> list[str]:
+        return _clean_list(value)
 
 
 class ChapterContinuityUpdate(BaseModel):
@@ -173,6 +217,7 @@ class ChapterContinuityUpdate(BaseModel):
     trust_fractures: dict[str, str] = Field(default_factory=dict)
     civilian_pressure_points: list[str] = Field(default_factory=list)
     emotional_open_loops: dict[str, str] = Field(default_factory=dict)
+    genre_state: dict[str, str] = Field(default_factory=dict)
 
 
 class ChapterCritique(BaseModel):
@@ -189,8 +234,10 @@ class ChapterCritique(BaseModel):
     emotional_depth_score: int = Field(default=0, ge=0, le=10)
     ideology_clarity_score: int = Field(default=0, ge=0, le=10)
     civilian_texture_score: int = Field(default=0, ge=0, le=10)
+    genre_contract_score: int = Field(default=10, ge=0, le=10)
     blocking_issues: list[str] = Field(default_factory=list)
     soft_warnings: list[str] = Field(default_factory=list)
+    genre_contract_findings: list[str] = Field(default_factory=list)
     repair_scope: str = "none"
 
     @field_validator(
@@ -203,6 +250,7 @@ class ChapterCritique(BaseModel):
         "emotional_depth_score",
         "ideology_clarity_score",
         "civilian_texture_score",
+        "genre_contract_score",
         mode="before",
     )
     @classmethod
@@ -240,6 +288,7 @@ class ManuscriptQaReport(BaseModel):
     ideology_consistency_findings: list[str] = Field(default_factory=list)
     civilian_texture_findings: list[str] = Field(default_factory=list)
     technical_escalation_fatigue_findings: list[str] = Field(default_factory=list)
+    genre_contract_notes: list[str] = Field(default_factory=list)
 
 
 class TaskRouteOverride(BaseModel):
