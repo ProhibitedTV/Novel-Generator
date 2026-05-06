@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Compare runs - {{ project.title }} - Novel Generator{% endblock %}
+
+{% block content %}
+<section class="panel page-banner">
+  <div class="section-header">
+    <div class="page-header-copy">
+      <p class="eyebrow">Run comparison</p>
+      <h1>{{ project.title }}</h1>
+      <p class="hero-copy">Compare completed drafts by route, word count, chapter coverage, revision load, quality signals, QA risk categories, and exported artifacts.</p>
+    </div>
+    <div class="hero-actions">
+      <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
+    </div>
+  </div>
+
+  <dl class="stats-grid">
+    <div><dt>Completed runs</dt><dd>{{ comparison_run_count }}</dd></div>
+    <div><dt>Project target</dt><dd>{{ project.desired_word_count }} words</dd></div>
+    <div><dt>Requested chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
+    <div><dt>Preferred model</dt><dd class="long-value">{{ project.preferred_model }}</dd></div>
+  </dl>
+</section>
+
+{% if comparison_run_count < 2 %}
+  <section class="notice notice-warning">
+    At least two completed runs are needed for a useful comparison. Queue another run or finish an active one, then come back here.
+  </section>
+{% endif %}
+
+{% if comparison_runs %}
+  <section class="run-compare-grid">
+    {% for card in comparison_runs %}
+      <article class="panel run-compare-card{% if card.run.id == best_run_id and comparison_run_count > 1 %} is-best{% endif %}">
+        <div class="section-header">
+          <div class="section-header-copy">
+            <p class="eyebrow">Run #{{ card.short_id }}</p>
+            <h2>{{ card.run.model_name }}</h2>
+            <p>{{ card.provider_model }}</p>
+          </div>
+          <div class="compare-score">
+            <span class="detail-label">Draft fitness</span>
+            <strong>{{ card.score }}</strong>
+          </div>
+        </div>
+
+        {% if card.run.id == best_run_id and comparison_run_count > 1 %}
+          <p class="inline-note inline-note-success">Lowest combined QA risk among completed runs.</p>
+        {% endif %}
+
+        <div class="story-bible-grid">
+          <div class="detail-item inline-detail">
+            <span class="detail-label">Status</span>
+            <span class="badge status-{{ card.run.status.value }}">{{ card.run.status.value.replace("_", " ") }}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Completed</span>
+            <span class="detail-value">{{ card.run.completed_at.strftime('%Y-%m-%d %H:%M') if card.run.completed_at else "-" }}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Words drafted</span>
+            <span class="detail-value">{{ card.word_count }}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Chapter coverage</span>
+            <span class="detail-value">{{ card.completed_chapters }}/{{ card.chapter_count }} completed</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Revision triggers</span>
+            <span class="detail-value">{{ card.revision_count }}</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">QA findings</span>
+            <span class="detail-value">{{ card.blocking_count }} blocking / {{ card.warning_count }} warnings</span>
+          </div>
+        </div>
+
+        <div class="support-block">
+          <div class="section-header-copy">
+            <h3>Quality signals</h3>
+          </div>
+          <div class="comparison-signal-grid">
+            {% for signal in card.signal_rows %}
+              <div class="signal-card signal-{{ signal.tone }}">
+                <strong>{{ signal.label }}</strong>
+                <span>{{ signal.average if signal.average is not none else "-" }}/10</span>
+                <p>{{ signal.state_label }}</p>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="support-block">
+          <div class="section-header-copy">
+            <h3>QA risk categories</h3>
+          </div>
+          <div class="compare-category-grid">
+            {% for row in card.category_rows %}
+              <div class="compare-category compare-category-{{ row.tone }}">
+                <span>{{ row.label }}</span>
+                <strong>{{ row.count }}</strong>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <div class="story-bible-grid">
+          <div class="detail-item">
+            <span class="detail-label">Strengths</span>
+            <ul class="bullet-list">
+              {% for item in card.standout_strengths %}
+                <li>{{ item }}</li>
+              {% else %}
+                <li>No chapter strengths recorded yet.</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Top risks</span>
+            <ul class="bullet-list">
+              {% for item in card.top_risks %}
+                <li>{{ item }}</li>
+              {% else %}
+                <li>No major QA risk category is elevated.</li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+
+        <div class="support-block">
+          <div class="section-header-copy">
+            <h3>Artifacts</h3>
+          </div>
+          {% if card.qa_artifact %}
+            <a class="artifact-card qa-artifact-card" href="/api/artifacts/{{ card.qa_artifact.id }}/download">
+              <span class="artifact-kind">editorial feedback</span>
+              <div class="artifact-meta">
+                <strong class="artifact-name long-value">{{ card.qa_artifact.filename }}</strong>
+                <span class="detail-value">QA report</span>
+              </div>
+            </a>
+          {% endif %}
+          {% if card.manuscript_artifacts %}
+            <div class="artifact-list">
+              {% for artifact in card.manuscript_artifacts %}
+                <a class="artifact-card" href="/api/artifacts/{{ artifact.id }}/download">
+                  <span class="artifact-kind">{{ artifact.kind }}</span>
+                  <div class="artifact-meta">
+                    <strong class="artifact-name long-value">{{ artifact.filename }}</strong>
+                    <span class="detail-value">Generated output</span>
+                  </div>
+                </a>
+              {% endfor %}
+            </div>
+          {% elif not card.qa_artifact %}
+            <p class="empty-state">No artifacts are attached to this run.</p>
+          {% endif %}
+        </div>
+
+        <div class="form-actions">
+          <a class="button secondary" href="/runs/{{ card.run.id }}">Open run</a>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+{% else %}
+  <section class="panel">
+    <p class="empty-state">No completed runs are ready to compare yet.</p>
+  </section>
+{% endif %}
+{% endblock %}

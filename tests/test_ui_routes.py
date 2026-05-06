@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 
 from novel_generator.dependencies import get_session_factory
-from novel_generator.models import Artifact, RunStatus
+from novel_generator.models import Artifact, ChapterStatus, RunStatus
 from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, get_project, get_run
 from novel_generator.schemas import ProjectCreate, ProviderCapabilities, RunCreate
 from novel_generator.services.ollama import OllamaClient
@@ -82,6 +83,93 @@ def seed_project_and_run() -> tuple[str, str]:
         )
         session.commit()
         return project.id, run.id
+
+
+def seed_project_with_completed_compare_runs() -> tuple[str, list[str]]:
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = create_project(
+            session,
+            ProjectCreate(
+                title="Compare Project",
+                premise="A seeded premise with multiple completed drafts.",
+                desired_word_count=5000,
+                requested_chapters=2,
+                min_words_per_chapter=800,
+                max_words_per_chapter=1200,
+                preferred_model="test-model",
+                story_brief={"setting": "A brittle station-city", "tone": "tense sci-fi"},
+            ),
+        )
+        run_ids: list[str] = []
+        for index, model_name in enumerate(["test-model", "alternate-model"], start=1):
+            run = create_run(
+                session,
+                project,
+                RunCreate(
+                    project_id=project.id,
+                    model_name=model_name,
+                    target_word_count=5000,
+                    requested_chapters=2,
+                    min_words_per_chapter=800,
+                    max_words_per_chapter=1200,
+                    pause_after_outline=False,
+                ),
+            )
+            run.status = RunStatus.COMPLETED
+            run.current_step = "completed"
+            run.completed_at = datetime(2026, 5, index, 12, 0)
+            run.outline = [
+                {"chapter_number": 1, "title": f"Signal {index}", "objective": "Find the signal.", "ending_state": "The signal is traced."},
+                {"chapter_number": 2, "title": f"Choice {index}", "objective": "Choose a route.", "ending_state": "The route is chosen."},
+            ]
+            create_chapters_from_outline(session, run)
+            for chapter in run.chapters:
+                chapter.status = ChapterStatus.COMPLETED
+                chapter.content = f"Completed draft {index} chapter {chapter.chapter_number} with enough prose to count."
+                chapter.summary = f"Summary for draft {index} chapter {chapter.chapter_number}."
+                chapter.word_count = 1100 + (index * 100)
+                chapter.continuity_update = {"chapter_outcome": f"Outcome {chapter.chapter_number}", "current_patch_status": "Stable"}
+                chapter.qa_notes = {
+                    "strengths": [f"Draft {index} keeps the premise clear."],
+                    "warnings": ["The ending needs more object-level specificity."] if index == 2 else [],
+                    "revision_required": index == 2,
+                    "focus": ["Sharpen the ending hook."] if index == 2 else [],
+                    "forward_motion_score": 8 if index == 1 else 6,
+                    "ending_concreteness_score": 8 if index == 1 else 4,
+                    "cost_consequence_realism_score": 7 if index == 1 else 5,
+                    "side_character_independence_score": 7 if index == 1 else 5,
+                    "proper_noun_continuity_score": 8 if index == 1 else 6,
+                    "repetition_risk_score": 2 if index == 1 else 7,
+                    "emotional_depth_score": 8 if index == 1 else 5,
+                    "ideology_clarity_score": 7 if index == 1 else 6,
+                    "civilian_texture_score": 7 if index == 1 else 5,
+                    "genre_contract_score": 8 if index == 1 else 5,
+                    "blocking_issues": ["Chapter ending is abstract."] if index == 2 else [],
+                    "soft_warnings": ["Technical emergency beats repeat."] if index == 2 else [],
+                    "genre_contract_findings": ["The draft needs a cleaner serial hook."] if index == 2 else [],
+                    "repair_scope": "targeted_scene_and_ending" if index == 2 else "none",
+                }
+            run.artifacts.append(
+                Artifact(
+                    kind="qa-report",
+                    filename=f"qa-report-{index}.md",
+                    relative_path=f"{run.id}/qa-report.md",
+                    content_type="text/markdown",
+                )
+            )
+            run.artifacts.append(
+                Artifact(
+                    kind="manuscript-md",
+                    filename=f"manuscript-{index}.md",
+                    relative_path=f"{run.id}/manuscript.md",
+                    content_type="text/markdown",
+                )
+            )
+            run_ids.append(run.id)
+
+        session.commit()
+        return project.id, run_ids
 
 
 def test_home_empty_state_with_unreachable_ollama(client, monkeypatch) -> None:
@@ -425,6 +513,36 @@ def test_project_detail_renders_cleanup_controls_for_finished_runs(client, monke
     assert "Manage project" in response.text
     assert "Clean finished runs" in response.text
     assert f'action="/runs/{run_id}/delete"' in response.text
+
+
+def test_project_detail_links_to_compare_when_multiple_completed_runs_exist(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id, _ = seed_project_with_completed_compare_runs()
+
+    response = client.get(f"/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert "Compare completed runs" in response.text
+    assert f'href="/projects/{project_id}/runs/compare"' in response.text
+
+
+def test_run_compare_page_summarizes_completed_runs(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id, run_ids = seed_project_with_completed_compare_runs()
+
+    response = client.get(f"/projects/{project_id}/runs/compare")
+
+    assert response.status_code == 200
+    assert "Run comparison" in response.text
+    assert "Draft fitness" in response.text
+    assert "test-model" in response.text
+    assert "alternate-model" in response.text
+    assert "Revision triggers" in response.text
+    assert "Ending risks" in response.text
+    assert "Technical fatigue" in response.text
+    assert "qa-report-1.md" in response.text
+    assert "manuscript-2.md" in response.text
+    assert f'href="/runs/{run_ids[0]}"' in response.text
 
 
 def test_cleanup_finished_runs_ui_removes_terminal_run(client, monkeypatch) -> None:

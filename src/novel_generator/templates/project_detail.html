@@ -428,11 +428,16 @@
       <h2>Run history</h2>
       <p>{{ project_runs|length }} total run{{ "" if project_runs|length == 1 else "s" }}. Finished runs can be re-opened, rerun, or deleted once you no longer need their saved exports.</p>
     </div>
-    {% if terminal_run_count %}
-      <form method="post" action="/projects/{{ project.id }}/runs/cleanup" data-confirm="Delete all completed, failed, and canceled runs for this project? Their saved drafts, event logs, and exports will be removed.">
-        <button class="secondary" type="submit">Delete {{ terminal_run_count }} finished run{{ "" if terminal_run_count == 1 else "s" }}</button>
-      </form>
-    {% endif %}
+    <div class="hero-actions">
+      {% if completed_run_count >= 2 %}
+        <a class="button secondary" href="/projects/{{ project.id }}/runs/compare">Compare completed runs</a>
+      {% endif %}
+      {% if terminal_run_count %}
+        <form method="post" action="/projects/{{ project.id }}/runs/cleanup" data-confirm="Delete all completed, failed, and canceled runs for this project? Their saved drafts, event logs, and exports will be removed.">
+          <button class="secondary" type="submit">Delete {{ terminal_run_count }} finished run{{ "" if terminal_run_count == 1 else "s" }}</button>
+        </form>
+      {% endif %}
+    </div>
   </div>
   {% if project_runs %}
     <div class="run-table">

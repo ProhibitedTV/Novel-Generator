@@ -159,6 +159,72 @@ QUALITY_SIGNAL_DEFS = [
     {"field": "genre_contract_score", "label": "Genre contract", "lower_is_better": False, "default": 10},
     {"field": "repetition_risk_score", "label": "Repetition risk", "lower_is_better": True},
 ]
+COMPARISON_CATEGORY_DEFS = [
+    {
+        "id": "ending",
+        "label": "Ending risks",
+        "field": "ending_concreteness_score",
+        "threshold": 5,
+        "mode": "low",
+        "keywords": ["ending", "hook", "abstract"],
+    },
+    {
+        "id": "cost",
+        "label": "Easy-win risks",
+        "field": "cost_consequence_realism_score",
+        "threshold": 5,
+        "mode": "low",
+        "keywords": ["cost", "price", "technical problem"],
+    },
+    {
+        "id": "side_character",
+        "label": "Side-character agency",
+        "field": "side_character_independence_score",
+        "threshold": 5,
+        "mode": "low",
+        "keywords": ["side-character", "side character"],
+    },
+    {
+        "id": "repetition",
+        "label": "Repetition risks",
+        "field": "repetition_risk_score",
+        "threshold": 6,
+        "mode": "high",
+        "keywords": ["repetition", "repeated", "stock phrase"],
+    },
+    {
+        "id": "emotional",
+        "label": "Emotional pacing",
+        "field": "emotional_depth_score",
+        "threshold": 5,
+        "mode": "low",
+        "keywords": ["emotional", "aftermath", "memory-damage"],
+    },
+    {
+        "id": "continuity",
+        "label": "Continuity risks",
+        "field": "proper_noun_continuity_score",
+        "threshold": 5,
+        "mode": "low",
+        "keywords": ["proper noun", "continuity", "canonical"],
+    },
+    {
+        "id": "technical",
+        "label": "Technical fatigue",
+        "field": None,
+        "threshold": 0,
+        "mode": "keyword",
+        "keywords": ["technical emergency", "alarm fatigue", "lockdown", "quarantine"],
+    },
+    {
+        "id": "genre",
+        "label": "Genre contract",
+        "field": "genre_contract_score",
+        "threshold": 5,
+        "mode": "low",
+        "keywords": ["genre"],
+    },
+]
 
 
 def _score_state(score: int, *, lower_is_better: bool) -> tuple[str, str]:
@@ -833,12 +899,183 @@ def _chapter_completion_count(run: GenerationRun) -> int:
 def _project_run_stats(project: Project) -> dict[str, Any]:
     project_runs = _sort_runs(project)
     terminal_runs = [run for run in project_runs if run.status in TERMINAL_STATUSES]
+    completed_runs = [run for run in project_runs if run.status == RunStatus.COMPLETED]
     active_runs = [run for run in project_runs if run.status not in TERMINAL_STATUSES]
     return {
         "project_runs": project_runs,
         "terminal_run_count": len(terminal_runs),
+        "completed_run_count": len(completed_runs),
         "active_run_count": len(active_runs),
         "can_delete_project": not active_runs,
+    }
+
+
+def _run_qa_notes(run: GenerationRun) -> list[dict[str, Any]]:
+    notes: list[dict[str, Any]] = []
+    for chapter in _sorted_run_chapters(run):
+        if chapter.qa_notes:
+            notes.append(chapter.qa_notes)
+    return notes
+
+
+def _score_average(notes: list[dict[str, Any]], field: str, *, default: int = 0) -> float | None:
+    if not notes:
+        return None
+    scores = [int(item.get(field, default) or default) for item in notes]
+    return round(sum(scores) / len(scores), 1)
+
+
+def _warning_text(qa_notes: dict[str, Any]) -> str:
+    warnings = [
+        *qa_notes.get("warnings", []),
+        *qa_notes.get("soft_warnings", []),
+        *qa_notes.get("blocking_issues", []),
+        *qa_notes.get("genre_contract_findings", []),
+        *qa_notes.get("focus", []),
+    ]
+    return " ".join(str(item) for item in warnings).lower()
+
+
+def _category_hit(qa_notes: dict[str, Any], definition: dict[str, Any]) -> bool:
+    field = definition.get("field")
+    mode = definition.get("mode")
+    if field:
+        default = 10 if field == "genre_contract_score" else 0
+        score = int(qa_notes.get(field, default) or default)
+        if mode == "low" and score <= int(definition["threshold"]):
+            return True
+        if mode == "high" and score >= int(definition["threshold"]):
+            return True
+
+    text = _warning_text(qa_notes)
+    return any(keyword in text for keyword in definition["keywords"])
+
+
+def _comparison_category_rows(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for definition in COMPARISON_CATEGORY_DEFS:
+        count = sum(1 for item in notes if _category_hit(item, definition))
+        rows.append(
+            {
+                "id": definition["id"],
+                "label": definition["label"],
+                "count": count,
+                "tone": "risk" if count else "healthy",
+            }
+        )
+    return rows
+
+
+def _comparison_score(notes: list[dict[str, Any]], category_rows: list[dict[str, Any]]) -> int:
+    if not notes:
+        return 0
+
+    positive_fields = [
+        item["field"]
+        for item in QUALITY_SIGNAL_DEFS
+        if item["field"] != "repetition_risk_score"
+    ]
+    positive_scores = [
+        int(note.get(field, 10 if field == "genre_contract_score" else 0) or 0)
+        for note in notes
+        for field in positive_fields
+    ]
+    repetition_scores = [10 - int(note.get("repetition_risk_score", 0) or 0) for note in notes]
+    all_scores = [*positive_scores, *repetition_scores]
+    quality_average = sum(all_scores) / len(all_scores) if all_scores else 0
+    revision_count = sum(
+        1
+        for note in notes
+        if note.get("revision_required") or str(note.get("repair_scope", "none") or "none") != "none"
+    )
+    warning_load = sum(
+        len(note.get("blocking_issues", []) or [])
+        + len(note.get("soft_warnings", []) or [])
+        + len(note.get("warnings", []) or [])
+        for note in notes
+    )
+    category_load = sum(row["count"] for row in category_rows)
+    return max(0, min(100, int(round((quality_average * 10) - (warning_load * 1.5) - revision_count - category_load))))
+
+
+def _run_comparison_card(run: GenerationRun) -> dict[str, Any]:
+    notes = _run_qa_notes(run)
+    category_rows = _comparison_category_rows(notes)
+    score = _comparison_score(notes, category_rows)
+    signal_rows: list[dict[str, Any]] = []
+    for definition in QUALITY_SIGNAL_DEFS:
+        average = _score_average(
+            notes,
+            definition["field"],
+            default=int(definition.get("default", 0) or 0),
+        )
+        rounded = int(round(average)) if average is not None else 0
+        tone, state_label = _score_state(rounded, lower_is_better=bool(definition["lower_is_better"]))
+        signal_rows.append(
+            {
+                "label": definition["label"],
+                "average": average,
+                "tone": tone,
+                "state_label": state_label if average is not None else "No data",
+            }
+        )
+
+    qa_artifact = next((artifact for artifact in run.artifacts if artifact.kind == "qa-report"), None)
+    manuscript_artifacts = [artifact for artifact in run.artifacts if artifact.kind != "qa-report"]
+    revision_count = sum(
+        1
+        for note in notes
+        if note.get("revision_required") or str(note.get("repair_scope", "none") or "none") != "none"
+    )
+    blocking_count = sum(len(note.get("blocking_issues", []) or []) for note in notes)
+    warning_count = sum(
+        len(note.get("warnings", []) or []) + len(note.get("soft_warnings", []) or [])
+        for note in notes
+    )
+    standout_strengths = [
+        str(item)
+        for note in notes
+        for item in note.get("strengths", []) or []
+    ][:3]
+    top_risks = [
+        row["label"]
+        for row in category_rows
+        if row["count"]
+    ][:3]
+    return {
+        "run": run,
+        "short_id": run.id[:8],
+        "provider_model": f"{run.provider_name} / {run.model_name}",
+        "completed_chapters": _chapter_completion_count(run),
+        "chapter_count": len(run.chapters),
+        "word_count": _run_word_count(run),
+        "revision_count": revision_count,
+        "blocking_count": blocking_count,
+        "warning_count": warning_count,
+        "score": score,
+        "signal_rows": signal_rows,
+        "category_rows": category_rows,
+        "qa_artifact": qa_artifact,
+        "manuscript_artifacts": manuscript_artifacts,
+        "artifact_count": len(run.artifacts),
+        "standout_strengths": standout_strengths,
+        "top_risks": top_risks,
+    }
+
+
+def _project_comparison_context(project: Project) -> dict[str, Any]:
+    completed_runs = [
+        run
+        for run in _sort_runs(project)
+        if run.status == RunStatus.COMPLETED
+    ]
+    cards = [_run_comparison_card(run) for run in completed_runs]
+    best_score = max((card["score"] for card in cards), default=None)
+    best_run_id = next((card["run"].id for card in cards if card["score"] == best_score), None)
+    return {
+        "comparison_runs": cards,
+        "comparison_run_count": len(cards),
+        "best_run_id": best_run_id,
     }
 
 
@@ -1296,6 +1533,26 @@ def project_detail(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found.")
     return _render(request, "project_detail.html", _project_detail_context(request, project, db, settings))
+
+
+@router.get("/projects/{project_id}/runs/compare")
+def compare_project_runs(
+    project_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    return _render(
+        request,
+        "run_compare.html",
+        {
+            "active_nav": "projects",
+            "project": project,
+            **_project_comparison_context(project),
+        },
+    )
 
 
 @router.post("/projects/{project_id}/edit")

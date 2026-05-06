@@ -407,9 +407,74 @@ label {
 .project-list,
 .artifact-list,
 .chapter-list,
-.run-table {
+.run-table,
+.run-compare-grid {
   display: grid;
   gap: 0.95rem;
+}
+
+.run-compare-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr));
+  align-items: start;
+}
+
+.run-compare-card {
+  display: grid;
+  gap: 1rem;
+  border-color: rgba(217, 207, 192, 0.95);
+}
+
+.run-compare-card.is-best {
+  border-color: rgba(66, 132, 112, 0.7);
+  box-shadow: 0 20px 55px rgba(66, 132, 112, 0.12);
+}
+
+.compare-score {
+  min-width: 7rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 16px;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  background: rgba(255, 255, 255, 0.62);
+  text-align: center;
+}
+
+.compare-score strong {
+  display: block;
+  font-size: clamp(1.7rem, 3vw, 2.4rem);
+  line-height: 1;
+}
+
+.comparison-signal-grid,
+.compare-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: 0.65rem;
+}
+
+.compare-category {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 3rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 14px;
+  border: 1px solid rgba(217, 207, 192, 0.9);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.compare-category strong {
+  font-size: 1.18rem;
+}
+
+.compare-category-healthy {
+  border-color: rgba(81, 139, 113, 0.28);
+  background: rgba(236, 247, 241, 0.78);
+}
+
+.compare-category-risk {
+  border-color: rgba(186, 90, 78, 0.28);
+  background: rgba(255, 241, 238, 0.78);
 }
 
 .project-card,
