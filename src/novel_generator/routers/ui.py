@@ -146,6 +146,19 @@ CANON_ENTITY_TYPES = [
     "technology",
     "event",
 ]
+LOCAL_PROVIDER_NAMES = {"ollama"}
+HIGH_TOKEN_ROUTE_STAGES = {stage["id"] for stage in TASK_ROUTE_STAGES}
+LOCAL_PROVIDER_DISCLOSURE = (
+    "Runs locally on your configured Ollama host. Manuscript text is not sent to a cloud provider by Novel Generator."
+)
+EXTERNAL_PROVIDER_DISCLOSURE = (
+    "This route may send manuscript text and story data to the configured external provider. "
+    "Check that provider's privacy, retention, and pricing policies before using it."
+)
+HIGH_TOKEN_DISCLOSURE = (
+    "Full novel runs can use large prompts, chapter drafts, critiques, and QA payloads. "
+    "Expect high token usage if the configured provider charges by token."
+)
 RUN_STAGE_LOOKUP = {stage["id"]: stage for stage in RUN_STAGES}
 RUN_STAGE_PROGRESS_ORDER = [
     "queued",
@@ -310,6 +323,108 @@ def _latest_route_context(run: GenerationRun) -> dict[str, str]:
                 "model_name": model_name or run.model_name,
             }
     return {"provider_name": run.provider_name, "model_name": run.model_name}
+
+
+def _provider_label(provider_name: str) -> str:
+    try:
+        return provider_definition(provider_name).label
+    except ProviderError:
+        return provider_name
+
+
+def _provider_privacy_disclosure(provider_name: str) -> dict[str, Any]:
+    provider_key = str(provider_name or "").strip() or "ollama"
+    is_external = provider_key not in LOCAL_PROVIDER_NAMES
+    return {
+        "provider_name": provider_key,
+        "provider_label": _provider_label(provider_key),
+        "is_external": is_external,
+        "tone": "warning" if is_external else "success",
+        "badge_label": "External provider" if is_external else "Local/private",
+        "title": "External provider route" if is_external else "Local/private route",
+        "body": EXTERNAL_PROVIDER_DISCLOSURE if is_external else LOCAL_PROVIDER_DISCLOSURE,
+        "cost_body": HIGH_TOKEN_DISCLOSURE if is_external else "",
+    }
+
+
+def _routing_mapping(task_routing: Any) -> dict[str, Any]:
+    if task_routing is None:
+        return {}
+    if hasattr(task_routing, "model_dump"):
+        return task_routing.model_dump(exclude_none=True)
+    if isinstance(task_routing, dict):
+        return task_routing
+    return {}
+
+
+def _route_entry_mapping(entry: Any) -> dict[str, Any]:
+    if entry is None:
+        return {}
+    if hasattr(entry, "model_dump"):
+        return entry.model_dump(exclude_none=True)
+    if isinstance(entry, dict):
+        return entry
+    return {}
+
+
+def _route_disclosure_rows(
+    default_provider_name: str,
+    default_model_name: str,
+    task_routing: Any,
+) -> list[dict[str, Any]]:
+    routing = _routing_mapping(task_routing)
+    rows: list[dict[str, Any]] = []
+    for stage in TASK_ROUTE_STAGES:
+        entry = _route_entry_mapping(routing.get(stage["id"]))
+        provider_name = str(entry.get("provider_name") or default_provider_name or "ollama").strip()
+        model_name = str(entry.get("model_name") or default_model_name or "").strip()
+        disclosure = _provider_privacy_disclosure(provider_name)
+        rows.append(
+            {
+                "id": stage["id"],
+                "label": stage["label"],
+                "provider_name": provider_name,
+                "provider_label": disclosure["provider_label"],
+                "model_name": model_name,
+                "uses_override": bool(entry),
+                "is_external": disclosure["is_external"],
+                "badge_label": disclosure["badge_label"],
+                "tone": disclosure["tone"],
+            }
+        )
+    return rows
+
+
+def _route_privacy_summary(
+    default_provider_name: str,
+    default_model_name: str,
+    task_routing: Any,
+) -> dict[str, Any]:
+    rows = _route_disclosure_rows(default_provider_name, default_model_name, task_routing)
+    external_rows = [row for row in rows if row["is_external"]]
+    if external_rows:
+        has_high_token_route = any(row["id"] in HIGH_TOKEN_ROUTE_STAGES for row in external_rows)
+        provider_labels = list(dict.fromkeys(row["provider_label"] for row in external_rows))
+        return {
+            "tone": "warning",
+            "title": "External provider disclosure",
+            "body": EXTERNAL_PROVIDER_DISCLOSURE,
+            "cost_body": HIGH_TOKEN_DISCLOSURE if has_high_token_route else "",
+            "badge_label": "External provider",
+            "is_external": True,
+            "stage_rows": external_rows,
+            "provider_labels": provider_labels,
+        }
+    return {
+        "tone": "success",
+        "title": "Local/private route disclosure",
+        "body": LOCAL_PROVIDER_DISCLOSURE,
+        "cost_body": "",
+        "badge_label": "Local/private",
+        "is_external": False,
+        "stage_rows": rows,
+        "provider_labels": list(dict.fromkeys(row["provider_label"] for row in rows)),
+    }
 
 
 def _chapter_for_dashboard(run: GenerationRun) -> Any | None:
@@ -519,10 +634,14 @@ def _run_dashboard_context(run: GenerationRun) -> dict[str, Any]:
     quality_chapter = _latest_quality_chapter(run, preferred=dashboard_chapter)
     quality_source = quality_chapter.chapter_number if quality_chapter is not None and quality_chapter.qa_notes else None
     continuity = _continuity_snapshot(run, dashboard_chapter)
+    current_route = _latest_route_context(run)
     return {
         "current_stage_context": current_stage,
         "next_stage_context": next_stage,
-        "current_route_context": _latest_route_context(run),
+        "current_route_context": current_route,
+        "current_route_disclosure": _provider_privacy_disclosure(current_route["provider_name"]),
+        "run_route_disclosure": _route_privacy_summary(run.provider_name, run.model_name, run.task_routing),
+        "run_route_disclosure_rows": _route_disclosure_rows(run.provider_name, run.model_name, run.task_routing),
         "current_contract": current_contract,
         "quality_signal_rows": _quality_signal_rows(quality_chapter),
         "quality_source_chapter": quality_source,
@@ -862,6 +981,19 @@ def _task_route_rows(form_values: dict[str, Any]) -> list[dict[str, str]]:
     ]
 
 
+def _form_route_privacy_summary(
+    values: dict[str, Any],
+    *,
+    provider_field: str,
+    model_field: str,
+) -> dict[str, Any]:
+    return _route_privacy_summary(
+        str(values.get(provider_field, "") or "ollama"),
+        str(values.get(model_field, "") or ""),
+        _task_routing_payload(values),
+    )
+
+
 def _provider_catalog(settings: Settings, db: Session) -> tuple[dict[str, Any], dict[str, ProviderCapabilities], ProviderManager]:
     configs = ensure_provider_configs(db, settings)
     db.commit()
@@ -883,6 +1015,8 @@ def _provider_option_rows(configs_by_name: dict[str, Any], statuses_by_name: dic
                 "reachable": status.reachable,
                 "available_models": status.available_models,
                 "default_model": config.default_model,
+                "privacy_label": _provider_privacy_disclosure(option["name"])["badge_label"],
+                "is_external": _provider_privacy_disclosure(option["name"])["is_external"],
             }
         )
     return rows
@@ -1303,6 +1437,11 @@ def _project_new_context(
         "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
         "genre_profile_options": genre_profile_options(),
         "task_route_rows": _task_route_rows(form_payload),
+        "route_disclosure": _form_route_privacy_summary(
+            form_payload,
+            provider_field="preferred_provider_name",
+            model_field="preferred_model",
+        ),
         "form_errors": form_errors or {},
         "page_error": page_error,
     }
@@ -1345,9 +1484,19 @@ def _project_detail_context(
         "edit_values": edit_payload,
         "edit_errors": edit_errors or {},
         "edit_task_route_rows": _task_route_rows(edit_payload),
+        "edit_route_disclosure": _form_route_privacy_summary(
+            edit_payload,
+            provider_field="preferred_provider_name",
+            model_field="preferred_model",
+        ),
         "run_values": run_payload,
         "run_errors": run_errors or {},
         "run_task_route_rows": _task_route_rows(run_payload),
+        "run_route_disclosure": _form_route_privacy_summary(
+            run_payload,
+            provider_field="provider_name",
+            model_field="model_name",
+        ),
         "provider_options": _provider_option_rows(provider_configs_by_name, provider_statuses_by_name),
         "genre_profile_options": genre_profile_options(),
         "page_error": page_error,
@@ -1388,6 +1537,7 @@ def _provider_settings_context(
                 "form_values": values,
                 "form_errors": form_errors.get(provider_name, {}) if isinstance(form_errors.get(provider_name), dict) else {},
                 "supports_api_key": provider_definition(provider_name).requires_api_key,
+                "privacy_disclosure": _provider_privacy_disclosure(provider_name),
             }
         )
     return {

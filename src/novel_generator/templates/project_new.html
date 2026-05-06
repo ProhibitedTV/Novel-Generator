@@ -133,7 +133,7 @@
           <select name="preferred_provider_name">
             {% for option in provider_options %}
               <option value="{{ option.name }}" {% if form_values.preferred_provider_name == option.name %}selected{% endif %}>
-                {{ option.label }}
+                {{ option.label }} - {{ option.privacy_label }}
               </option>
             {% endfor %}
           </select>
@@ -145,6 +145,15 @@
         </label>
         {% if form_errors.preferred_model %}<p class="field-error">{{ form_errors.preferred_model }}</p>{% endif %}
         <p class="field-note">Verified chips below come from the saved Ollama connection. For other providers, type the model name manually or confirm it in provider settings.</p>
+        <div class="callout callout-{{ route_disclosure.tone }} route-disclosure">
+          <div class="callout-copy">
+            <h3>{{ route_disclosure.title }}</h3>
+            <p>{{ route_disclosure.body }}</p>
+            {% if route_disclosure.cost_body %}
+              <p>{{ route_disclosure.cost_body }}</p>
+            {% endif %}
+          </div>
+        </div>
         {% if provider_status.available_models %}
           <div class="model-picker">
             <div class="model-picker-header">
@@ -190,7 +199,7 @@
                   <option value="">Use project default</option>
                   {% for option in provider_options %}
                     <option value="{{ option.name }}" {% if row.provider_name == option.name %}selected{% endif %}>
-                      {{ option.label }}
+                      {{ option.label }} - {{ option.privacy_label }}
                     </option>
                   {% endfor %}
                 </select>

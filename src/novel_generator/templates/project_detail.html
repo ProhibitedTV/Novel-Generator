@@ -74,7 +74,7 @@
             <select name="preferred_provider_name">
               {% for option in provider_options %}
                 <option value="{{ option.name }}" {% if edit_values.preferred_provider_name == option.name %}selected{% endif %}>
-                  {{ option.label }}
+                  {{ option.label }} - {{ option.privacy_label }}
                 </option>
               {% endfor %}
             </select>
@@ -218,7 +218,7 @@
                 <select name="{{ row.provider_field }}">
                   <option value="">Use project default</option>
                   {% for option in provider_options %}
-                    <option value="{{ option.name }}" {% if row.provider_name == option.name %}selected{% endif %}>{{ option.label }}</option>
+                    <option value="{{ option.name }}" {% if row.provider_name == option.name %}selected{% endif %}>{{ option.label }} - {{ option.privacy_label }}</option>
                   {% endfor %}
                 </select>
               </label>
@@ -373,7 +373,7 @@
         Provider
         <select name="provider_name">
           {% for option in provider_options %}
-            <option value="{{ option.name }}" {% if run_values.provider_name == option.name %}selected{% endif %}>{{ option.label }}</option>
+            <option value="{{ option.name }}" {% if run_values.provider_name == option.name %}selected{% endif %}>{{ option.label }} - {{ option.privacy_label }}</option>
           {% endfor %}
         </select>
       </label>
@@ -385,6 +385,22 @@
       </label>
       {% if run_errors.model_name %}<p class="field-error">{{ run_errors.model_name }}</p>{% endif %}
       <p class="field-note">The run inherits this project's advanced task routing. Verified chips below still reflect the saved Ollama connection for the default self-hosted path.</p>
+      <div class="callout callout-{{ run_route_disclosure.tone }} route-disclosure">
+        <div class="callout-copy">
+          <h3>{{ run_route_disclosure.title }}</h3>
+          <p>{{ run_route_disclosure.body }}</p>
+          {% if run_route_disclosure.cost_body %}
+            <p>{{ run_route_disclosure.cost_body }}</p>
+          {% endif %}
+        </div>
+        {% if run_route_disclosure.is_external %}
+          <div class="disclosure-stage-list">
+            {% for row in run_route_disclosure.stage_rows %}
+              <span class="meta-chip">{{ row.label }}: {{ row.provider_label }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
 
       {% if provider_status.available_models %}
         <div class="model-picker">

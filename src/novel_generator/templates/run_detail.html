@@ -55,6 +55,7 @@
         <div class="detail-item">
           <span class="detail-label">Active route</span>
           <span class="detail-value long-value" data-run-route-label>{{ current_route_context.provider_name }} / {{ current_route_context.model_name }}</span>
+          <span class="meta-chip">{{ current_route_disclosure.badge_label }}</span>
         </div>
         <div class="detail-item">
           <span class="detail-label">Provider default</span>
@@ -103,6 +104,23 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div class="callout callout-{{ run_route_disclosure.tone }} route-disclosure">
+    <div class="callout-copy">
+      <h2>{{ run_route_disclosure.title }}</h2>
+      <p>{{ run_route_disclosure.body }}</p>
+      {% if run_route_disclosure.cost_body %}
+        <p>{{ run_route_disclosure.cost_body }}</p>
+      {% endif %}
+    </div>
+    {% if run_route_disclosure.is_external %}
+      <div class="disclosure-stage-list">
+        {% for row in run_route_disclosure.stage_rows %}
+          <span class="meta-chip">{{ row.label }}: {{ row.provider_label }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
   </div>
 
   <div class="run-stepper" data-run-stepper>
@@ -457,18 +475,21 @@
       </div>
     </div>
     <div class="run-table">
-      {% for stage_name, route in run.task_routing.items() %}
-        <article class="run-row">
-          <div class="run-row-main">
-            <div class="run-row-top">
-              <span class="run-row-title">{{ stage_name.replace("_", " ") }}</span>
+      {% for row in run_route_disclosure_rows %}
+        {% if row.uses_override %}
+          <article class="run-row">
+            <div class="run-row-main">
+              <div class="run-row-top">
+                <span class="run-row-title">{{ row.label }}</span>
+              </div>
+              <div class="meta-chip-row">
+                <span class="meta-chip">{{ row.provider_label }}</span>
+                <span class="meta-chip long-value">{{ row.model_name }}</span>
+                <span class="meta-chip">{{ row.badge_label }}</span>
+              </div>
             </div>
-            <div class="meta-chip-row">
-              <span class="meta-chip">{{ route.provider_name if route.provider_name is defined else route["provider_name"] }}</span>
-              <span class="meta-chip long-value">{{ route.model_name if route.model_name is defined else route["model_name"] }}</span>
-            </div>
-          </div>
-        </article>
+          </article>
+        {% endif %}
       {% endfor %}
     </div>
   </section>

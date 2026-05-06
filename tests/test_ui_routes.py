@@ -217,6 +217,8 @@ def test_project_new_page_renders_story_brief_and_model_picker_hooks(client, mon
     assert 'name="story_setting"' in response.text
     assert "What happens after this" in response.text
     assert "Setup progress" in response.text
+    assert "Runs locally on your configured Ollama host." in response.text
+    assert "Ollama - Local/private" in response.text
 
 
 def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:
@@ -285,6 +287,9 @@ def test_provider_settings_validation_and_live_actions_render(client, monkeypatc
     assert 'data-provider-action="models"' in response.text
     assert "Recommended setup flow" in response.text
     assert "OpenAI-compatible API" in response.text
+    assert "Runs locally on your configured Ollama host." in response.text
+    assert "This route may send manuscript text and story data to the configured external provider." in response.text
+    assert "Full novel runs can use large prompts" in response.text
 
 
 def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> None:
@@ -524,6 +529,53 @@ def test_project_detail_links_to_compare_when_multiple_completed_runs_exist(clie
     assert response.status_code == 200
     assert "Compare completed runs" in response.text
     assert f'href="/projects/{project_id}/runs/compare"' in response.text
+
+
+def test_project_run_setup_warns_for_external_default_provider(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id = seed_project()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = get_project(session, project_id)
+        assert project is not None
+        project.preferred_provider_name = "openai_compatible"
+        project.preferred_model = "external-model"
+        session.commit()
+
+    response = client.get(f"/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert "OpenAI-compatible API - External provider" in response.text
+    assert "This route may send manuscript text and story data to the configured external provider." in response.text
+    assert "Full novel runs can use large prompts" in response.text
+    assert "Chapter draft: OpenAI-compatible API" in response.text
+
+
+def test_run_detail_warns_for_external_provider_routes(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.provider_name = "openai_compatible"
+        run.model_name = "external-model"
+        run.task_routing = {
+            "chapter_critique": {"provider_name": "ollama", "model_name": "test-model"},
+        }
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "External provider disclosure" in response.text
+    assert "This route may send manuscript text and story data to the configured external provider." in response.text
+    assert "Full novel runs can use large prompts" in response.text
+    assert "Local/private" in response.text
+    assert "Story bible: OpenAI-compatible API" in response.text
+    assert "Chapter critique" in response.text
 
 
 def test_project_canon_controls_add_update_lock_and_delete(client, monkeypatch) -> None:

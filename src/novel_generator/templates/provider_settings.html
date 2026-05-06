@@ -53,6 +53,16 @@
           <p class="panel-intro">Optional. Enable this when you want per-stage routing to an OpenAI-compatible endpoint for planning, editing, or QA.</p>
         {% endif %}
 
+        <div class="callout callout-{{ card.privacy_disclosure.tone }} route-disclosure">
+          <div class="callout-copy">
+            <h3>{{ card.privacy_disclosure.badge_label }}</h3>
+            <p>{{ card.privacy_disclosure.body }}</p>
+            {% if card.privacy_disclosure.cost_body %}
+              <p>{{ card.privacy_disclosure.cost_body }}</p>
+            {% endif %}
+          </div>
+        </div>
+
         {% if card.form_errors.__all__ %}
           <p class="error-text">{{ card.form_errors.__all__ }}</p>
         {% endif %}
