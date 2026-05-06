@@ -253,7 +253,16 @@ class FakeOllamaClient:
         return next(self._responses)
 
 
-def _create_project(session, *, requested_chapters: int = 2):
+def _create_project(session, *, requested_chapters: int = 2, approved_canon: list[dict] | None = None):
+    story_brief = {
+        "setting": "A failing memory-city",
+        "tone": "Tense luminous sci-fi",
+        "protagonist": "Iris, disgraced archivist",
+        "core_conflict": "Save the city without accepting coercive control",
+        "ending_target": "One clear ending centered on consent and sacrifice",
+    }
+    if approved_canon is not None:
+        story_brief["approved_canon"] = approved_canon
     return create_project(
         session,
         ProjectCreate(
@@ -264,13 +273,7 @@ def _create_project(session, *, requested_chapters: int = 2):
             min_words_per_chapter=900,
             max_words_per_chapter=1200,
             preferred_model="test-model",
-            story_brief={
-                "setting": "A failing memory-city",
-                "tone": "Tense luminous sci-fi",
-                "protagonist": "Iris, disgraced archivist",
-                "core_conflict": "Save the city without accepting coercive control",
-                "ending_target": "One clear ending centered on consent and sacrifice",
-            },
+            story_brief=story_brief,
         ),
     )
 
@@ -294,6 +297,39 @@ def test_process_run_safe_pauses_after_outline_when_requested(configured_environ
         assert refreshed.outline is not None
         assert len(refreshed.chapters) == 2
         assert len(refreshed.artifacts) == 0
+
+
+def test_process_run_merges_approved_project_canon_into_story_bible(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(
+            session,
+            requested_chapters=2,
+            approved_canon=[
+                {
+                    "name": "Glass Orchard",
+                    "kind": "location",
+                    "role": "Locked project-level setting term",
+                    "aliases": ["the orchard"],
+                    "approved": True,
+                    "locked": True,
+                }
+            ],
+        )
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(session, run, settings, FakeOllamaClient([_story_bible_json(), _outline_json(2)]))
+
+        refreshed = get_run(session, run.id)
+        assert refreshed is not None
+        canon_by_name = {entity["name"]: entity for entity in refreshed.story_bible["canon_registry"]}
+        assert canon_by_name["Glass Orchard"]["approved"] is True
+        assert canon_by_name["Glass Orchard"]["locked"] is True
+        assert refreshed.continuity_ledger["active_entities"][0]["name"] == "Glass Orchard"
 
 
 def test_approved_run_completes_and_generates_qa_report(configured_environment) -> None:

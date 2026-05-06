@@ -1220,6 +1220,43 @@ dd {
   margin: 0;
 }
 
+.canon-panel {
+  gap: 1.25rem;
+}
+
+.canon-add-form,
+.canon-entry-form {
+  gap: 0.8rem;
+}
+
+.canon-card-list {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.canon-card {
+  display: grid;
+  gap: 1rem;
+}
+
+.canon-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.canon-checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  color: var(--muted);
+  font-size: 0.94rem;
+}
+
+.compact-toggle {
+  padding: 0.85rem;
+}
+
 .run-dashboard-grid {
   margin-top: 1rem;
 }

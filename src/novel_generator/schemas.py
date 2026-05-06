@@ -28,37 +28,6 @@ def _validate_genre_profile(value: Any) -> str:
     return key
 
 
-class StoryBrief(BaseModel):
-    genre_profile: str = DEFAULT_GENRE_PROFILE
-    setting: str = ""
-    tone: str = ""
-    protagonist: str = ""
-    supporting_cast: list[str] = Field(default_factory=list)
-    antagonist: str = ""
-    core_conflict: str = ""
-    ending_target: str = ""
-    world_rules: list[str] = Field(default_factory=list)
-    must_include: list[str] = Field(default_factory=list)
-    avoid: list[str] = Field(default_factory=list)
-
-    @field_validator("supporting_cast", "world_rules", "must_include", "avoid", mode="before")
-    @classmethod
-    def validate_lists(cls, value: Any) -> list[str]:
-        return _clean_list(value)
-
-    @field_validator("setting", "tone", "protagonist", "antagonist", "core_conflict", "ending_target", mode="before")
-    @classmethod
-    def validate_strings(cls, value: Any) -> str:
-        if value is None:
-            return ""
-        return str(value).strip()
-
-    @field_validator("genre_profile", mode="before")
-    @classmethod
-    def validate_genre_profile(cls, value: Any) -> str:
-        return _validate_genre_profile(value)
-
-
 class StoryCastMember(BaseModel):
     name: str
     role: str
@@ -83,11 +52,52 @@ class CanonicalEntity(BaseModel):
     kind: str
     role: str = ""
     aliases: list[str] = Field(default_factory=list)
+    approved: bool = False
+    locked: bool = False
 
     @field_validator("aliases", mode="before")
     @classmethod
     def validate_aliases(cls, value: Any) -> list[str]:
         return _clean_list(value)
+
+    @field_validator("name", "kind", "role", mode="before")
+    @classmethod
+    def validate_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+
+class StoryBrief(BaseModel):
+    genre_profile: str = DEFAULT_GENRE_PROFILE
+    setting: str = ""
+    tone: str = ""
+    protagonist: str = ""
+    supporting_cast: list[str] = Field(default_factory=list)
+    antagonist: str = ""
+    core_conflict: str = ""
+    ending_target: str = ""
+    world_rules: list[str] = Field(default_factory=list)
+    must_include: list[str] = Field(default_factory=list)
+    avoid: list[str] = Field(default_factory=list)
+    approved_canon: list[CanonicalEntity] = Field(default_factory=list)
+
+    @field_validator("supporting_cast", "world_rules", "must_include", "avoid", mode="before")
+    @classmethod
+    def validate_lists(cls, value: Any) -> list[str]:
+        return _clean_list(value)
+
+    @field_validator("setting", "tone", "protagonist", "antagonist", "core_conflict", "ending_target", mode="before")
+    @classmethod
+    def validate_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @field_validator("genre_profile", mode="before")
+    @classmethod
+    def validate_genre_profile(cls, value: Any) -> str:
+        return _validate_genre_profile(value)
 
 
 class ConcreteEndingHook(BaseModel):

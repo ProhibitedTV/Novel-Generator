@@ -338,6 +338,8 @@ def merge_canonical_entities(
                 "kind": current.kind or payload.kind,
                 "role": current.role or payload.role,
                 "aliases": aliases,
+                "approved": current.approved or payload.approved,
+                "locked": current.locked or payload.locked,
             }
         )
     return [entity.model_dump() for entity in merged.values()]
@@ -670,6 +672,12 @@ def manuscript_quality_notes(
                 notes["atmospheric_repetition_findings"].append(
                     f"Chapter {chapter.chapter_number} repeats '{phrase}' {count} times."
                 )
+        for entity in ((chapter.continuity_update or {}).get("new_entities_introduced", []) or []):
+            name = str(entity.get("name", "")).strip()
+            if name and not entity.get("approved"):
+                notes["proper_noun_continuity_findings"].append(
+                    f"Chapter {chapter.chapter_number} introduced unapproved canon entity '{name}'."
+                )
 
     if bible:
         for entity in bible.get("canon_registry") or []:
@@ -678,6 +686,10 @@ def manuscript_quality_notes(
                 continue
             kind = str(entity.get("kind", "")).strip().lower()
             aliases = [alias for alias in entity.get("aliases", []) if alias]
+            if not entity.get("approved"):
+                notes["proper_noun_continuity_findings"].append(
+                    f"Canonical {kind or 'entity'} '{name}' is present in the story bible but not approved yet."
+                )
             canonical_mentions = manuscript_text.count(name.lower())
             alias_mentions = sum(manuscript_text.count(alias.lower()) for alias in aliases)
             if canonical_mentions == 0 and kind in {"project", "faction", "system", "location"}:

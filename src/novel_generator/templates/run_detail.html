@@ -302,6 +302,23 @@
           </ul>
           <p class="field-note{% if revision_trigger_rows %} is-hidden{% endif %}" data-revision-empty>No revision triggers are available yet.</p>
       </div>
+
+      <div class="support-block">
+        <div class="section-header-copy">
+          <h3>Canon warnings</h3>
+        </div>
+        {% if canon_warning_rows %}
+          <ul class="bullet-list dashboard-alert-list">
+            {% for item in canon_warning_rows %}
+              <li class="alert-warning">
+                {% if item.chapter_number %}Chapter {{ item.chapter_number }}: {% endif %}{{ item.text }}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="field-note">No canon warnings are available yet.</p>
+        {% endif %}
+      </div>
     </article>
 
     <article class="panel dashboard-panel">
@@ -611,9 +628,23 @@
               {% for entity in story_bible.canon_registry %}
                 <article class="story-card">
                   <strong>{{ entity.name }}</strong>
-                  <p class="field-note">{{ entity.kind }}{% if entity.role %} / {{ entity.role }}{% endif %}</p>
+                  <div class="meta-chip-row">
+                    <span class="meta-chip">{{ entity.kind }}</span>
+                    <span class="badge status-{{ 'completed' if entity.approved else 'queued' }}">{{ "Approved" if entity.approved else "Pending approval" }}</span>
+                    {% if entity.locked %}
+                      <span class="meta-chip">Locked</span>
+                    {% endif %}
+                  </div>
+                  {% if entity.role %}
+                    <p class="field-note">{{ entity.role }}</p>
+                  {% endif %}
                   {% if entity.aliases %}
                     <p class="chapter-copy">Aliases: {{ entity.aliases | join(", ") }}</p>
+                  {% endif %}
+                  {% if not entity.approved %}
+                    <form method="post" action="/runs/{{ run.id }}/canon/{{ loop.index0 }}/approve" class="panel-actions">
+                      <button class="secondary" type="submit">Approve to project canon</button>
+                    </form>
                   {% endif %}
                 </article>
               {% endfor %}

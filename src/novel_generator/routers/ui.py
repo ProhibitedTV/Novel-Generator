@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from urllib.parse import urlencode
 
@@ -27,7 +28,7 @@ from ..repositories import (
     update_project,
     update_provider_config,
 )
-from ..schemas import ProjectCreate, ProjectUpdate, ProviderCapabilities, ProviderConfigUpdate, RunCreate
+from ..schemas import CanonicalEntity, ProjectCreate, ProjectUpdate, ProviderCapabilities, ProviderConfigUpdate, RunCreate
 from ..services.genre_profiles import genre_profile, genre_profile_options
 from ..services.openai_compatible import OpenAICompatibleClient
 from ..services.ollama import OllamaClient
@@ -133,6 +134,18 @@ RUN_STAGES = [
     },
 ]
 TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
+
+CANON_ENTITY_TYPES = [
+    "person",
+    "faction",
+    "system",
+    "project",
+    "location",
+    "artifact",
+    "organization",
+    "technology",
+    "event",
+]
 RUN_STAGE_LOOKUP = {stage["id"]: stage for stage in RUN_STAGES}
 RUN_STAGE_PROGRESS_ORDER = [
     "queued",
@@ -426,6 +439,42 @@ def _revision_trigger_rows(chapter: Any | None) -> list[dict[str, str]]:
     return deduped[:8]
 
 
+def _canon_warning_rows(run: GenerationRun) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for entity in (run.story_bible or {}).get("canon_registry", []) or []:
+        name = str(entity.get("name", "")).strip()
+        if name and not entity.get("approved"):
+            rows.append({"chapter_number": None, "text": f"Story bible canon is pending approval: {name}."})
+
+    for chapter in sorted(run.chapters, key=lambda item: item.chapter_number):
+        qa_notes = chapter.qa_notes or {}
+        for bucket in ("warnings", "soft_warnings", "blocking_issues"):
+            for item in qa_notes.get(bucket, []) or []:
+                text = str(item)
+                lowered = text.lower()
+                if "canon" in lowered or "proper noun" in lowered or "canonical" in lowered:
+                    rows.append({"chapter_number": chapter.chapter_number, "text": text})
+        for entity in ((chapter.continuity_update or {}).get("new_entities_introduced", []) or []):
+            name = str(entity.get("name", "")).strip()
+            if name and not entity.get("approved"):
+                rows.append(
+                    {
+                        "chapter_number": chapter.chapter_number,
+                        "text": f"Continuity update introduced unapproved canon entity: {name}.",
+                    }
+                )
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[int | None, str]] = set()
+    for row in rows:
+        key = (row["chapter_number"], row["text"])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped[:10]
+
+
 def _continuity_snapshot(run: GenerationRun, chapter: Any | None) -> dict[str, Any] | None:
     source = _latest_continuity_chapter(run, preferred=chapter)
     ledger = run.continuity_ledger or {}
@@ -478,6 +527,7 @@ def _run_dashboard_context(run: GenerationRun) -> dict[str, Any]:
         "quality_signal_rows": _quality_signal_rows(quality_chapter),
         "quality_source_chapter": quality_source,
         "revision_trigger_rows": _revision_trigger_rows(quality_chapter),
+        "canon_warning_rows": _canon_warning_rows(run),
         "continuity_snapshot": continuity,
         "total_run_words": _run_word_count(run),
         "word_progress_percent": _word_progress_percent(run),
@@ -575,6 +625,97 @@ def _field_errors(exc: ValidationError) -> dict[str, str]:
 
 def _join_lines(values: list[str] | None) -> str:
     return "\n".join(item for item in (values or []) if str(item).strip())
+
+
+def _split_aliases(value: str | list[str] | None) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in re.split(r"[\n,]+", str(value)) if item.strip()]
+
+
+def _normalize_canon_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _project_canon_entries(project: Project) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for entity in (project.story_brief or {}).get("approved_canon", []) or []:
+        try:
+            payload = CanonicalEntity.model_validate(entity)
+        except ValidationError:
+            continue
+        if not payload.name:
+            continue
+        entries.append(payload.model_dump())
+    return _merge_project_canon_entries(entries)
+
+
+def _merge_project_canon_entries(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, CanonicalEntity] = {}
+    for entity in entries:
+        payload = CanonicalEntity.model_validate(entity)
+        key = _normalize_canon_key(payload.name)
+        if not key:
+            continue
+        current = merged.get(key)
+        if current is None:
+            merged[key] = payload
+            continue
+        aliases = sorted({*current.aliases, *payload.aliases})
+        merged[key] = current.model_copy(
+            update={
+                "kind": current.kind or payload.kind,
+                "role": current.role or payload.role,
+                "aliases": aliases,
+                "approved": current.approved or payload.approved,
+                "locked": current.locked or payload.locked,
+            }
+        )
+    return [entity.model_dump() for entity in merged.values()]
+
+
+def _project_canon_rows(project: Project) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, entity in enumerate(_project_canon_entries(project)):
+        rows.append({**entity, "index": index, "aliases_text": ", ".join(entity.get("aliases", []))})
+    return rows
+
+
+def _canon_payload_from_form(
+    *,
+    name: str,
+    kind: str,
+    role: str,
+    aliases: str | list[str] | None,
+    approved: bool,
+    locked: bool,
+) -> dict[str, Any]:
+    kind_key = str(kind or "").strip().lower()
+    if kind_key not in CANON_ENTITY_TYPES:
+        raise ValueError("Choose a supported canon entity type.")
+    payload = CanonicalEntity.model_validate(
+        {
+            "name": name,
+            "kind": kind_key,
+            "role": role,
+            "aliases": _split_aliases(aliases),
+            "approved": approved,
+            "locked": locked,
+        }
+    )
+    if not payload.name:
+        raise ValueError("Canon entities need a name.")
+    return payload.model_dump()
+
+
+def _save_project_canon(db: Session, project: Project, entries: list[dict[str, Any]]) -> None:
+    brief = dict(project.story_brief or {})
+    brief["approved_canon"] = _merge_project_canon_entries(entries)
+    project.story_brief = brief
+    db.add(project)
+    db.flush()
 
 
 def _story_brief_form_values(story_brief: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -1194,6 +1335,8 @@ def _project_detail_context(
         "active_nav": "projects",
         "project": project,
         "project_genre_profile": project_profile,
+        "canon_entries": _project_canon_rows(project),
+        "canon_entity_types": CANON_ENTITY_TYPES,
         **run_stats,
         "provider_config": provider_config,
         "provider_status": provider_status,
@@ -1555,6 +1698,130 @@ def compare_project_runs(
     )
 
 
+@router.post("/projects/{project_id}/canon")
+def add_project_canon_entity(
+    project_id: str,
+    name: str = Form(""),
+    kind: str = Form("person"),
+    role: str = Form(""),
+    aliases: str = Form(""),
+    approved: str | None = Form("1"),
+    locked: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    try:
+        entry = _canon_payload_from_form(
+            name=name,
+            kind=kind,
+            role=role,
+            aliases=aliases,
+            approved=_coerce_checkbox(approved),
+            locked=_coerce_checkbox(locked),
+        )
+    except (ValidationError, ValueError) as exc:
+        return _redirect(f"/projects/{project.id}", message=str(exc), message_tone="warning")
+    _save_project_canon(db, project, [*_project_canon_entries(project), entry])
+    db.commit()
+    return _redirect(f"/projects/{project.id}", message="Canon entity saved.", message_tone="success")
+
+
+@router.post("/projects/{project_id}/canon/{entity_index}/update")
+def update_project_canon_entity(
+    project_id: str,
+    entity_index: int,
+    name: str = Form(""),
+    kind: str = Form("person"),
+    role: str = Form(""),
+    aliases: str = Form(""),
+    approved: str | None = Form(None),
+    locked: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    entries = _project_canon_entries(project)
+    if entity_index < 0 or entity_index >= len(entries):
+        return _redirect(f"/projects/{project.id}", message="Canon entity not found.", message_tone="warning")
+    try:
+        entry = _canon_payload_from_form(
+            name=name,
+            kind=kind,
+            role=role,
+            aliases=aliases,
+            approved=_coerce_checkbox(approved),
+            locked=_coerce_checkbox(locked),
+        )
+    except (ValidationError, ValueError) as exc:
+        return _redirect(f"/projects/{project.id}", message=str(exc), message_tone="warning")
+    entries.pop(entity_index)
+    _save_project_canon(db, project, [*entries, entry])
+    db.commit()
+    return _redirect(f"/projects/{project.id}", message="Canon entity updated.", message_tone="success")
+
+
+@router.post("/projects/{project_id}/canon/{entity_index}/approve")
+def approve_project_canon_entity(
+    project_id: str,
+    entity_index: int,
+    db: Session = Depends(get_db),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    entries = _project_canon_entries(project)
+    if entity_index < 0 or entity_index >= len(entries):
+        return _redirect(f"/projects/{project.id}", message="Canon entity not found.", message_tone="warning")
+    entries[entity_index]["approved"] = True
+    _save_project_canon(db, project, entries)
+    db.commit()
+    return _redirect(f"/projects/{project.id}", message="Canon entity approved.", message_tone="success")
+
+
+@router.post("/projects/{project_id}/canon/{entity_index}/lock")
+def toggle_project_canon_entity_lock(
+    project_id: str,
+    entity_index: int,
+    db: Session = Depends(get_db),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    entries = _project_canon_entries(project)
+    if entity_index < 0 or entity_index >= len(entries):
+        return _redirect(f"/projects/{project.id}", message="Canon entity not found.", message_tone="warning")
+    entries[entity_index]["locked"] = not bool(entries[entity_index].get("locked"))
+    _save_project_canon(db, project, entries)
+    db.commit()
+    state = "locked" if entries[entity_index]["locked"] else "unlocked"
+    return _redirect(f"/projects/{project.id}", message=f"Canon entity {state}.", message_tone="success")
+
+
+@router.post("/projects/{project_id}/canon/{entity_index}/delete")
+def delete_project_canon_entity(
+    project_id: str,
+    entity_index: int,
+    db: Session = Depends(get_db),
+):
+    project = get_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    entries = _project_canon_entries(project)
+    if entity_index < 0 or entity_index >= len(entries):
+        return _redirect(f"/projects/{project.id}", message="Canon entity not found.", message_tone="warning")
+    removed = entries.pop(entity_index)
+    _save_project_canon(db, project, entries)
+    db.commit()
+    return _redirect(
+        f"/projects/{project.id}",
+        message=f"Removed canon entity {removed.get('name', 'entity')}.",
+        message_tone="success",
+    )
+
+
 @router.post("/projects/{project_id}/edit")
 def edit_project_ui(
     project_id: str,
@@ -1644,6 +1911,8 @@ def edit_project_ui(
         "story_must_include": story_must_include,
         "story_avoid": story_avoid,
     }
+    story_brief_payload = _story_brief_payload(raw_form_values)
+    story_brief_payload["approved_canon"] = _project_canon_entries(project)
     payload_values = {
         "title": title,
         "premise": premise,
@@ -1654,7 +1923,7 @@ def edit_project_ui(
         "preferred_provider_name": preferred_provider_name,
         "preferred_model": preferred_model,
         "notes": notes,
-        "story_brief": _story_brief_payload(raw_form_values),
+        "story_brief": story_brief_payload,
         "task_routing": _task_routing_payload(raw_form_values),
     }
     provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
@@ -1887,6 +2156,54 @@ def run_detail(
             **_run_dashboard_context(run),
         },
     )
+
+
+@router.post("/runs/{run_id}/canon/{entity_index}/approve")
+def approve_run_canon_entity(
+    run_id: str,
+    entity_index: int,
+    locked: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    story_bible = dict(run.story_bible or {})
+    canon_registry = list(story_bible.get("canon_registry") or [])
+    if entity_index < 0 or entity_index >= len(canon_registry):
+        return _redirect(f"/runs/{run.id}", message="Canon entity not found.", message_tone="warning")
+
+    current = CanonicalEntity.model_validate(canon_registry[entity_index])
+    approved_entity = current.model_copy(
+        update={
+            "approved": True,
+            "locked": current.locked or _coerce_checkbox(locked),
+        }
+    )
+    canon_registry[entity_index] = approved_entity.model_dump()
+    story_bible["canon_registry"] = [
+        CanonicalEntity.model_validate(entity).model_dump() for entity in canon_registry
+    ]
+    run.story_bible = story_bible
+
+    if run.continuity_ledger:
+        ledger = dict(run.continuity_ledger)
+        updated_active_entities = []
+        approved_key = _normalize_canon_key(approved_entity.name)
+        for entity in ledger.get("active_entities", []) or []:
+            payload = CanonicalEntity.model_validate(entity)
+            if _normalize_canon_key(payload.name) == approved_key:
+                payload = payload.model_copy(
+                    update={"approved": True, "locked": payload.locked or approved_entity.locked}
+                )
+            updated_active_entities.append(payload.model_dump())
+        ledger["active_entities"] = updated_active_entities
+        run.continuity_ledger = ledger
+
+    _save_project_canon(db, run.project, [*_project_canon_entries(run.project), approved_entity.model_dump()])
+    db.add(run)
+    db.commit()
+    return _redirect(f"/runs/{run.id}", message="Canon entity approved and added to the project registry.", message_tone="success")
 
 
 @router.post("/runs/{run_id}/approve-outline")

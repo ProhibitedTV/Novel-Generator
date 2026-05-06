@@ -53,6 +53,16 @@ def _genre_profile_block(profile: GenreProfile) -> str:
 def _story_brief_lines(project: Project) -> str:
     brief = project.story_brief or {}
     profile = genre_profile(brief.get("genre_profile"))
+    approved_canon = []
+    for entity in brief.get("approved_canon", []) or []:
+        name = str(entity.get("name", "")).strip()
+        if not name:
+            continue
+        kind = str(entity.get("kind", "")).strip() or "entity"
+        aliases = ", ".join(str(alias).strip() for alias in entity.get("aliases", []) if str(alias).strip())
+        locked = " locked" if entity.get("locked") else ""
+        alias_text = f"; aliases: {aliases}" if aliases else ""
+        approved_canon.append(f"{name} ({kind}{locked}){alias_text}")
     lines = [
         f"Premise: {project.premise}",
         f"Notes: {project.notes or 'None provided.'}",
@@ -67,6 +77,7 @@ def _story_brief_lines(project: Project) -> str:
         f"World rules: {', '.join(brief.get('world_rules', [])) or 'Not specified.'}",
         f"Must include: {', '.join(brief.get('must_include', [])) or 'Not specified.'}",
         f"Avoid: {', '.join(brief.get('avoid', [])) or 'Not specified.'}",
+        f"Approved canon: {'; '.join(approved_canon) if approved_canon else 'None approved yet.'}",
     ]
     return "\n".join(lines)
 

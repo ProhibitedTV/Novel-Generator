@@ -68,6 +68,22 @@ def test_project_patch_api_updates_story_brief_and_preserves_defaults(client, mo
 
     project_response = client.post("/api/projects", json=create_project_payload())
     project_id = project_response.json()["id"]
+    with get_session_factory()() as session:
+        project = get_project(session, project_id)
+        assert project is not None
+        story_brief = dict(project.story_brief or {})
+        story_brief["approved_canon"] = [
+            {
+                "name": "Glass Orchard",
+                "kind": "location",
+                "role": "Project-level setting term",
+                "aliases": ["the orchard"],
+                "approved": True,
+                "locked": True,
+            }
+        ]
+        project.story_brief = story_brief
+        session.commit()
 
     patch_response = client.patch(
         f"/api/projects/{project_id}",
@@ -87,6 +103,8 @@ def test_project_patch_api_updates_story_brief_and_preserves_defaults(client, mo
     assert patch_response.json()["preferred_model"] == "test-model"
     assert patch_response.json()["story_brief"]["tone"] == "Claustrophobic mystery"
     assert patch_response.json()["story_brief"]["avoid"] == ["Looping emotional abstractions"]
+    assert patch_response.json()["story_brief"]["approved_canon"][0]["name"] == "Glass Orchard"
+    assert patch_response.json()["story_brief"]["approved_canon"][0]["locked"] is True
 
 
 def test_invalid_model_is_rejected_when_queueing_run(client, monkeypatch) -> None:

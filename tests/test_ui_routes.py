@@ -526,6 +526,144 @@ def test_project_detail_links_to_compare_when_multiple_completed_runs_exist(clie
     assert f'href="/projects/{project_id}/runs/compare"' in response.text
 
 
+def test_project_canon_controls_add_update_lock_and_delete(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id = seed_project()
+
+    response = client.get(f"/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert "Canon Registry" in response.text
+    assert f'action="/projects/{project_id}/canon"' in response.text
+
+    response = client.post(
+        f"/projects/{project_id}/canon",
+        data={
+            "name": "Peace Patch",
+            "kind": "project",
+            "role": "Behavioral control patch",
+            "aliases": "the patch, pacifier",
+            "locked": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = get_project(session, project_id)
+        assert project is not None
+        canon = project.story_brief["approved_canon"]
+        assert canon[0]["name"] == "Peace Patch"
+        assert canon[0]["approved"] is True
+        assert canon[0]["locked"] is True
+        assert canon[0]["aliases"] == ["the patch", "pacifier"]
+
+    response = client.post(
+        f"/projects/{project_id}/canon/0/update",
+        data={
+            "name": "Peace Patch",
+            "kind": "project",
+            "role": "Locked deployment artifact",
+            "aliases": "the patch\nThe Pacifier",
+            "approved": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        project = get_project(session, project_id)
+        assert project is not None
+        canon = project.story_brief["approved_canon"]
+        assert canon[0]["role"] == "Locked deployment artifact"
+        assert canon[0]["aliases"] == ["the patch", "The Pacifier"]
+        assert canon[0]["locked"] is False
+
+    response = client.post(f"/projects/{project_id}/canon/0/lock", follow_redirects=False)
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        project = get_project(session, project_id)
+        assert project is not None
+        assert project.story_brief["approved_canon"][0]["locked"] is True
+
+    response = client.post(f"/projects/{project_id}/canon/0/delete", follow_redirects=False)
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        project = get_project(session, project_id)
+        assert project is not None
+        assert project.story_brief["approved_canon"] == []
+
+
+def test_run_story_bible_canon_can_be_approved_to_project(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.AWAITING_APPROVAL
+        run.current_step = "outline_review"
+        run.story_bible = {
+            "logline": "A trapped engineer finds a forbidden patch.",
+            "theme": "Consent beats stability.",
+            "act_plan": ["Setup", "Escalation", "Ending"],
+            "cast": [],
+            "character_agendas": [],
+            "canon_registry": [
+                {"name": "Peace Patch", "kind": "project", "role": "Behavioral control patch", "aliases": ["the patch"]}
+            ],
+            "conflict_ladder": ["Patch discovered"],
+            "world_rules": [],
+            "core_system_rules": [],
+            "prose_guardrails": [],
+            "ending_promise": "Nora chooses consent.",
+        }
+        run.continuity_ledger = {
+            "current_patch_status": "Patch unshipped.",
+            "character_states": {},
+            "world_state": "Station unstable.",
+            "open_threads": [],
+            "resolved_threads": [],
+            "timeline": [],
+            "active_entities": [
+                {"name": "Peace Patch", "kind": "project", "role": "Behavioral control patch", "aliases": ["the patch"]}
+            ],
+            "entity_state_changes": {},
+            "open_promises_by_name": {},
+            "ideology_state_by_character": {},
+            "memory_damage": {},
+            "trust_fractures": {},
+            "civilian_pressure_points": [],
+            "emotional_open_loops": {},
+            "genre_state": {},
+        }
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "Pending approval" in response.text
+    assert "Approve to project canon" in response.text
+    assert "Story bible canon is pending approval: Peace Patch." in response.text
+
+    response = client.post(f"/runs/{run_id}/canon/0/approve", follow_redirects=False)
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        project = get_project(session, project_id)
+        assert run is not None
+        assert project is not None
+        assert run.story_bible["canon_registry"][0]["approved"] is True
+        assert run.continuity_ledger["active_entities"][0]["approved"] is True
+        assert project.story_brief["approved_canon"][0]["name"] == "Peace Patch"
+        assert project.story_brief["approved_canon"][0]["approved"] is True
+
+
 def test_run_compare_page_summarizes_completed_runs(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
     project_id, run_ids = seed_project_with_completed_compare_runs()

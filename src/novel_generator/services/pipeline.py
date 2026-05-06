@@ -12,6 +12,7 @@ from ..schemas import (
     ChapterContinuityUpdate,
     ChapterCritique,
     ChapterPlan,
+    CanonicalEntity,
     ContinuityLedger,
     ManuscriptQaReport,
     StoryBible,
@@ -60,6 +61,41 @@ class RunCanceled(Exception):
 
 def _dedupe(items: list[str]) -> list[str]:
     return list(dict.fromkeys(item for item in items if item))
+
+
+def _project_approved_canon(project: Any) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for entity in (project.story_brief or {}).get("approved_canon", []) or []:
+        payload = CanonicalEntity.model_validate(entity)
+        if not payload.approved:
+            continue
+        entries.append(payload.model_dump())
+    return entries
+
+
+def _unapproved_canon_warnings(update: ChapterContinuityUpdate) -> list[str]:
+    warnings: list[str] = []
+    for entity in update.new_entities_introduced:
+        if entity.approved:
+            continue
+        warnings.append(f"Unapproved canonical entity introduced by continuity update: {entity.name}.")
+    return warnings
+
+
+def _apply_continuity_canon_warnings(chapter: Any, update: ChapterContinuityUpdate) -> None:
+    warnings = _unapproved_canon_warnings(update)
+    if not warnings:
+        return
+    critique = ChapterCritique.model_validate(chapter.qa_notes or {})
+    score = critique.proper_noun_continuity_score or 10
+    chapter.qa_notes = critique.model_copy(
+        update={
+            "warnings": _dedupe([*critique.warnings, *warnings]),
+            "soft_warnings": _dedupe([*critique.soft_warnings, *warnings]),
+            "focus": _dedupe([*critique.focus, "Review and approve or merge new canon before continuing too far."]),
+            "proper_noun_continuity_score": min(score, 5),
+        }
+    ).model_dump()
 
 
 def _sorted_chapters(run: GenerationRun) -> list:
@@ -284,6 +320,14 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
             "genre_contract": story_bible.genre_contract or list(selected_profile.genre_contract),
         }
     )
+    approved_canon = _project_approved_canon(project)
+    if approved_canon:
+        story_bible = StoryBible.model_validate(
+            {
+                **story_bible.model_dump(),
+                "canon_registry": merge_canonical_entities(approved_canon, story_bible.canon_registry),
+            }
+        )
     run.story_bible = story_bible.model_dump()
     run.continuity_ledger = _build_initial_ledger(story_bible).model_dump()
     record_event(session, run, "story_bible_completed", {"logline": story_bible.logline})
@@ -515,6 +559,7 @@ def _draft_chapter(
     ledger_after = _ledger_from_update(ledger, continuity_update)
     if continuity_update.timeline != ledger_after.timeline:
         continuity_update.timeline = ledger_after.timeline
+    _apply_continuity_canon_warnings(chapter, continuity_update)
     chapter.continuity_update = continuity_update.model_dump()
     chapter.status = ChapterStatus.COMPLETED
     chapter.error_message = None

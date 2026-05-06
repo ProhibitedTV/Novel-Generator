@@ -113,7 +113,10 @@ def _validated_project_update(project, payload: ProjectUpdate) -> ProjectUpdate:
         "story_brief": project.story_brief or {},
         "task_routing": project.task_routing or {},
     }
-    merged.update(payload.model_dump(exclude_unset=True))
+    updates = payload.model_dump(exclude_unset=True)
+    if "story_brief" in updates:
+        updates["story_brief"] = {**(project.story_brief or {}), **(updates["story_brief"] or {})}
+    merged.update(updates)
     validated = ProjectCreate.model_validate(merged)
     return ProjectUpdate(**validated.model_dump())
 

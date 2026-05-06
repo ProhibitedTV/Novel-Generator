@@ -240,6 +240,121 @@
   </details>
 </section>
 
+<section class="panel canon-panel" id="canon">
+  <div class="section-header">
+    <div class="section-header-copy">
+      <h2>Canon Registry</h2>
+      <p>Approved names, aliases, and world terms are merged into new story bibles before chapter drafting starts.</p>
+    </div>
+    <span class="badge status-completed">{{ canon_entries|length }} saved</span>
+  </div>
+
+  <form method="post" action="/projects/{{ project.id }}/canon" class="stack-form canon-add-form">
+    <input type="hidden" name="approved" value="1">
+    <div class="grid compact">
+      <label>
+        Name
+        <input type="text" name="name" placeholder="Iris Vale" required>
+      </label>
+      <label>
+        Type
+        <select name="kind">
+          {% for kind in canon_entity_types %}
+            <option value="{{ kind }}">{{ kind }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        Role
+        <input type="text" name="role" placeholder="Protagonist, faction, landmark">
+      </label>
+      <label>
+        Aliases
+        <input type="text" name="aliases" placeholder="Comma-separated aliases">
+      </label>
+    </div>
+    <label class="toggle-card compact-toggle">
+      <span class="toggle-input">
+        <input type="checkbox" name="locked" value="1">
+        <strong>Lock this canon entry</strong>
+      </span>
+      <span class="field-note">Locked entries stay visibly protected when future runs merge generated canon.</span>
+    </label>
+    <div class="form-actions">
+      <button type="submit">Add canon entity</button>
+    </div>
+  </form>
+
+  {% if canon_entries %}
+    <div class="story-card-list canon-card-list">
+      {% for entity in canon_entries %}
+        <article class="story-card canon-card">
+          <div class="canon-card-heading">
+            <div>
+              <strong>{{ entity.name }}</strong>
+              <div class="meta-chip-row">
+                <span class="meta-chip">{{ entity.kind }}</span>
+                <span class="badge status-{{ 'completed' if entity.approved else 'queued' }}">{{ "Approved" if entity.approved else "Pending approval" }}</span>
+                {% if entity.locked %}
+                  <span class="meta-chip">Locked</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+
+          <form method="post" action="/projects/{{ project.id }}/canon/{{ entity.index }}/update" class="stack-form canon-entry-form">
+            <div class="grid compact">
+              <label>
+                Name
+                <input type="text" name="name" value="{{ entity.name }}" required>
+              </label>
+              <label>
+                Type
+                <select name="kind">
+                  {% for kind in canon_entity_types %}
+                    <option value="{{ kind }}" {% if entity.kind == kind %}selected{% endif %}>{{ kind }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <label>
+                Role
+                <input type="text" name="role" value="{{ entity.role }}">
+              </label>
+              <label>
+                Aliases
+                <input type="text" name="aliases" value="{{ entity.aliases_text }}">
+              </label>
+            </div>
+            <div class="canon-checkbox-row">
+              <label><input type="checkbox" name="approved" value="1" {% if entity.approved %}checked{% endif %}> Approved</label>
+              <label><input type="checkbox" name="locked" value="1" {% if entity.locked %}checked{% endif %}> Locked</label>
+            </div>
+            <div class="form-actions">
+              <button class="secondary" type="submit">Save canon</button>
+            </div>
+          </form>
+
+          <div class="row-actions">
+            {% if not entity.approved %}
+              <form method="post" action="/projects/{{ project.id }}/canon/{{ entity.index }}/approve">
+                <button class="secondary" type="submit">Approve</button>
+              </form>
+            {% endif %}
+            <form method="post" action="/projects/{{ project.id }}/canon/{{ entity.index }}/lock">
+              <button class="secondary" type="submit">{{ "Unlock" if entity.locked else "Lock" }}</button>
+            </form>
+            <form method="post" action="/projects/{{ project.id }}/canon/{{ entity.index }}/delete" data-confirm="Remove this canon entity from the project registry?">
+              <button class="danger" type="submit">Delete</button>
+            </form>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="empty-state">No project-level canon is approved yet. Add key names here or approve generated story bible entries from a run.</p>
+  {% endif %}
+</section>
+
 <section class="grid two-up form-layout">
   <article class="panel">
     <div class="section-header">
