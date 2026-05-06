@@ -389,6 +389,7 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "civilian_texture": "A worker passes a tea tin through the vent to Tarin.",
           "ideology_clash": "Tarin argues that survival without consent is still surrender.",
           "primary_interpersonal_conflict": "Tarin accuses Iris of treating people like systems.",
+          "independent_side_character_move": "Tarin blocks the elevator route until Iris gives him the source shard.",
           "genre_specific_focus": "Keep the clue chain fair and visible.",
           "genre_specific_beats": ["Iris misreads a planted clue", "Tarin notices the missing map seam"]
         }
@@ -446,6 +447,7 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "trust_fractures": {"Iris/Tarin": "Tarin no longer trusts Iris to weigh collateral costs."},
           "civilian_pressure_points": ["Families in the shelter lose archive access and heating."],
           "emotional_open_loops": {"Iris": "She fears she is choosing freedom with a damaged self."},
+          "side_character_decisions": {"Tarin": ["Tarin blocks the elevator route until Iris gives him the source shard."]},
           "genre_state": {"clue_chain": "The first planted clue has been misread."}
         }
         """
@@ -460,11 +462,13 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert critique.ideology_clarity_score == 8
     assert continuity.memory_damage["Iris"].startswith("She loses")
     assert plan.genre_specific_focus.startswith("Keep the clue chain")
+    assert plan.independent_side_character_move.startswith("Tarin blocks")
     assert critique.genre_contract_score == 7
     assert critique.voice_distinctness_score == 5
     assert critique.dialogue_tension_score == 4
     assert critique.technical_escalation_fatigue_score == 7
     assert continuity.genre_state["clue_chain"].startswith("The first planted clue")
+    assert continuity.side_character_decisions["Tarin"][0].startswith("Tarin blocks")
 
 
 def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
@@ -585,6 +589,7 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
         "primary_obstacle": "Archive lockdown",
         "cost_if_success": "Iris burns access",
         "side_character_friction": "Tarin refuses to trust the map.",
+        "independent_side_character_move": "Tarin blocks the route until Iris admits the map may be manipulating her.",
         "concrete_ending_hook": {"trigger": "A door opens", "visible_object_or_actor": "blue lens", "next_problem": "the route descends"},
         "chapter_mode": "systems_crisis",
         "civilian_life_detail": "Workers trade heat tabs.",
@@ -597,6 +602,7 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
         "scene_beats": ["Iris climbs", "Tarin refuses", "The door opens"],
         "conflict_turn": "Tarin blocks her.",
         "ending_hook": "The door opens.",
+        "independent_side_character_move": "Tarin blocks the route until Iris admits the map may be manipulating her.",
     }
     ledger = {
         "current_patch_status": "Unknown.",
@@ -613,6 +619,7 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
         "trust_fractures": {},
         "civilian_pressure_points": [],
         "emotional_open_loops": {},
+        "side_character_decisions": {},
         "genre_state": {},
     }
     critique = parse_chapter_critique(
@@ -659,6 +666,8 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "visible consequence" in draft_prompt
     assert "at most one primary system-crisis mechanic" in draft_prompt
     assert "human-visible consequences" in draft_prompt
+    assert "independent_side_character_move" in draft_prompt
+    assert "side characters who appear must pursue their own want" in draft_prompt
     assert "style_alignment_score" in critique_prompt
     assert "ending_hook_type" in critique_prompt
     assert "scene_turn_resolution_score" in critique_prompt
@@ -666,9 +675,11 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "abstract_cliffhanger" in critique_prompt
     assert "next problem" in critique_prompt
     assert "lockdowns, quarantines, reboots, alarms" in critique_prompt
+    assert "side_character_independence_score should be 5 or lower" in critique_prompt
     assert "voice_and_texture" in critique_prompt
     assert "concrete external action" in revision_prompt
     assert "remove repeated alarm-console escalation" in revision_prompt
+    assert "add or sharpen the planned independent_side_character_move" in revision_prompt
     assert "voice_and_texture" in revision_prompt
     assert "do not copy exact language" in revision_prompt
 

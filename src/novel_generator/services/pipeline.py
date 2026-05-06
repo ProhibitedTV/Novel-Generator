@@ -198,6 +198,7 @@ def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
             for agenda in story_bible.character_agendas
             if agenda.private_pressure
         },
+        side_character_decisions={},
         genre_state=dict(profile.default_genre_state),
     )
 
@@ -232,6 +233,14 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
     if update.timeline_entry and update.timeline_entry not in timeline:
         timeline.append(update.timeline_entry)
 
+    side_character_decisions = {
+        name: list(moves)
+        for name, moves in current_ledger.side_character_decisions.items()
+    }
+    for name, moves in update.side_character_decisions.items():
+        existing = side_character_decisions.get(name, [])
+        side_character_decisions[name] = _dedupe([*existing, *moves])
+
     return ContinuityLedger(
         current_patch_status=update.current_patch_status or current_ledger.current_patch_status,
         character_states={**current_ledger.character_states, **update.character_states},
@@ -247,6 +256,7 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
         trust_fractures={**current_ledger.trust_fractures, **update.trust_fractures},
         civilian_pressure_points=_dedupe([*current_ledger.civilian_pressure_points, *update.civilian_pressure_points]),
         emotional_open_loops={**current_ledger.emotional_open_loops, **update.emotional_open_loops},
+        side_character_decisions=side_character_decisions,
         genre_state={**current_ledger.genre_state, **update.genre_state},
     )
 
@@ -293,6 +303,7 @@ def _style_score_warnings(critique: ChapterCritique) -> list[str]:
 ENDING_REPAIR_TYPES = {"abstract_cliffhanger", "image_or_feeling_beat", "outline_summary"}
 ENDING_REPAIR_THRESHOLD = 5
 TECHNICAL_FATIGUE_REPAIR_THRESHOLD = 6
+SIDE_CHARACTER_REPAIR_THRESHOLD = 5
 
 
 def _ending_score_warnings(critique: ChapterCritique) -> list[str]:
@@ -319,13 +330,30 @@ def _technical_fatigue_warnings(critique: ChapterCritique) -> list[str]:
     ]
 
 
+def _side_character_warnings(critique: ChapterCritique) -> list[str]:
+    if critique.side_character_independence_score > SIDE_CHARACTER_REPAIR_THRESHOLD:
+        return []
+    return [
+        "Side-character agency needs a targeted repair: "
+        f"side-character independence {critique.side_character_independence_score}/10."
+    ]
+
+
 def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLintResult) -> ChapterCritique:
     style_warnings = _style_score_warnings(critique)
     ending_warnings = _ending_score_warnings(critique)
     technical_warnings = _technical_fatigue_warnings(critique)
+    side_character_warnings = _side_character_warnings(critique)
     blocking_issues = _dedupe([*critique.blocking_issues, *lint_result.blocking_issues])
     soft_warnings = _dedupe(
-        [*critique.soft_warnings, *lint_result.soft_warnings, *style_warnings, *ending_warnings, *technical_warnings]
+        [
+            *critique.soft_warnings,
+            *lint_result.soft_warnings,
+            *style_warnings,
+            *ending_warnings,
+            *technical_warnings,
+            *side_character_warnings,
+        ]
     )
     warnings = _dedupe([*critique.warnings, *soft_warnings])
     focus = _dedupe([*critique.focus, *blocking_issues[:2], *soft_warnings[:2]])
@@ -336,12 +364,14 @@ def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLin
         or bool(style_warnings)
         or bool(ending_warnings)
         or bool(technical_warnings)
+        or bool(side_character_warnings)
     )
     repair_scope = _resolve_repair_scope(
         critique.repair_scope,
         lint_result.repair_scope,
         "targeted_scene_and_ending" if ending_warnings else "none",
         "targeted_scene_and_ending" if technical_warnings else "none",
+        "targeted_scene_and_ending" if side_character_warnings else "none",
         "voice_and_texture" if style_warnings else "none",
     )
     return critique.model_copy(

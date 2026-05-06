@@ -115,6 +115,7 @@ def _outline_json(chapters: int) -> str:
                 "primary_obstacle": f"Primary obstacle {index}",
                 "cost_if_success": f"Cost if success {index}",
                 "side_character_friction": f"Tarin resists in chapter {index}",
+                "independent_side_character_move": "Tarin resists",
                 "concrete_ending_hook": {
                     "trigger": f"Trigger {index}",
                     "visible_object_or_actor": f"Visible actor {index}",
@@ -148,6 +149,7 @@ def _plan_json(index: int) -> str:
             "civilian_texture": f"Civilian texture {index}",
             "ideology_clash": f"Ideology clash {index}",
             "primary_interpersonal_conflict": f"Primary interpersonal conflict {index}",
+            "independent_side_character_move": "Tarin resists",
         }
     )
 
@@ -158,6 +160,7 @@ def _critique_json(
     ending_hook_type: str | None = None,
     scene_turn_resolution_score: int | None = None,
     technical_escalation_fatigue_score: int = 0,
+    side_character_independence_score: int = 6,
 ) -> str:
     return json.dumps(
         {
@@ -173,7 +176,7 @@ def _critique_json(
             if scene_turn_resolution_score is not None
             else (4 if revision_required else 8),
             "cost_consequence_realism_score": 7,
-            "side_character_independence_score": 6,
+            "side_character_independence_score": side_character_independence_score,
             "proper_noun_continuity_score": 8,
             "repetition_risk_score": 3,
             "emotional_depth_score": 7 if revision_required else 8,
@@ -217,6 +220,7 @@ def _continuity_json(index: int) -> str:
             "trust_fractures": {"Iris/Tarin": f"Trust fracture {index}"},
             "civilian_pressure_points": [f"Civilian pressure {index}"],
             "emotional_open_loops": {"Iris": f"Emotional loop {index}"},
+            "side_character_decisions": {"Tarin": [f"Tarin resists in chapter {index}"]},
         }
     )
 
@@ -604,6 +608,57 @@ def test_technical_fatigue_score_triggers_targeted_revision(configured_environme
         )
 
 
+def test_side_character_score_triggers_targeted_revision(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    (
+                        "Iris put the burned key into Tarin's hand. "
+                        "Trigger 1 lands when the visible actor 1 seals the corridor, leaving only route 1."
+                    ),
+                    _critique_json(revision_required=False, side_character_independence_score=4),
+                    (
+                        "Iris stopped at the rail while Tarin blocked the route with his shoulder. "
+                        "The visible actor 1 sealed the corridor behind them, and Iris handed Tarin the burned key."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris accepts the cost of the sealed corridor and gives Tarin the key.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        chapter = refreshed.chapters[0]
+        assert refreshed.status == RunStatus.COMPLETED
+        assert chapter.content.startswith("Iris stopped at the rail")
+        assert any(
+            event.event_type == "chapter_revision_started"
+            and event.payload.get("repair_scope") == "targeted_scene_and_ending"
+            for event in refreshed.events
+        )
+
+
 def test_canonical_entity_collision_hard_fails_run(configured_environment) -> None:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -689,6 +744,7 @@ def test_continuity_ledger_carries_entities_forward_across_completed_chapters(co
         assert "Entity 2" in names
         assert refreshed.continuity_ledger["trust_fractures"]["Iris/Tarin"] == "Trust fracture 2"
         assert refreshed.continuity_ledger["civilian_pressure_points"][-1] == "Civilian pressure 2"
+        assert refreshed.continuity_ledger["side_character_decisions"]["Tarin"][-1].startswith("Tarin resists in chapter 2")
 
 
 def test_v1_regeneration_creates_fresh_v2_structure(configured_environment) -> None:

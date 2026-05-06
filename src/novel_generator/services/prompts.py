@@ -288,6 +288,7 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 '      "primary_obstacle": "string",\n'
                 '      "cost_if_success": "string",\n'
                 '      "side_character_friction": "string",\n'
+                '      "independent_side_character_move": "string",\n'
                 '      "concrete_ending_hook": {\n'
                 '        "trigger": "string",\n'
                 '        "visible_object_or_actor": "string",\n'
@@ -312,6 +313,7 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 f"{midpoint_rule}"
                 "- every block of 4 chapters must contain at least 1 chapter_mode of breather or aftermath\n"
                 "- side_character_friction must name who pushes back on the protagonist and why\n"
+                "- independent_side_character_move must name a side character action that changes the protagonist's options through cost, reveal, betrayal, rescue, escalation, public consequence, or political constraint\n"
                 "- cost_if_success must describe the price of progress, not just the risk of failure\n"
                 "- concrete_ending_hook must end on a specific actor, object, interruption, alarm, arrival, discovery, or reversal\n"
                 "- breather and aftermath chapters must center face-to-face conflict, civilian-life texture, and ideology pressure rather than another terminal emergency\n"
@@ -389,6 +391,7 @@ def build_chapter_plan_messages(
                 '  "civilian_texture": "string",\n'
                 '  "ideology_clash": "string",\n'
                 '  "primary_interpersonal_conflict": "string",\n'
+                '  "independent_side_character_move": "string",\n'
                 '  "genre_specific_focus": "string",\n'
                 '  "genre_specific_beats": ["profile-specific beat 1", "profile-specific beat 2"]\n'
                 "}\n\n"
@@ -397,6 +400,7 @@ def build_chapter_plan_messages(
                 "- at least one beat must materially worsen or transform the conflict\n"
                 "- if the protagonist uses a technical solution, the plan must include a visible cost or exposure\n"
                 "- side characters must exert pressure from their own agendas, not merely help or warn\n"
+                "- independent_side_character_move must name what a non-protagonist does on purpose to change the plot, not just what they say or explain\n"
                 "- if chapter_mode is breather or aftermath, do not make hacking or console work the primary action\n"
                 "- emotional_anchor must describe the human feeling the chapter lingers on\n"
                 "- civilian_texture must surface a specific detail of lived daily life\n"
@@ -460,6 +464,8 @@ def build_chapter_draft_messages(
                 "- when technical pressure appears, translate it into human-visible consequences: changed options, endangered civilians, fractured trust, physical danger, political constraint, or emotional cost\n"
                 "- if the recent context already used alarms, lockdowns, quarantine, countdowns, reserve percentages, or warning banners, make the next major obstacle interpersonal, political, physical, civilian, or emotional\n"
                 "- if side_character_friction exists, the side character must push back from their own agenda\n"
+                "- if independent_side_character_move exists, put that side character's concrete action on the page and make it alter the protagonist's options\n"
+                "- side characters who appear must pursue their own want through action, not only warn, explain, oppose, or validate the protagonist\n"
                 "- keep names, aliases, systems, projects, and locations consistent with the canon registry\n"
                 "- if chapter_mode is breather or aftermath, make face-to-face emotional conflict the primary motion instead of another terminal emergency\n"
                 "- include the civilian_life_detail and emotional_reveal explicitly on the page\n"
@@ -557,6 +563,8 @@ def build_chapter_critique_messages(
                 "- use repair_scope 'full_chapter' only when continuity or premise repetition is severe\n"
                 "- all score fields must be whole numbers from 0 to 10, not percentages\n"
                 "- forward_motion_score, ending_concreteness_score, scene_turn_resolution_score, cost_consequence_realism_score, side_character_independence_score, and proper_noun_continuity_score should be higher when the draft is stronger\n"
+                "- side_character_independence_score should be 5 or lower when a named side character appears only to warn, explain, ask questions, block, or validate without making an independent choice that changes the plot\n"
+                "- set revision_required to true if side_character_independence_score is 5 or lower\n"
                 "- scene_turn_resolution_score should be low if the ending opens a cliffhanger without resolving the chapter's immediate objective or scene tension\n"
                 "- set revision_required to true if ending_hook_type is abstract_cliffhanger, image_or_feeling_beat, or outline_summary, or if scene_turn_resolution_score is 5 or lower\n"
                 "- emotional_depth_score, ideology_clarity_score, and civilian_texture_score should be higher when the chapter creates human texture and belief conflict\n"
@@ -626,6 +634,8 @@ def build_chapter_revision_messages(
                 "- avoid repeating lockdown, quarantine, reboot, alarm, warning banner, reserve percentage, core temperature, critical failure, drone breach, override, or countdown mechanics from adjacent chapters unless the story bible marks one continuous act-level sequence\n"
                 "- translate any remaining technical stakes into a visible human consequence on the page\n"
                 "- make side characters push back from their own agendas rather than existing only to help or warn\n"
+                "- if side_character_independence_score is 5 or lower, add or sharpen the planned independent_side_character_move so a side character takes a concrete action that changes the protagonist's options\n"
+                "- side-character action should create a cost, reveal, betrayal, rescue, escalation, public consequence, or political constraint and should follow that character's want/fear from the story bible\n"
                 "- restore any missing emotional fallout, civilian texture, or ideology clash that the plan called for\n"
                 "- fix any genre_contract_findings and preserve the chapter's genre_specific_focus\n"
                 "- honor profile-specific drafting focus: "
@@ -715,6 +725,7 @@ def build_continuity_update_messages(
                 '  "trust_fractures": {"Relationship": "what trust was damaged"},\n'
                 '  "civilian_pressure_points": ["concrete civilian consequence"],\n'
                 '  "emotional_open_loops": {"Character": "unresolved emotional burden"},\n'
+                '  "side_character_decisions": {"Character": ["independent action that changed the plot"]},\n'
                 '  "genre_state": {"profile state key": "current state after this chapter"}\n'
                 "}\n\n"
                 "Rules:\n"
@@ -725,6 +736,7 @@ def build_continuity_update_messages(
                 "- explicitly track which named entities changed state and which open promises are still live\n"
                 "- if a character's belief is contradicted, mark whether that contradiction is intentional in ideology_shift_notes\n"
                 "- preserve memory damage, trust fractures, civilian harm, and unresolved emotional fallout unless the chapter truly heals them\n"
+                "- track major side-character decisions when a non-protagonist takes an independent action that changes the protagonist's options\n"
                 "- update genre_state using the selected profile's continuity focus and default_genre_state\n"
                 "- include profile-specific continuity focus: "
                 + "; ".join(profile.continuity_focus)

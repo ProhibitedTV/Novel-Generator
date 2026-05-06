@@ -490,6 +490,8 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
                 "character_turn": "Nora stops hiding what she knows.",
                 "reveal": "The patch is signed with her key.",
                 "ending_state": "Nora commits to tracing it.",
+                "side_character_friction": "Jun wants to destroy the evidence.",
+                "independent_side_character_move": "Jun locks the hatch until Nora admits the risk.",
             }
         ]
         create_chapters_from_outline(session, run)
@@ -505,6 +507,7 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
                 "emotional_anchor": "Nora remembers the operator she failed to save.",
                 "civilian_texture": "Children shelter in a maintenance chapel nearby.",
                 "ideology_clash": "Jun wants safety even if it means obedience.",
+                "independent_side_character_move": "Jun locks the hatch until Nora admits the risk.",
             }
         )
         chapter.summary = "Nora reaches the hatch, but the audit net tracks the spoof."
@@ -526,6 +529,7 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
             "trust_fractures": {"Nora/Jun": "Trust is eroding under pressure."},
             "civilian_pressure_points": ["Families are sheltering near the maintenance chapel."],
             "emotional_open_loops": {"Nora": "She cannot forget the last operator she failed to save."},
+            "side_character_decisions": {"Jun": ["Jun locks the hatch until Nora admits the risk."]},
         }
         chapter.qa_notes = {
             "strengths": ["Forward motion holds."],
@@ -556,6 +560,7 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
     assert "Ending type: abstract_cliffhanger" in response.text
     assert "Scene turn resolved: 4/10" in response.text
     assert "Technical fatigue: 7/10" in response.text
+    assert "Move: Jun locks the hatch until Nora admits the risk." in response.text
     assert "Repair scope used: targeted scene and ending." in response.text
     assert "Nora spoofs the hatch sensor to buy ten seconds." in response.text
     assert "Peace Patch replication paused at the hatch cluster." in response.text

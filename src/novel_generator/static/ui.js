@@ -518,6 +518,7 @@ function setupRunDetail() {
       characterTurn: outline.character_turn || "",
       costIfSuccess: outline.cost_if_success || "",
       sideCharacterFriction: outline.side_character_friction || "",
+      independentSideCharacterMove: outline.independent_side_character_move || plan.independent_side_character_move || "",
       chapterMode: outline.chapter_mode || "",
       civilianLifeDetail: outline.civilian_life_detail || "",
       emotionalReveal: outline.emotional_reveal || plan.emotional_anchor || "",
@@ -695,7 +696,9 @@ function setupRunDetail() {
       contractCostNode.textContent = contract.costIfSuccess || "-";
     }
     if (contractFrictionNode) {
-      contractFrictionNode.textContent = contract.sideCharacterFriction || "-";
+      contractFrictionNode.textContent = contract.independentSideCharacterMove
+        ? `${contract.sideCharacterFriction || "-"} / ${contract.independentSideCharacterMove}`
+        : contract.sideCharacterFriction || "-";
     }
     if (contractModeNode) {
       contractModeNode.textContent = contract.chapterMode || "-";

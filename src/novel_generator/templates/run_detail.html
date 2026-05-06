@@ -229,7 +229,14 @@
           </div>
           <div class="detail-item">
             <span class="detail-label">Side-character friction</span>
-            <p class="chapter-copy" data-contract-friction>{{ current_contract.side_character_friction if current_contract else "-" }}</p>
+            <p class="chapter-copy" data-contract-friction>
+              {% if current_contract %}
+                {{ current_contract.side_character_friction or "-" }}
+                {% if current_contract.independent_side_character_move %}<br>Move: {{ current_contract.independent_side_character_move }}{% endif %}
+              {% else %}
+                -
+              {% endif %}
+            </p>
           </div>
           <div class="detail-item">
             <span class="detail-label">Chapter mode</span>
@@ -731,6 +738,10 @@
                 <div class="detail-item">
                   <span class="detail-label">Side-character friction</span>
                   <p class="chapter-copy">{{ entry.side_character_friction or "-" }}</p>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">Side-character move</span>
+                  <p class="chapter-copy">{{ entry.independent_side_character_move or "-" }}</p>
                 </div>
                 <div class="detail-item">
                   <span class="detail-label">Genre state change</span>

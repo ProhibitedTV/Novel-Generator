@@ -491,6 +491,8 @@ def _current_contract_context(run: GenerationRun) -> tuple[dict[str, Any] | None
         "character_turn": outline.get("character_turn", ""),
         "cost_if_success": outline.get("cost_if_success", ""),
         "side_character_friction": outline.get("side_character_friction", ""),
+        "independent_side_character_move": outline.get("independent_side_character_move", "")
+        or plan.get("independent_side_character_move", ""),
         "chapter_mode": outline.get("chapter_mode", ""),
         "civilian_life_detail": outline.get("civilian_life_detail", ""),
         "emotional_reveal": outline.get("emotional_reveal", ""),

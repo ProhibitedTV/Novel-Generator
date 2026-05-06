@@ -66,6 +66,7 @@ def _outline_entry() -> dict:
         "primary_obstacle": "The watchdog masks its own audit trail.",
         "cost_if_success": "Nadia's archive credentials get burned.",
         "side_character_friction": "Nadia refuses to falsify the archive to protect Mara.",
+        "independent_side_character_move": "Nadia refuses to falsify the archive to protect Mara.",
         "concrete_ending_hook": {
             "trigger": "A drone reaches the archive hatch.",
             "visible_object_or_actor": "Its lens turns blue.",
@@ -94,6 +95,7 @@ def _plan() -> dict:
         "civilian_texture": "Children in the shelter sleep beside flickering heat coils.",
         "ideology_clash": "Nadia argues that truth without shelter is just another cruelty.",
         "primary_interpersonal_conflict": "Nadia refuses to keep enabling Mara's collateral damage.",
+        "independent_side_character_move": "Nadia refuses to falsify the archive to protect Mara.",
     }
 
 
@@ -116,6 +118,7 @@ def _ledger() -> dict:
         "trust_fractures": {"Mara/Nadia": "Nadia no longer trusts Mara to weigh civilian cost."},
         "civilian_pressure_points": ["Families in shelter seven lost heating during the lockdown."],
         "emotional_open_loops": {"Mara": "She fears she is choosing freedom with damaged memory."},
+        "side_character_decisions": {},
     }
 
 
@@ -363,6 +366,23 @@ def test_manuscript_quality_notes_tracks_repeated_emergency_mechanics() -> None:
     assert any("Manuscript repeatedly returns" in item for item in notes["technical_escalation_fatigue_findings"])
 
 
+def test_manuscript_quality_notes_tracks_side_character_decision_coverage() -> None:
+    first = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Mara discovers the patch.",
+        content="Nadia refused to falsify the archive while Mara opened the logs.",
+        status=ChapterStatus.COMPLETED,
+    )
+    first.continuity_update = {
+        "side_character_decisions": {"Nadia": ["Nadia refused to falsify the archive."]}
+    }
+
+    notes = manuscript_quality_notes([first], _story_bible())
+
+    assert any("Major side character Nadia has only 1 tracked independent decision" in item for item in notes["side_character_agency_notes"])
+
+
 def test_lint_flags_prose_voice_and_style_avoid_problems() -> None:
     systems_outline = {**_outline_entry(), "chapter_mode": "systems_crisis"}
     style_plan = {
@@ -409,3 +429,48 @@ def test_lint_flags_prose_voice_and_style_avoid_problems() -> None:
     assert any("filter verbs" in item.lower() for item in result.soft_warnings)
     assert any("abstract emotions" in item.lower() for item in result.soft_warnings)
     assert any("style-avoid phrase" in item.lower() for item in result.soft_warnings)
+
+
+def test_lint_flags_side_character_exposition_without_independent_action() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Mara got the logs open while Nadia watched the console. "
+            "Nadia warned Mara that the archive would punish them, then explained why the records mattered. "
+            "A drone stopped outside the hatch. Its lens turned blue. It spoke in Nadia's voice."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(
+        chapter,
+        {**_outline_entry(), "independent_side_character_move": ""},
+        {**_plan(), "independent_side_character_move": ""},
+        _story_bible(),
+        _ledger(),
+        [],
+    )
+
+    assert result.needs_repair is True
+    assert result.repair_scope == "targeted_scene_and_ending"
+    assert any("appears only to warn, explain" in item.lower() for item in result.soft_warnings)
+
+
+def test_lint_requires_planned_independent_side_character_move() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Mara got the logs open while Nadia argued beside her. "
+            "A drone stopped outside the hatch. Its lens turned blue. It spoke in Nadia's voice."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, _outline_entry(), _plan(), _story_bible(), _ledger(), [])
+
+    assert result.needs_repair is True
+    assert any("missing the planned independent side-character move" in item.lower() for item in result.blocking_issues)

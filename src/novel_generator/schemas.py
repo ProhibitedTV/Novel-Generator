@@ -21,6 +21,22 @@ def _clean_list(value: Any) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+def _clean_list_map(value: Any) -> dict[str, list[str]]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    cleaned: dict[str, list[str]] = {}
+    for key, items in value.items():
+        name = str(key).strip()
+        if not name:
+            continue
+        cleaned_items = _clean_list(items)
+        if cleaned_items:
+            cleaned[name] = cleaned_items
+    return cleaned
+
+
 def _validate_genre_profile(value: Any) -> str:
     key = str(value or DEFAULT_GENRE_PROFILE).strip() or DEFAULT_GENRE_PROFILE
     if key not in GENRE_PROFILES:
@@ -210,6 +226,7 @@ class StructuredOutlineEntry(BaseModel):
     primary_obstacle: str = ""
     cost_if_success: str = ""
     side_character_friction: str = ""
+    independent_side_character_move: str = ""
     concrete_ending_hook: ConcreteEndingHook = Field(default_factory=ConcreteEndingHook)
     chapter_mode: str = ""
     civilian_life_detail: str = ""
@@ -239,7 +256,13 @@ class ContinuityLedger(BaseModel):
     trust_fractures: dict[str, str] = Field(default_factory=dict)
     civilian_pressure_points: list[str] = Field(default_factory=list)
     emotional_open_loops: dict[str, str] = Field(default_factory=dict)
+    side_character_decisions: dict[str, list[str]] = Field(default_factory=dict)
     genre_state: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("side_character_decisions", mode="before")
+    @classmethod
+    def validate_side_character_decisions(cls, value: Any) -> dict[str, list[str]]:
+        return _clean_list_map(value)
 
 
 class ChapterPlan(BaseModel):
@@ -257,6 +280,7 @@ class ChapterPlan(BaseModel):
     civilian_texture: str = ""
     ideology_clash: str = ""
     primary_interpersonal_conflict: str = ""
+    independent_side_character_move: str = ""
     genre_specific_focus: str = ""
     genre_specific_beats: list[str] = Field(default_factory=list)
 
@@ -284,7 +308,13 @@ class ChapterContinuityUpdate(BaseModel):
     trust_fractures: dict[str, str] = Field(default_factory=dict)
     civilian_pressure_points: list[str] = Field(default_factory=list)
     emotional_open_loops: dict[str, str] = Field(default_factory=dict)
+    side_character_decisions: dict[str, list[str]] = Field(default_factory=dict)
     genre_state: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("side_character_decisions", mode="before")
+    @classmethod
+    def validate_side_character_decisions(cls, value: Any) -> dict[str, list[str]]:
+        return _clean_list_map(value)
 
 
 class ChapterCritique(BaseModel):

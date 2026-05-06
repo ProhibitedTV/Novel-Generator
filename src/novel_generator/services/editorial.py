@@ -65,6 +65,7 @@ ENDING_ACTION_VERBS = {
     "block",
     "blocks",
     "blocked",
+    "blocks",
     "break",
     "breaks",
     "broke",
@@ -334,6 +335,59 @@ HUMAN_CONSEQUENCE_TERMS = {
     "workers",
 }
 
+SIDE_CHARACTER_ACTION_TERMS = {
+    "accepted",
+    "announced",
+    "arrested",
+    "betrayed",
+    "blocked",
+    "broadcast",
+    "burned",
+    "carried",
+    "chose",
+    "closed",
+    "confessed",
+    "cut",
+    "deleted",
+    "destroyed",
+    "dropped",
+    "exposed",
+    "handed",
+    "hid",
+    "leaked",
+    "leaks",
+    "left",
+    "locked",
+    "opened",
+    "ordered",
+    "patched",
+    "patches",
+    "published",
+    "refused",
+    "refuses",
+    "resists",
+    "released",
+    "rescued",
+    "revealed",
+    "sealed",
+    "sent",
+    "signed",
+    "stole",
+    "switched",
+    "took",
+    "voted",
+}
+
+SIDE_CHARACTER_EXPOSITION_TERMS = {
+    "asked",
+    "explained",
+    "said",
+    "told",
+    "warned",
+    "watched",
+    "wondered",
+}
+
 FILTER_VERBS = [
     "felt",
     "feel",
@@ -585,6 +639,62 @@ def _has_human_visible_consequence(text: str) -> bool:
     terms = set(_normalized_words(text))
     cost_terms = [keyword for keyword in COST_KEYWORDS if keyword not in {"alarm", "alarms"}]
     return bool(terms & HUMAN_CONSEQUENCE_TERMS) or any(keyword in lowered for keyword in cost_terms)
+
+
+def _payload_name(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("name", "")).strip()
+    return str(getattr(item, "name", "")).strip()
+
+
+def _major_side_character_names(story_bible: StoryBible | dict[str, Any]) -> list[str]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    cast = bible.get("cast") or []
+    protagonist = _payload_name(cast[0]) if cast else ""
+    names: list[str] = []
+    for member in cast[1:]:
+        name = _payload_name(member)
+        if name and name != protagonist:
+            names.append(name)
+    for agenda in bible.get("character_agendas") or []:
+        name = _payload_name(agenda)
+        if name and name != protagonist:
+            names.append(name)
+    return list(dict.fromkeys(names))
+
+
+def _story_character_name_terms(story_bible: StoryBible | dict[str, Any]) -> set[str]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    names = [_payload_name(member) for member in bible.get("cast") or []]
+    names.extend(_payload_name(agenda) for agenda in bible.get("character_agendas") or [])
+    return {
+        term
+        for name in names
+        for term in _meaningful_terms(name)
+    }
+
+
+def _mentions_name(text: str, name: str) -> bool:
+    return bool(name) and bool(re.search(rf"\b{re.escape(name)}\b", text, flags=re.IGNORECASE))
+
+
+def _sentences_with_name(text: str, name: str) -> list[str]:
+    return [sentence for sentence in _sentences(text) if _mentions_name(sentence, name)]
+
+
+def _has_side_character_action(sentences: list[str]) -> bool:
+    for sentence in sentences:
+        terms = set(_normalized_words(sentence))
+        if terms & SIDE_CHARACTER_ACTION_TERMS:
+            return True
+    return False
+
+
+def _looks_exposition_only(sentences: list[str]) -> bool:
+    if not sentences:
+        return False
+    combined_terms = set(_normalized_words(" ".join(sentences)))
+    return bool(combined_terms & SIDE_CHARACTER_EXPOSITION_TERMS) and not _has_side_character_action(sentences)
 
 
 def _sentences(text: str) -> list[str]:
@@ -958,6 +1068,45 @@ def lint_chapter(
             result.needs_repair = True
             result.repair_scope = "targeted_scene_and_ending"
 
+    independent_move = str(
+        chapter_plan.get("independent_side_character_move")
+        or entry.get("independent_side_character_move")
+        or ""
+    ).strip()
+    if independent_move:
+        move_terms = _meaningful_terms(independent_move) - _story_character_name_terms(story_bible)
+        content_terms = _meaningful_terms(content)
+        if move_terms and len(move_terms & content_terms) < min(2, len(move_terms)):
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} is missing the planned independent side-character move."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+    elif friction:
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} has side-character friction but no planned independent side-character move."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+
+    for name in _major_side_character_names(story_bible):
+        name_sentences = _sentences_with_name(content, name)
+        if not name_sentences:
+            continue
+        if not _has_side_character_action(name_sentences):
+            if _looks_exposition_only(name_sentences):
+                issue = (
+                    f"Side character {name} appears only to warn, explain, ask, or observe without an "
+                    "independent action that changes the plot."
+                )
+            else:
+                issue = (
+                    f"Side character {name} appears without a clear independent action that changes the plot."
+                )
+            result.soft_warnings.append(issue)
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+
     genre_expectations = [
         *(entry.get("genre_specific_beats") or []),
         entry.get("genre_state_change", ""),
@@ -1221,6 +1370,26 @@ def manuscript_quality_notes(
         )
 
     if bible:
+        side_decision_counts: Counter[str] = Counter()
+        for chapter in chapters:
+            decisions = (chapter.continuity_update or {}).get("side_character_decisions", {}) or {}
+            for name, moves in decisions.items():
+                side_decision_counts[str(name)] += len(moves or [])
+        for name in _major_side_character_names(bible):
+            count = side_decision_counts.get(name, 0)
+            if count == 0:
+                notes["side_character_agency_notes"].append(
+                    f"Major side character {name} has no tracked independent decisions in continuity."
+                )
+            elif count < 2:
+                notes["side_character_agency_notes"].append(
+                    f"Major side character {name} has only {count} tracked independent decision."
+                )
+            else:
+                notes["side_character_agency_notes"].append(
+                    f"Major side character {name} has {count} tracked independent decisions."
+                )
+
         for entity in bible.get("canon_registry") or []:
             name = str(entity.get("name", "")).strip()
             if not name:
