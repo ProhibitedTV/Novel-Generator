@@ -401,8 +401,10 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "warnings": ["The final paragraph still sounds too abstract."],
           "revision_required": true,
           "focus": ["Rewrite the ending beat around the elevator doors opening."],
+          "ending_hook_type": "outline summary",
           "forward_motion_score": 8,
           "ending_concreteness_score": 4,
+          "scene_turn_resolution_score": 5,
           "cost_consequence_realism_score": 7,
           "side_character_independence_score": 6,
           "proper_noun_continuity_score": 8,
@@ -450,6 +452,8 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
 
     assert plan.price_paid.startswith("Iris permanently burns")
     assert critique.repair_scope == "targeted_scene_and_ending"
+    assert critique.ending_hook_type == "outline_summary"
+    assert critique.scene_turn_resolution_score == 5
     assert continuity.new_entities_introduced[0].name == "Shaft Elevator"
     assert plan.ideology_clash.startswith("Tarin argues")
     assert critique.ideology_clarity_score == 8
@@ -469,8 +473,10 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
           "warnings": [],
           "revision_required": false,
           "focus": [],
+          "ending_hook_type": "image beat",
           "forward_motion_score": 70,
           "ending_concreteness_score": 40,
+          "scene_turn_resolution_score": 50,
           "cost_consequence_realism_score": 65,
           "side_character_independence_score": 55,
           "proper_noun_continuity_score": 80,
@@ -492,6 +498,8 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
 
     assert critique.forward_motion_score == 7
     assert critique.ending_concreteness_score == 4
+    assert critique.ending_hook_type == "image_or_feeling_beat"
+    assert critique.scene_turn_resolution_score == 5
     assert critique.cost_consequence_realism_score == 7
     assert critique.side_character_independence_score == 6
     assert critique.proper_noun_continuity_score == 8
@@ -610,8 +618,10 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
           "warnings": [],
           "revision_required": true,
           "focus": ["Strengthen style profile alignment."],
+          "ending_hook_type": "abstract_cliffhanger",
           "forward_motion_score": 8,
           "ending_concreteness_score": 8,
+          "scene_turn_resolution_score": 4,
           "cost_consequence_realism_score": 8,
           "side_character_independence_score": 8,
           "proper_noun_continuity_score": 8,
@@ -640,8 +650,15 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert '"style_profile"' in story_prompt
     assert "Prose style profile" in draft_prompt
     assert "character_voice_map" in draft_prompt
+    assert "final paragraph must include" in draft_prompt
+    assert "visible consequence" in draft_prompt
     assert "style_alignment_score" in critique_prompt
+    assert "ending_hook_type" in critique_prompt
+    assert "scene_turn_resolution_score" in critique_prompt
+    assert "abstract_cliffhanger" in critique_prompt
+    assert "next problem" in critique_prompt
     assert "voice_and_texture" in critique_prompt
+    assert "concrete external action" in revision_prompt
     assert "voice_and_texture" in revision_prompt
     assert "do not copy exact language" in revision_prompt
 

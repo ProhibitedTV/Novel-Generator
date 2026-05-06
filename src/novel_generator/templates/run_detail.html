@@ -879,6 +879,8 @@
                     <ul class="bullet-list">
                       <li>Forward motion: {{ chapter.qa_notes.forward_motion_score or 0 }}/10</li>
                       <li>Ending concreteness: {{ chapter.qa_notes.ending_concreteness_score or 0 }}/10</li>
+                      <li>Ending type: {{ chapter.qa_notes.ending_hook_type|default("unknown") }}</li>
+                      <li>Scene turn resolved: {{ chapter.qa_notes.scene_turn_resolution_score|default(10) }}/10</li>
                       <li>Cost realism: {{ chapter.qa_notes.cost_consequence_realism_score or 0 }}/10</li>
                       <li>Side-character independence: {{ chapter.qa_notes.side_character_independence_score or 0 }}/10</li>
                       <li>Proper-noun continuity: {{ chapter.qa_notes.proper_noun_continuity_score or 0 }}/10</li>

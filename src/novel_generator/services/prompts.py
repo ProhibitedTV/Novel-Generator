@@ -472,6 +472,9 @@ def build_chapter_draft_messages(
                 + "\n"
                 "- limit new system acronyms in breather or aftermath chapters unless absolutely necessary\n"
                 "- do not introduce abstract chapter endings about destiny, choices, or the future hanging in the balance\n"
+                "- the final paragraph must include a concrete external action, visible consequence, irreversible decision, reveal, reversal, or state change\n"
+                "- do not end with planning-language such as 'the next problem', 'the next step', 'the choice ahead', or equivalent outline-summary language\n"
+                "- quiet or emotional chapters may end softly, but the emotion must be paired with a tangible event a reader can visualize\n"
                 "- end in the exact story state promised by ending_state and land the concrete ending hook with a visible actor, object, or event\n"
                 "- keep each named character's voice and priorities distinct\n\n"
                 "Return the chapter prose only."
@@ -520,8 +523,10 @@ def build_chapter_critique_messages(
                 '  "warnings": ["string"],\n'
                 '  "revision_required": true,\n'
                 '  "focus": ["string"],\n'
+                '  "ending_hook_type": "concrete_action_hook|resolved_scene_turn|abstract_cliffhanger|image_or_feeling_beat|outline_summary",\n'
                 '  "forward_motion_score": 0,\n'
                 '  "ending_concreteness_score": 0,\n'
+                '  "scene_turn_resolution_score": 0,\n'
                 '  "cost_consequence_realism_score": 0,\n'
                 '  "side_character_independence_score": 0,\n'
                 '  "proper_noun_continuity_score": 0,\n'
@@ -541,12 +546,15 @@ def build_chapter_critique_messages(
                 '  "repair_scope": "none|voice_and_texture|targeted_scene_and_ending|full_chapter"\n'
                 "}\n\n"
                 "Rules:\n"
-                "- set revision_required to true if the chapter has an abstract ending, a zero-cost major solution, a repeated premise beat, a side character who only helps or warns, a proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
+                "- classify ending_hook_type as concrete_action_hook when the final beat is a visible event/action/reversal, resolved_scene_turn when it quietly completes the scene turn with a tangible decision or state change, abstract_cliffhanger when it only gestures at future stakes, image_or_feeling_beat when it ends on mood/image without external consequence, or outline_summary when it uses planning language such as 'next problem' or 'next step'\n"
+                "- set revision_required to true if the chapter has an abstract ending, outline-summary ending, image/feeling-only ending, unresolved immediate scene turn, zero-cost major solution, repeated premise beat, side character who only helps or warns, proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
                 "- use repair_scope 'voice_and_texture' when the main problem is flat prose, samey dialogue, repeated sentence rhythm, weak sensory specificity, or poor style-profile alignment\n"
                 "- use repair_scope 'targeted_scene_and_ending' for ending, cost, repetition-fatigue, or side-character pressure problems\n"
                 "- use repair_scope 'full_chapter' only when continuity or premise repetition is severe\n"
                 "- all score fields must be whole numbers from 0 to 10, not percentages\n"
-                "- forward_motion_score, ending_concreteness_score, cost_consequence_realism_score, side_character_independence_score, and proper_noun_continuity_score should be higher when the draft is stronger\n"
+                "- forward_motion_score, ending_concreteness_score, scene_turn_resolution_score, cost_consequence_realism_score, side_character_independence_score, and proper_noun_continuity_score should be higher when the draft is stronger\n"
+                "- scene_turn_resolution_score should be low if the ending opens a cliffhanger without resolving the chapter's immediate objective or scene tension\n"
+                "- set revision_required to true if ending_hook_type is abstract_cliffhanger, image_or_feeling_beat, or outline_summary, or if scene_turn_resolution_score is 5 or lower\n"
                 "- emotional_depth_score, ideology_clarity_score, and civilian_texture_score should be higher when the chapter creates human texture and belief conflict\n"
                 "- genre_contract_score should be higher when the chapter clearly serves the selected genre contract\n"
                 "- style_alignment_score, voice_distinctness_score, sentence_rhythm_score, sensory_specificity_score, and dialogue_tension_score should be higher when the prose obeys the style profile\n"
@@ -602,6 +610,9 @@ def build_chapter_revision_messages(
                 "- if repair_scope is 'voice_and_texture', preserve the plot beats and rewrite for stronger style-profile alignment, sharper character voices, more concrete sensory anchors, and more varied sentence rhythm\n"
                 "- if repair_scope is 'targeted_scene_and_ending', preserve the good material and rewrite only the weakest scene plus the final 2 to 3 paragraphs\n"
                 "- if repair_scope is 'full_chapter', rebuild the chapter so it stops repeating the premise and restores continuity\n"
+                "- if ending_hook_type is abstract_cliffhanger, image_or_feeling_beat, or outline_summary, replace the final beat with a concrete external action, visible consequence, irreversible decision, reveal, reversal, or state change\n"
+                "- make the revised ending resolve the chapter's immediate scene tension while opening the next problem through something visible on the page\n"
+                "- do not end with planning-language such as 'the next problem', 'the next step', 'the choice ahead', or equivalent outline-summary language\n"
                 "- follow the prose style profile's narrative_voice, sentence_rhythm, imagery_palette, dialogue_rules, character_voice_map, and avoid list\n"
                 "- do not copy exact language from any user-provided style reference\n"
                 "- show a real price or fallout if a technical solution succeeds\n"
@@ -612,7 +623,7 @@ def build_chapter_revision_messages(
                 + "; ".join(profile.drafting_focus)
                 + "\n"
                 "- if this is a breather or aftermath chapter, ensure the chapter breathes and does not become another pure console sequence\n"
-                "- end on a concrete next problem, not a thesis sentence about the future or a choice\n"
+                "- end on a concrete event or decision that creates the next problem, not a thesis sentence about the future or a choice\n"
                 "- keep names and roles consistent with the canon registry and continuity ledger\n"
                 "- do not add a heading\n\n"
                 "Return revised chapter prose only."
@@ -766,7 +777,7 @@ def build_manuscript_qa_messages(
                 '  "technical_escalation_fatigue_findings": ["string"],\n'
                 '  "genre_contract_notes": ["string"]\n'
                 "}\n\n"
-                "Be specific about repeated setups, duplicated endings, continuity instability, easy technical wins, side-character flatness, "
+                "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
                 "proper-noun drift, emotional pacing, ideology blur, civilian-life absence, technical alarm fatigue, and whether the manuscript delivers on the ending promise. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)

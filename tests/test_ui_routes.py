@@ -531,8 +531,10 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
             "warnings": ["The ending still feels abstract."],
             "revision_required": True,
             "focus": ["Rewrite the final beat around the hatch alarm."],
+            "ending_hook_type": "abstract_cliffhanger",
             "forward_motion_score": 8,
             "ending_concreteness_score": 4,
+            "scene_turn_resolution_score": 4,
             "cost_consequence_realism_score": 6,
             "side_character_independence_score": 5,
             "proper_noun_continuity_score": 9,
@@ -549,6 +551,8 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
     assert "Blocking issues" in response.text
     assert "Repair scope" in response.text
     assert "Ending concreteness: 4/10" in response.text
+    assert "Ending type: abstract_cliffhanger" in response.text
+    assert "Scene turn resolved: 4/10" in response.text
     assert "Repair scope used: targeted scene and ending." in response.text
     assert "Nora spoofs the hatch sensor to buy ten seconds." in response.text
     assert "Peace Patch replication paused at the hatch cluster." in response.text

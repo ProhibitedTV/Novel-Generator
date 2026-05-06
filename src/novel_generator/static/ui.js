@@ -331,6 +331,7 @@ function setupRunDetail() {
   const qualityDefs = [
     { field: "forward_motion_score", label: "Forward motion", lowerIsBetter: false },
     { field: "ending_concreteness_score", label: "Ending concreteness", lowerIsBetter: false },
+    { field: "scene_turn_resolution_score", label: "Scene turn resolved", lowerIsBetter: false, defaultScore: 10 },
     { field: "cost_consequence_realism_score", label: "Cost realism", lowerIsBetter: false },
     { field: "emotional_depth_score", label: "Emotional depth", lowerIsBetter: false },
     { field: "side_character_independence_score", label: "Side-character agency", lowerIsBetter: false },

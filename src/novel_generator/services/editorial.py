@@ -29,9 +29,18 @@ STOCK_PHRASES = [
 BREATHER_MODES = {"breather", "aftermath"}
 
 ABSTRACT_ENDING_PATTERNS = [
+    r"\bnext problem\b",
     r"the next step would decide",
+    r"\bthe next step\b",
+    r"\bnext challenge\b",
+    r"\bnext choice\b",
+    r"\bchoice ahead\b",
+    r"\bproblem lay ahead\b",
+    r"\bproblem waited\b",
     r"the choice would define",
+    r"the choice was clear",
     r"the future rested",
+    r"\bfuture hung\b",
     r"the truth was waiting",
     r"would shape humanity",
     r"would define the next chapter",
@@ -40,6 +49,193 @@ ABSTRACT_ENDING_PATTERNS = [
     r"she had begun her journey",
     r"the colony breathed",
 ]
+
+ENDING_ACTION_VERBS = {
+    "accepts",
+    "accepted",
+    "activate",
+    "activates",
+    "activated",
+    "arrive",
+    "arrives",
+    "arrived",
+    "begin",
+    "begins",
+    "began",
+    "block",
+    "blocks",
+    "blocked",
+    "break",
+    "breaks",
+    "broke",
+    "burn",
+    "burns",
+    "burned",
+    "cast",
+    "casts",
+    "close",
+    "closes",
+    "closed",
+    "collapse",
+    "collapses",
+    "collapsed",
+    "cut",
+    "cuts",
+    "delete",
+    "deletes",
+    "deleted",
+    "drop",
+    "drops",
+    "dropped",
+    "enter",
+    "enters",
+    "entered",
+    "erase",
+    "erases",
+    "erased",
+    "execute",
+    "executes",
+    "executed",
+    "fall",
+    "falls",
+    "fell",
+    "fire",
+    "fires",
+    "fired",
+    "hand",
+    "hands",
+    "handed",
+    "hit",
+    "hits",
+    "knock",
+    "knocks",
+    "knocked",
+    "land",
+    "lands",
+    "landed",
+    "leave",
+    "leaves",
+    "left",
+    "lock",
+    "locks",
+    "locked",
+    "open",
+    "opens",
+    "opened",
+    "press",
+    "presses",
+    "pressed",
+    "publish",
+    "publishes",
+    "published",
+    "pull",
+    "pulls",
+    "pulled",
+    "refuse",
+    "refuses",
+    "refused",
+    "release",
+    "releases",
+    "released",
+    "rang",
+    "rings",
+    "reach",
+    "reaches",
+    "reached",
+    "reveal",
+    "reveals",
+    "revealed",
+    "rip",
+    "rips",
+    "ripped",
+    "rose",
+    "rises",
+    "said",
+    "says",
+    "seal",
+    "seals",
+    "sealed",
+    "send",
+    "sends",
+    "sent",
+    "shatter",
+    "shatters",
+    "shattered",
+    "shift",
+    "shifts",
+    "shifted",
+    "shut",
+    "shuts",
+    "sign",
+    "signs",
+    "signed",
+    "slam",
+    "slams",
+    "slammed",
+    "speak",
+    "speaks",
+    "spoke",
+    "step",
+    "steps",
+    "stepped",
+    "stop",
+    "stops",
+    "stopped",
+    "strike",
+    "strikes",
+    "struck",
+    "switch",
+    "switches",
+    "switched",
+    "turn",
+    "turns",
+    "turned",
+    "vanish",
+    "vanishes",
+    "vanished",
+    "vote",
+    "votes",
+    "voted",
+    "walk",
+    "walks",
+    "walked",
+    "wake",
+    "wakes",
+    "woke",
+}
+
+ENDING_CONCRETE_NOUNS = {
+    "actor",
+    "alarm",
+    "body",
+    "broadcast",
+    "button",
+    "command",
+    "console",
+    "corridor",
+    "door",
+    "drone",
+    "elevator",
+    "file",
+    "floor",
+    "hand",
+    "hatch",
+    "key",
+    "lens",
+    "letter",
+    "light",
+    "map",
+    "message",
+    "panel",
+    "route",
+    "screen",
+    "seal",
+    "signal",
+    "switch",
+    "terminal",
+    "voice",
+    "vote",
+}
 
 TECH_SOLUTION_KEYWORDS = [
     "hack",
@@ -308,6 +504,24 @@ def _sentences(text: str) -> list[str]:
     return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if sentence.strip()]
 
 
+def _paragraphs(text: str) -> list[str]:
+    return [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text.strip()) if paragraph.strip()]
+
+
+def _ending_text(content: str, paragraphs: int = 3) -> str:
+    chunks = _paragraphs(content)
+    if not chunks:
+        return ""
+    return "\n\n".join(chunks[-paragraphs:])
+
+
+def _final_beat_text(content: str) -> str:
+    chunks = _paragraphs(content)
+    final_paragraph = chunks[-1] if chunks else content.strip()
+    sentences = _sentences(final_paragraph)
+    return sentences[-1] if sentences else final_paragraph
+
+
 def _sentence_start_key(sentence: str, words: int) -> str:
     normalized = _normalized_words(sentence)
     return " ".join(normalized[:words])
@@ -388,6 +602,20 @@ def _style_avoid_terms(story_bible: StoryBible | dict[str, Any]) -> list[str]:
     ]
 
 
+def _has_concrete_ending_action(text: str) -> bool:
+    terms = set(_normalized_words(text))
+    has_action = bool(terms & ENDING_ACTION_VERBS)
+    has_concrete_noun = bool(terms & ENDING_CONCRETE_NOUNS)
+    return has_action and has_concrete_noun
+
+
+def _looks_like_internal_or_atmospheric_ending(text: str) -> bool:
+    terms = set(_normalized_words(text))
+    has_abstract_emotion = bool(terms & set(ABSTRACT_EMOTION_TERMS))
+    has_theme_language = bool({"future", "truth", "choice", "destiny", "hope", "meaning"} & terms)
+    return has_abstract_emotion or has_theme_language
+
+
 def detect_canonical_entity_collisions(
     existing_entities: list[CanonicalEntity | dict[str, Any]],
     new_entities: list[CanonicalEntity | dict[str, Any]],
@@ -459,15 +687,33 @@ def lint_chapter(
     words = _normalized_words(content)
     result = ChapterLintResult()
 
+    ending_text = _ending_text(content)
+    final_beat = _final_beat_text(content)
+    ending_lowered = ending_text.lower()
     tail = lowered[-220:]
     for pattern in ABSTRACT_ENDING_PATTERNS:
-        if re.search(pattern, tail):
+        if re.search(pattern, tail) or re.search(pattern, ending_lowered):
             result.blocking_issues.append(
-                f"Chapter {chapter.chapter_number} ends in an abstract thesis statement instead of a concrete hook."
+                f"Chapter {chapter.chapter_number} ends in abstract or outline-summary language instead of a concrete hook."
             )
             result.needs_repair = True
             result.repair_scope = "targeted_scene_and_ending"
             break
+
+    if final_beat and not _has_concrete_ending_action(final_beat):
+        if _looks_like_internal_or_atmospheric_ending(final_beat):
+            message = (
+                f"Chapter {chapter.chapter_number} ends on internal emotion, theme, or atmosphere "
+                "without a tangible event."
+            )
+        else:
+            message = (
+                f"Chapter {chapter.chapter_number} final beat lacks a concrete external action "
+                "or visible consequence."
+            )
+        result.blocking_issues.append(message)
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
 
     ending_hook = entry.get("concrete_ending_hook") or {}
     hook_terms = _meaningful_terms(

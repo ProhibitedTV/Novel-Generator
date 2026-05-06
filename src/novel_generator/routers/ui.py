@@ -176,6 +176,7 @@ RUN_STAGE_PROGRESS_ORDER = [
 QUALITY_SIGNAL_DEFS = [
     {"field": "forward_motion_score", "label": "Forward motion", "lower_is_better": False},
     {"field": "ending_concreteness_score", "label": "Ending concreteness", "lower_is_better": False},
+    {"field": "scene_turn_resolution_score", "label": "Scene turn resolved", "lower_is_better": False, "default": 10},
     {"field": "cost_consequence_realism_score", "label": "Cost realism", "lower_is_better": False},
     {"field": "emotional_depth_score", "label": "Emotional depth", "lower_is_better": False},
     {"field": "side_character_independence_score", "label": "Side-character agency", "lower_is_better": False},

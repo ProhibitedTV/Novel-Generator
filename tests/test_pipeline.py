@@ -152,15 +152,25 @@ def _plan_json(index: int) -> str:
     )
 
 
-def _critique_json(*, revision_required: bool) -> str:
+def _critique_json(
+    *,
+    revision_required: bool,
+    ending_hook_type: str | None = None,
+    scene_turn_resolution_score: int | None = None,
+) -> str:
     return json.dumps(
         {
             "strengths": ["The chapter advances the plot."],
             "warnings": ["The first draft needs sharper character distinction."] if revision_required else [],
             "revision_required": revision_required,
             "focus": ["Differentiate Iris from Tarin."] if revision_required else [],
+            "ending_hook_type": ending_hook_type
+            or ("abstract_cliffhanger" if revision_required else "concrete_action_hook"),
             "forward_motion_score": 8,
             "ending_concreteness_score": 4 if revision_required else 8,
+            "scene_turn_resolution_score": scene_turn_resolution_score
+            if scene_turn_resolution_score is not None
+            else (4 if revision_required else 8),
             "cost_consequence_realism_score": 7,
             "side_character_independence_score": 6,
             "proper_noun_continuity_score": 8,
@@ -352,7 +362,7 @@ def test_approved_run_completes_and_generates_qa_report(configured_environment) 
         resume_client = FakeOllamaClient(
                 [
                     _plan_json(1),
-                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor and the next problem 1 is the only route left.",
+                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them.",
                     _critique_json(revision_required=False),
                     "Iris discovers the living map and commits to following it underground.",
                     _continuity_json(1),
@@ -360,7 +370,7 @@ def test_approved_run_completes_and_generates_qa_report(configured_environment) 
                     (
                         "Iris and Tarin move through the shelter corridor where families trade broth cups beside failing heat cloths. "
                         "Tarin resists the pull to run, then demands to know why frightened civilians should pay for Iris's truth, and Iris admits she fears obedience more than collapse. "
-                        "Trigger 2 hits when the visible actor 2 wakes beneath them and the next problem 2 forces a deeper descent."
+                        "Trigger 2 hits when the visible actor 2 wakes beneath them and a lower hatch opens."
                     ),
                     _critique_json(revision_required=False),
                     "Iris and Tarin descend farther and realize the city has been steering them.",
@@ -458,14 +468,14 @@ def test_style_lint_triggers_voice_and_texture_revision(configured_environment) 
                         "Iris thought grief would break her. Iris noticed guilt in the silence. "
                         "Iris wondered if shame had won. Iris heard terror under every breath. "
                         "Despair made the hallway impossible to name. Tarin resists in chapter 1 as Iris tries to run. "
-                        "Trigger 1 lands when the visible actor 1 seals the corridor and the next problem 1 is immediate."
+                        "Trigger 1 lands when the visible actor 1 seals the corridor, forcing a deeper descent."
                     ),
                     _critique_json(revision_required=False),
                     (
                         "Iris slowed at the shaft while Tarin blocked the route with one hand on the rail. "
                         "The air tasted of rust, and each blue pulse from the map caught in the water on the floor. "
                         "Tarin refused to move until Iris admitted what following the map would cost him. "
-                        "Trigger 1 lands when the visible actor 1 seals the corridor and the next problem 1 is immediate."
+                        "Trigger 1 lands when the visible actor 1 seals the corridor, forcing a deeper descent."
                     ),
                     _critique_json(revision_required=False),
                     "Iris accepts Tarin's resistance and follows the sealed corridor at a cost.",
@@ -482,6 +492,61 @@ def test_style_lint_triggers_voice_and_texture_revision(configured_environment) 
         assert any(
             event.event_type == "chapter_revision_started"
             and event.payload.get("repair_scope") == "voice_and_texture"
+            for event in refreshed.events
+        )
+
+
+def test_ending_score_triggers_targeted_scene_revision(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    (
+                        "Iris put the burned key into Tarin's hand. "
+                        "Trigger 1 lands when the visible actor 1 seals the corridor, leaving only route 1."
+                    ),
+                    _critique_json(
+                        revision_required=False,
+                        ending_hook_type="outline_summary",
+                        scene_turn_resolution_score=4,
+                    ),
+                    (
+                        "Iris stopped at the rail while Tarin blocked the route with his shoulder. "
+                        "The visible actor 1 sealed the corridor behind them, and Iris handed Tarin the burned key."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris accepts the cost of the sealed corridor and gives Tarin the key.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        chapter = refreshed.chapters[0]
+        assert refreshed.status == RunStatus.COMPLETED
+        assert chapter.content.startswith("Iris stopped at the rail")
+        assert any(
+            event.event_type == "chapter_revision_started"
+            and event.payload.get("repair_scope") == "targeted_scene_and_ending"
             for event in refreshed.events
         )
 
@@ -509,7 +574,7 @@ def test_canonical_entity_collision_hard_fails_run(configured_environment) -> No
                     _story_bible_json(),
                     _outline_json(1),
                     _plan_json(1),
-                    "Iris and Tarin reach the hatch while Tarin resists trusting the map. Trigger 1 lands when the visible actor 1 blocks the exit and the next problem 1 is immediate.",
+                    "Iris and Tarin reach the hatch while Tarin resists trusting the map. Trigger 1 lands when the visible actor 1 blocks the exit and the route below opens.",
                     _critique_json(revision_required=False),
                     "Iris secures the map but exposes Tarin's route.",
                     _collision_continuity_json(1),
@@ -545,7 +610,7 @@ def test_continuity_ledger_carries_entities_forward_across_completed_chapters(co
                         _story_bible_json(),
                         _outline_json(2),
                         _plan_json(1),
-                        "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor and the next problem 1 is the only route left.",
+                        "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them.",
                         _critique_json(revision_required=False),
                         "Iris discovers the living map and commits to following it underground.",
                         _continuity_json(1),
@@ -553,7 +618,7 @@ def test_continuity_ledger_carries_entities_forward_across_completed_chapters(co
                         (
                             "Iris and Tarin move through the shelter corridor where families trade broth cups beside failing heat cloths. "
                             "Tarin resists the pull to run, then demands to know why frightened civilians should pay for Iris's truth, and Iris admits she fears obedience more than collapse. "
-                            "Trigger 2 hits when the visible actor 2 wakes beneath them and the next problem 2 forces a deeper descent."
+                            "Trigger 2 hits when the visible actor 2 wakes beneath them and a lower hatch opens."
                         ),
                         _critique_json(revision_required=False),
                         "Iris and Tarin descend farther and realize the city has been steering them.",

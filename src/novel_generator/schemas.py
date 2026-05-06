@@ -292,8 +292,10 @@ class ChapterCritique(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     revision_required: bool = False
     focus: list[str] = Field(default_factory=list)
+    ending_hook_type: str = "unknown"
     forward_motion_score: int = Field(default=0, ge=0, le=10)
     ending_concreteness_score: int = Field(default=0, ge=0, le=10)
+    scene_turn_resolution_score: int = Field(default=10, ge=0, le=10)
     cost_consequence_realism_score: int = Field(default=0, ge=0, le=10)
     side_character_independence_score: int = Field(default=0, ge=0, le=10)
     proper_noun_continuity_score: int = Field(default=0, ge=0, le=10)
@@ -315,6 +317,7 @@ class ChapterCritique(BaseModel):
     @field_validator(
         "forward_motion_score",
         "ending_concreteness_score",
+        "scene_turn_resolution_score",
         "cost_consequence_realism_score",
         "side_character_independence_score",
         "proper_noun_continuity_score",
@@ -346,6 +349,20 @@ class ChapterCritique(BaseModel):
 
         normalized = int(math.floor(numeric + 0.5))
         return max(0, min(10, normalized))
+
+    @field_validator("ending_hook_type", mode="before")
+    @classmethod
+    def normalize_ending_hook_type(cls, value: Any) -> str:
+        normalized = str(value or "unknown").strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized in {"action_hook", "concrete_hook"}:
+            return "concrete_action_hook"
+        if normalized in {"resolved_turn", "scene_turn", "resolved_scene"}:
+            return "resolved_scene_turn"
+        if normalized in {"image_beat", "feeling_beat", "image_feeling_beat"}:
+            return "image_or_feeling_beat"
+        if normalized in {"summary", "planning_language", "outline_contract"}:
+            return "outline_summary"
+        return normalized or "unknown"
 
 
 class ManuscriptQaReport(BaseModel):

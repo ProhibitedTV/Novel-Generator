@@ -132,7 +132,65 @@ def test_chapter_lint_flags_abstract_ending_patterns() -> None:
 
     assert result.needs_repair is True
     assert result.repair_scope == "targeted_scene_and_ending"
-    assert any("abstract thesis statement" in item.lower() for item in result.blocking_issues)
+    assert any("abstract or outline-summary language" in item.lower() for item in result.blocking_issues)
+
+
+def test_chapter_lint_flags_outline_summary_ending_language() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Mara got the logs open while Nadia braced the archive hatch. "
+            "The drone lens turned blue outside the door, but the next problem lay ahead."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, _outline_entry(), _plan(), _story_bible(), _ledger(), [])
+
+    assert result.needs_repair is True
+    assert result.repair_scope == "targeted_scene_and_ending"
+    assert any("outline-summary language" in item.lower() for item in result.blocking_issues)
+
+
+def test_chapter_lint_flags_final_beat_without_external_action() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Mara got the logs open while Nadia braced the archive hatch. "
+            "The answer became possible at last."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, _outline_entry(), _plan(), _story_bible(), _ledger(), [])
+
+    assert result.needs_repair is True
+    assert result.repair_scope == "targeted_scene_and_ending"
+    assert any("final beat lacks a concrete external action" in item.lower() for item in result.blocking_issues)
+
+
+def test_chapter_lint_allows_quiet_concrete_ending_beat() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Families in the archive shelter traded warmth packs and stale broth while Mara admitted "
+            "she was more afraid of obedience than death. Nadia refused to falsify the records for her. "
+            "Mara put the burned key into Nadia's hand. A drone stopped outside the hatch. "
+            "Its lens turned blue. It spoke in Nadia's voice."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, _outline_entry(), _plan(), _story_bible(), _ledger(), [])
+
+    assert not any("final beat lacks" in item.lower() for item in result.blocking_issues)
+    assert not any("internal emotion" in item.lower() for item in result.blocking_issues)
 
 
 def test_chapter_lint_flags_zero_cost_technical_success() -> None:
