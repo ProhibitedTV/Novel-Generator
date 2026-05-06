@@ -121,6 +121,29 @@
             <textarea name="story_avoid" rows="5" placeholder="Cliches, plot moves, or tonal misses to steer away from">{{ form_values.story_avoid }}</textarea>
           </label>
         </div>
+
+        <div class="section-header-copy">
+          <h3>Prose and voice</h3>
+          <p>Optional style signals for sentence rhythm, dialogue pressure, sensory texture, and prose habits to avoid.</p>
+        </div>
+        <div class="grid compact">
+          <label>
+            Style targets
+            <textarea name="story_style_targets" rows="5" placeholder="One prose trait per line">{{ form_values.story_style_targets }}</textarea>
+          </label>
+          <label>
+            Dialogue targets
+            <textarea name="story_dialogue_targets" rows="5" placeholder="One dialogue trait per line">{{ form_values.story_dialogue_targets }}</textarea>
+          </label>
+          <label>
+            Style avoid
+            <textarea name="story_style_avoid" rows="5" placeholder="One prose habit or phrase per line">{{ form_values.story_style_avoid }}</textarea>
+          </label>
+          <label>
+            Style reference
+            <textarea name="story_style_reference" rows="5" placeholder="Paste a short excerpt or style notes">{{ form_values.story_style_reference }}</textarea>
+          </label>
+        </div>
       </div>
 
       <div class="form-section">

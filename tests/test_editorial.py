@@ -223,3 +223,51 @@ def test_lint_flags_technical_escalation_fatigue() -> None:
     result = lint_chapter(chapter, systems_outline, _plan(), _story_bible(), _ledger(), [])
 
     assert any("technical emergency beats" in item.lower() for item in result.soft_warnings)
+
+
+def test_lint_flags_prose_voice_and_style_avoid_problems() -> None:
+    systems_outline = {**_outline_entry(), "chapter_mode": "systems_crisis"}
+    style_plan = {
+        **_plan(),
+        "attempt": "Mara questions the hatch guard instead of touching the watchdog.",
+        "complication": "Nadia refuses the shortcut.",
+        "price_paid": "Mara loses Nadia's trust.",
+    }
+    style_bible = {
+        **_story_bible(),
+        "style_profile": {
+            "narrative_voice": "Close third with concrete sensory pressure.",
+            "sentence_rhythm": "Vary sentence openings and length.",
+            "imagery_palette": ["vault dust", "blue lens light"],
+            "dialogue_rules": ["Subtext over explanation."],
+            "character_voice_map": {"Mara": "precise when afraid", "Nadia": "procedural under threat"},
+            "avoid": ["weight of everything"],
+        },
+    }
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Mara felt fear in the archive. "
+            "Mara saw panic rising. "
+            "Mara knew dread had settled. "
+            "Mara thought grief would break her. "
+            "Mara noticed guilt in the silence. "
+            "Mara wondered if shame had won. "
+            "Mara heard terror under every breath. "
+            "Despair made the weight of everything impossible to name. "
+            "Nadia refuses to falsify the archive to protect Mara. "
+            "A drone stopped outside the hatch. Its lens turned blue. It spoke in Nadia's voice."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+
+    result = lint_chapter(chapter, systems_outline, style_plan, style_bible, _ledger(), [])
+
+    assert result.needs_repair is True
+    assert result.repair_scope == "voice_and_texture"
+    assert any("sentence openings" in item.lower() for item in result.soft_warnings)
+    assert any("filter verbs" in item.lower() for item in result.soft_warnings)
+    assert any("abstract emotions" in item.lower() for item in result.soft_warnings)
+    assert any("style-avoid phrase" in item.lower() for item in result.soft_warnings)

@@ -338,6 +338,11 @@ function setupRunDetail() {
     { field: "ideology_clarity_score", label: "Ideology clarity", lowerIsBetter: false },
     { field: "civilian_texture_score", label: "Civilian texture", lowerIsBetter: false },
     { field: "genre_contract_score", label: "Genre contract", lowerIsBetter: false, defaultScore: 10 },
+    { field: "style_alignment_score", label: "Style alignment", lowerIsBetter: false, defaultScore: 10 },
+    { field: "voice_distinctness_score", label: "Voice distinctness", lowerIsBetter: false, defaultScore: 10 },
+    { field: "sentence_rhythm_score", label: "Sentence rhythm", lowerIsBetter: false, defaultScore: 10 },
+    { field: "sensory_specificity_score", label: "Sensory specificity", lowerIsBetter: false, defaultScore: 10 },
+    { field: "dialogue_tension_score", label: "Dialogue tension", lowerIsBetter: false, defaultScore: 10 },
     { field: "repetition_risk_score", label: "Repetition risk", lowerIsBetter: true },
   ];
   const terminalStatuses = new Set(["completed", "failed", "canceled"]);

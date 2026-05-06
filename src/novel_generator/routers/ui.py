@@ -183,6 +183,11 @@ QUALITY_SIGNAL_DEFS = [
     {"field": "ideology_clarity_score", "label": "Ideology clarity", "lower_is_better": False},
     {"field": "civilian_texture_score", "label": "Civilian texture", "lower_is_better": False},
     {"field": "genre_contract_score", "label": "Genre contract", "lower_is_better": False, "default": 10},
+    {"field": "style_alignment_score", "label": "Style alignment", "lower_is_better": False, "default": 10},
+    {"field": "voice_distinctness_score", "label": "Voice distinctness", "lower_is_better": False, "default": 10},
+    {"field": "sentence_rhythm_score", "label": "Sentence rhythm", "lower_is_better": False, "default": 10},
+    {"field": "sensory_specificity_score", "label": "Sensory specificity", "lower_is_better": False, "default": 10},
+    {"field": "dialogue_tension_score", "label": "Dialogue tension", "lower_is_better": False, "default": 10},
     {"field": "repetition_risk_score", "label": "Repetition risk", "lower_is_better": True},
 ]
 COMPARISON_CATEGORY_DEFS = [
@@ -851,6 +856,10 @@ def _story_brief_form_values(story_brief: dict[str, Any] | None = None) -> dict[
         "story_world_rules": _join_lines(brief.get("world_rules", [])),
         "story_must_include": _join_lines(brief.get("must_include", [])),
         "story_avoid": _join_lines(brief.get("avoid", [])),
+        "story_style_reference": str(brief.get("style_reference", "") or ""),
+        "story_style_targets": _join_lines(brief.get("style_targets", [])),
+        "story_dialogue_targets": _join_lines(brief.get("dialogue_targets", [])),
+        "story_style_avoid": _join_lines(brief.get("style_avoid", [])),
     }
 
 
@@ -867,6 +876,10 @@ def _story_brief_payload(values: dict[str, Any]) -> dict[str, Any]:
         "world_rules": values.get("story_world_rules", ""),
         "must_include": values.get("story_must_include", ""),
         "avoid": values.get("story_avoid", ""),
+        "style_reference": values.get("story_style_reference", ""),
+        "style_targets": values.get("story_style_targets", ""),
+        "dialogue_targets": values.get("story_dialogue_targets", ""),
+        "style_avoid": values.get("story_style_avoid", ""),
     }
 
 
@@ -1640,6 +1653,10 @@ def create_project_ui(
     story_world_rules: str = Form(""),
     story_must_include: str = Form(""),
     story_avoid: str = Form(""),
+    story_style_reference: str = Form(""),
+    story_style_targets: str = Form(""),
+    story_dialogue_targets: str = Form(""),
+    story_style_avoid: str = Form(""),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -1682,6 +1699,10 @@ def create_project_ui(
         "story_world_rules": story_world_rules,
         "story_must_include": story_must_include,
         "story_avoid": story_avoid,
+        "story_style_reference": story_style_reference,
+        "story_style_targets": story_style_targets,
+        "story_dialogue_targets": story_dialogue_targets,
+        "story_style_avoid": story_style_avoid,
     }
     payload_values = {
         "title": title,
@@ -2014,6 +2035,10 @@ def edit_project_ui(
     story_world_rules: str = Form(""),
     story_must_include: str = Form(""),
     story_avoid: str = Form(""),
+    story_style_reference: str = Form(""),
+    story_style_targets: str = Form(""),
+    story_dialogue_targets: str = Form(""),
+    story_style_avoid: str = Form(""),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -2060,6 +2085,10 @@ def edit_project_ui(
         "story_world_rules": story_world_rules,
         "story_must_include": story_must_include,
         "story_avoid": story_avoid,
+        "story_style_reference": story_style_reference,
+        "story_style_targets": story_style_targets,
+        "story_dialogue_targets": story_dialogue_targets,
+        "story_style_avoid": story_style_avoid,
     }
     story_brief_payload = _story_brief_payload(raw_form_values)
     story_brief_payload["approved_canon"] = _project_canon_entries(project)

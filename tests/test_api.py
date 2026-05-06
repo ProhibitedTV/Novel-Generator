@@ -27,6 +27,10 @@ def create_project_payload() -> dict:
             "world_rules": ["The city stores memory in living stone."],
             "must_include": ["A morally costly choice"],
             "avoid": ["Repeated inciting incidents"],
+            "style_reference": "Short clipped sentences around tactile dread.",
+            "style_targets": ["taut lyric pressure", "concrete sensory detail"],
+            "dialogue_targets": ["subtext before confession"],
+            "style_avoid": ["weight of everything"],
         },
     }
 
@@ -93,6 +97,9 @@ def test_project_patch_api_updates_story_brief_and_preserves_defaults(client, mo
             "story_brief": {
                 "tone": "Claustrophobic mystery",
                 "avoid": ["Looping emotional abstractions"],
+                "style_targets": ["spare unease"],
+                "dialogue_targets": ["questions that dodge the real wound"],
+                "style_avoid": ["she felt"],
             },
         },
     )
@@ -103,6 +110,10 @@ def test_project_patch_api_updates_story_brief_and_preserves_defaults(client, mo
     assert patch_response.json()["preferred_model"] == "test-model"
     assert patch_response.json()["story_brief"]["tone"] == "Claustrophobic mystery"
     assert patch_response.json()["story_brief"]["avoid"] == ["Looping emotional abstractions"]
+    assert patch_response.json()["story_brief"]["style_reference"] == "Short clipped sentences around tactile dread."
+    assert patch_response.json()["story_brief"]["style_targets"] == ["spare unease"]
+    assert patch_response.json()["story_brief"]["dialogue_targets"] == ["questions that dodge the real wound"]
+    assert patch_response.json()["story_brief"]["style_avoid"] == ["she felt"]
     assert patch_response.json()["story_brief"]["approved_canon"][0]["name"] == "Glass Orchard"
     assert patch_response.json()["story_brief"]["approved_canon"][0]["locked"] is True
 

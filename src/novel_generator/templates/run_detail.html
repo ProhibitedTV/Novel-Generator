@@ -886,6 +886,11 @@
                       <li>Emotional depth: {{ chapter.qa_notes.emotional_depth_score or 0 }}/10</li>
                       <li>Ideology clarity: {{ chapter.qa_notes.ideology_clarity_score or 0 }}/10</li>
                       <li>Civilian texture: {{ chapter.qa_notes.civilian_texture_score or 0 }}/10</li>
+                      <li>Style alignment: {{ chapter.qa_notes.style_alignment_score|default(10) }}/10</li>
+                      <li>Voice distinctness: {{ chapter.qa_notes.voice_distinctness_score|default(10) }}/10</li>
+                      <li>Sentence rhythm: {{ chapter.qa_notes.sentence_rhythm_score|default(10) }}/10</li>
+                      <li>Sensory specificity: {{ chapter.qa_notes.sensory_specificity_score|default(10) }}/10</li>
+                      <li>Dialogue tension: {{ chapter.qa_notes.dialogue_tension_score|default(10) }}/10</li>
                     </ul>
                   </div>
                   {% if chapter.qa_notes.strengths %}

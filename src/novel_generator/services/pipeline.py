@@ -264,16 +264,44 @@ def _resolve_repair_scope(*scopes: str) -> str:
         return "full_chapter"
     if "targeted_scene_and_ending" in scopes:
         return "targeted_scene_and_ending"
+    if "voice_and_texture" in scopes:
+        return "voice_and_texture"
     return "none"
 
 
+STYLE_SCORE_LABELS = {
+    "style_alignment_score": "style alignment",
+    "voice_distinctness_score": "voice distinctness",
+    "sentence_rhythm_score": "sentence rhythm",
+    "sensory_specificity_score": "sensory specificity",
+    "dialogue_tension_score": "dialogue tension",
+}
+STYLE_REPAIR_THRESHOLD = 5
+
+
+def _style_score_warnings(critique: ChapterCritique) -> list[str]:
+    weak_scores = [
+        f"{label} {getattr(critique, field)}/10"
+        for field, label in STYLE_SCORE_LABELS.items()
+        if getattr(critique, field) <= STYLE_REPAIR_THRESHOLD
+    ]
+    if not weak_scores:
+        return []
+    return ["Style delivery needs a voice-and-texture repair: " + ", ".join(weak_scores) + "."]
+
+
 def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLintResult) -> ChapterCritique:
+    style_warnings = _style_score_warnings(critique)
     blocking_issues = _dedupe([*critique.blocking_issues, *lint_result.blocking_issues])
-    soft_warnings = _dedupe([*critique.soft_warnings, *lint_result.soft_warnings])
+    soft_warnings = _dedupe([*critique.soft_warnings, *lint_result.soft_warnings, *style_warnings])
     warnings = _dedupe([*critique.warnings, *soft_warnings])
     focus = _dedupe([*critique.focus, *blocking_issues[:2], *soft_warnings[:2]])
-    revision_required = critique.revision_required or lint_result.needs_repair or bool(blocking_issues)
-    repair_scope = _resolve_repair_scope(critique.repair_scope, lint_result.repair_scope)
+    revision_required = critique.revision_required or lint_result.needs_repair or bool(blocking_issues) or bool(style_warnings)
+    repair_scope = _resolve_repair_scope(
+        critique.repair_scope,
+        lint_result.repair_scope,
+        "voice_and_texture" if style_warnings else "none",
+    )
     return critique.model_copy(
         update={
             "warnings": warnings,

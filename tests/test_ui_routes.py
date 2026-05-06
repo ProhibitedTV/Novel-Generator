@@ -215,6 +215,10 @@ def test_project_new_page_renders_story_brief_and_model_picker_hooks(client, mon
     assert 'data-model-choice' in response.text
     assert 'name="story_genre_profile"' in response.text
     assert 'name="story_setting"' in response.text
+    assert 'name="story_style_targets"' in response.text
+    assert 'name="story_dialogue_targets"' in response.text
+    assert 'name="story_style_avoid"' in response.text
+    assert 'name="story_style_reference"' in response.text
     assert "What happens after this" in response.text
     assert "Setup progress" in response.text
     assert "Runs locally on your configured Ollama host." in response.text
@@ -256,6 +260,10 @@ def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatc
             "story_world_rules": "Memories are indexed in light",
             "story_must_include": "A betrayal",
             "story_avoid": "Looping chapter restarts",
+            "story_style_targets": "taut lyric pressure\nconcrete sensory dread",
+            "story_dialogue_targets": "subtext before confession",
+            "story_style_avoid": "weight of everything",
+            "story_style_reference": "Short clipped sentences around wet stone.",
         },
     )
 
@@ -264,6 +272,54 @@ def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatc
     assert '<option value="mystery" selected>' in response.text
     assert 'value="Orbital city"' in response.text
     assert "Looping chapter restarts" in response.text
+    assert "taut lyric pressure" in response.text
+    assert "subtext before confession" in response.text
+    assert "weight of everything" in response.text
+    assert "Short clipped sentences around wet stone." in response.text
+
+
+def test_project_edit_saves_prose_voice_fields(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id = seed_project()
+
+    response = client.post(
+        f"/projects/{project_id}/edit",
+        data={
+            "title": "Seed Project",
+            "premise": "A seeded premise for route rendering.",
+            "desired_word_count": "4000",
+            "requested_chapters": "4",
+            "min_words_per_chapter": "800",
+            "max_words_per_chapter": "1200",
+            "preferred_model": "test-model",
+            "notes": "",
+            "story_genre_profile": "sci_fi_thriller",
+            "story_setting": "Orbital city",
+            "story_tone": "claustrophobic",
+            "story_protagonist": "Nora",
+            "story_supporting_cast": "Jun",
+            "story_antagonist": "Watcher lattice",
+            "story_core_conflict": "Safety versus consent",
+            "story_ending_target": "One ending only",
+            "story_world_rules": "Memories are indexed in light",
+            "story_must_include": "A betrayal",
+            "story_avoid": "Looping chapter restarts",
+            "story_style_targets": "taut lyric pressure\nconcrete sensory dread",
+            "story_dialogue_targets": "subtext before confession",
+            "story_style_avoid": "weight of everything",
+            "story_style_reference": "Short clipped sentences around wet stone.",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with get_session_factory()() as session:
+        project = get_project(session, project_id)
+        assert project is not None
+        assert project.story_brief["style_targets"] == ["taut lyric pressure", "concrete sensory dread"]
+        assert project.story_brief["dialogue_targets"] == ["subtext before confession"]
+        assert project.story_brief["style_avoid"] == ["weight of everything"]
+        assert project.story_brief["style_reference"] == "Short clipped sentences around wet stone."
 
 
 def test_provider_settings_validation_and_live_actions_render(client, monkeypatch) -> None:

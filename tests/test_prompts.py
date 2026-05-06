@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from novel_generator.models import ChapterDraft, ChapterStatus
+from novel_generator.models import ChapterDraft, ChapterStatus, GenerationRun, Project
 from novel_generator.services.prompts import (
+    build_chapter_critique_messages,
+    build_chapter_draft_messages,
+    build_chapter_revision_messages,
+    build_story_bible_messages,
     parse_chapter_critique,
     parse_chapter_plan,
     parse_continuity_update,
@@ -44,6 +48,14 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
           "core_system_rules": ["Maps can rewrite routes and memories."],
           "prose_guardrails": ["No abstract ending thesis statements."],
           "genre_contract": ["Each reveal should be fairly planted."],
+          "style_profile": {
+            "narrative_voice": "Close third with sharp sensory pressure.",
+            "sentence_rhythm": "Tight action beats broken by slower dread.",
+            "imagery_palette": ["wet stone", "failing light"],
+            "dialogue_rules": ["Subtext before confession"],
+            "character_voice_map": {"Iris": "Precise under pressure"},
+            "avoid": ["weight of everything"]
+          },
           "ending_promise": "The city survives only if Iris gives up control."
         }
         ```"""
@@ -55,6 +67,8 @@ def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
     assert parsed.canon_registry[0].name == "Living Map"
     assert parsed.genre_profile == "mystery"
     assert parsed.genre_contract == ["Each reveal should be fairly planted."]
+    assert parsed.style_profile.narrative_voice.startswith("Close third")
+    assert parsed.style_profile.character_voice_map["Iris"] == "Precise under pressure"
     assert parsed.ending_promise.endswith("control.")
 
 
@@ -397,6 +411,11 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "ideology_clarity_score": 8,
           "civilian_texture_score": 6,
           "genre_contract_score": 7,
+          "style_alignment_score": 6,
+          "voice_distinctness_score": 5,
+          "sentence_rhythm_score": 7,
+          "sensory_specificity_score": 8,
+          "dialogue_tension_score": 4,
           "blocking_issues": ["The ending does not land on the planned object/action beat."],
           "soft_warnings": ["Tarin could resist harder in scene two."],
           "genre_contract_findings": ["The chapter plants one clue but needs a cleaner deduction turn."],
@@ -437,6 +456,8 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert continuity.memory_damage["Iris"].startswith("She loses")
     assert plan.genre_specific_focus.startswith("Keep the clue chain")
     assert critique.genre_contract_score == 7
+    assert critique.voice_distinctness_score == 5
+    assert critique.dialogue_tension_score == 4
     assert continuity.genre_state["clue_chain"].startswith("The first planted clue")
 
 
@@ -457,6 +478,11 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
           "emotional_depth_score": 60,
           "ideology_clarity_score": 75,
           "civilian_texture_score": 45,
+          "style_alignment_score": 80,
+          "voice_distinctness_score": 55,
+          "sentence_rhythm_score": 65,
+          "sensory_specificity_score": 70,
+          "dialogue_tension_score": 35,
           "blocking_issues": [],
           "soft_warnings": [],
           "repair_scope": "none"
@@ -473,6 +499,151 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
     assert critique.emotional_depth_score == 6
     assert critique.ideology_clarity_score == 8
     assert critique.civilian_texture_score == 5
+    assert critique.style_alignment_score == 8
+    assert critique.voice_distinctness_score == 6
+    assert critique.sentence_rhythm_score == 7
+    assert critique.sensory_specificity_score == 7
+    assert critique.dialogue_tension_score == 4
+
+
+def test_prompt_builders_include_prose_voice_profile() -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="An archivist finds a living map under a failing city.",
+        desired_word_count=2000,
+        requested_chapters=1,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+        preferred_model="test-model",
+        story_brief={
+            "tone": "tense luminous sci-fi",
+            "style_targets": ["taut lyric pressure", "concrete sensory dread"],
+            "dialogue_targets": ["arguments with subtext"],
+            "style_avoid": ["weight of everything"],
+            "style_reference": "Short clipped sentences. Wet stone. No copied lines.",
+        },
+    )
+    run = GenerationRun(
+        model_name="test-model",
+        target_word_count=2000,
+        requested_chapters=1,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+    )
+    chapter = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Iris follows the map.",
+        content="Iris follows the map. Tarin refuses the easy route.",
+        status=ChapterStatus.PENDING,
+    )
+    story_bible = {
+        "genre_profile": "sci_fi_thriller",
+        "logline": "Iris follows a living map.",
+        "theme": "Consent beats control.",
+        "act_plan": ["Discovery", "Descent", "Choice"],
+        "cast": [{"name": "Iris", "role": "Archivist", "desire": "Restore the city", "risk": "Losing herself"}],
+        "character_agendas": [],
+        "canon_registry": [],
+        "conflict_ladder": ["Map wakes"],
+        "world_rules": [],
+        "core_system_rules": [],
+        "prose_guardrails": [],
+        "genre_contract": [],
+        "style_profile": {
+            "narrative_voice": "Close third, tense and tactile.",
+            "sentence_rhythm": "Short pressure beats with occasional long sensory release.",
+            "imagery_palette": ["wet stone", "blue archive light"],
+            "dialogue_rules": ["Each exchange contains disagreement or withheld context."],
+            "character_voice_map": {"Iris": "precise when afraid", "Tarin": "plainspoken refusal"},
+            "avoid": ["weight of everything"],
+        },
+        "ending_promise": "Iris chooses consent.",
+    }
+    outline_entry = {
+        "chapter_number": 1,
+        "act": "Act I",
+        "title": "Signal",
+        "objective": "Follow the map.",
+        "conflict_turn": "Tarin blocks the easy route.",
+        "character_turn": "Iris accepts help has a price.",
+        "reveal": "The map knows her name.",
+        "ending_state": "The route opens below them.",
+        "outcome_type": "reversal",
+        "primary_obstacle": "Archive lockdown",
+        "cost_if_success": "Iris burns access",
+        "side_character_friction": "Tarin refuses to trust the map.",
+        "concrete_ending_hook": {"trigger": "A door opens", "visible_object_or_actor": "blue lens", "next_problem": "the route descends"},
+        "chapter_mode": "systems_crisis",
+        "civilian_life_detail": "Workers trade heat tabs.",
+        "emotional_reveal": "Iris fears obedience.",
+        "ideology_pressure": "Tarin challenges control.",
+    }
+    plan = {
+        "opening_state": "Iris hides with the map.",
+        "character_goal": "Reach the source.",
+        "scene_beats": ["Iris climbs", "Tarin refuses", "The door opens"],
+        "conflict_turn": "Tarin blocks her.",
+        "ending_hook": "The door opens.",
+    }
+    ledger = {
+        "current_patch_status": "Unknown.",
+        "character_states": {},
+        "world_state": "Archive locked.",
+        "open_threads": [],
+        "resolved_threads": [],
+        "timeline": [],
+        "active_entities": [],
+        "entity_state_changes": {},
+        "open_promises_by_name": {},
+        "ideology_state_by_character": {},
+        "memory_damage": {},
+        "trust_fractures": {},
+        "civilian_pressure_points": [],
+        "emotional_open_loops": {},
+        "genre_state": {},
+    }
+    critique = parse_chapter_critique(
+        """
+        {
+          "strengths": [],
+          "warnings": [],
+          "revision_required": true,
+          "focus": ["Strengthen style profile alignment."],
+          "forward_motion_score": 8,
+          "ending_concreteness_score": 8,
+          "cost_consequence_realism_score": 8,
+          "side_character_independence_score": 8,
+          "proper_noun_continuity_score": 8,
+          "repetition_risk_score": 3,
+          "emotional_depth_score": 8,
+          "ideology_clarity_score": 8,
+          "civilian_texture_score": 8,
+          "style_alignment_score": 4,
+          "voice_distinctness_score": 5,
+          "sentence_rhythm_score": 4,
+          "sensory_specificity_score": 5,
+          "dialogue_tension_score": 4,
+          "blocking_issues": [],
+          "soft_warnings": ["The prose is too generic."],
+          "repair_scope": "voice_and_texture"
+        }
+        """
+    )
+
+    story_prompt = build_story_bible_messages(project, run)[1]["content"]
+    draft_prompt = build_chapter_draft_messages(project, run, chapter, outline_entry, story_bible, ledger, "No previous chapters.", plan)[1]["content"]
+    critique_prompt = build_chapter_critique_messages(project, chapter, outline_entry, story_bible, ledger, plan, [])[1]["content"]
+    revision_prompt = build_chapter_revision_messages(project, chapter, outline_entry, story_bible, ledger, plan, critique, [])[1]["content"]
+
+    assert "Style targets: taut lyric pressure" in story_prompt
+    assert '"style_profile"' in story_prompt
+    assert "Prose style profile" in draft_prompt
+    assert "character_voice_map" in draft_prompt
+    assert "style_alignment_score" in critique_prompt
+    assert "voice_and_texture" in critique_prompt
+    assert "voice_and_texture" in revision_prompt
+    assert "do not copy exact language" in revision_prompt
 
 
 def test_rolling_context_uses_recent_completed_chapters() -> None:

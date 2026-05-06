@@ -53,6 +53,9 @@ def _genre_profile_block(profile: GenreProfile) -> str:
 def _story_brief_lines(project: Project) -> str:
     brief = project.story_brief or {}
     profile = genre_profile(brief.get("genre_profile"))
+    style_reference = str(brief.get("style_reference", "") or "").strip()
+    if len(style_reference) > 1600:
+        style_reference = style_reference[:1600].rstrip() + "..."
     approved_canon = []
     for entity in brief.get("approved_canon", []) or []:
         name = str(entity.get("name", "")).strip()
@@ -77,6 +80,10 @@ def _story_brief_lines(project: Project) -> str:
         f"World rules: {', '.join(brief.get('world_rules', [])) or 'Not specified.'}",
         f"Must include: {', '.join(brief.get('must_include', [])) or 'Not specified.'}",
         f"Avoid: {', '.join(brief.get('avoid', [])) or 'Not specified.'}",
+        f"Style targets: {', '.join(brief.get('style_targets', [])) or 'Not specified.'}",
+        f"Dialogue targets: {', '.join(brief.get('dialogue_targets', [])) or 'Not specified.'}",
+        f"Style avoid: {', '.join(brief.get('style_avoid', [])) or 'Not specified.'}",
+        f"Style reference: {style_reference or 'Not specified.'}",
         f"Approved canon: {'; '.join(approved_canon) if approved_canon else 'None approved yet.'}",
     ]
     return "\n".join(lines)
@@ -208,6 +215,14 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 '  "core_system_rules": ["system rule 1", "system rule 2"],\n'
                 '  "prose_guardrails": ["specific warning 1", "specific warning 2"],\n'
                 '  "genre_contract": ["profile-specific promise 1", "profile-specific promise 2"],\n'
+                '  "style_profile": {\n'
+                '    "narrative_voice": "string",\n'
+                '    "sentence_rhythm": "string",\n'
+                '    "imagery_palette": ["sensory image or texture rule"],\n'
+                '    "dialogue_rules": ["dialogue rule"],\n'
+                '    "character_voice_map": {"Character": "voice rule"},\n'
+                '    "avoid": ["prose habit to avoid"]\n'
+                "  },\n"
                 '  "ending_promise": "string"\n'
                 "}\n\n"
                 "Requirements:\n"
@@ -221,6 +236,10 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 + "; ".join(profile.story_bible_focus)
                 + "\n"
                 "- prose_guardrails must explicitly discourage repeated atmospheric phrasing, thesis-statement endings, zero-cost technical wins, and nonstop alarm escalation without breathers\n"
+                "- style_profile must translate the user's tone, style targets, dialogue targets, and style avoid list into reusable rules for later chapters\n"
+                "- if a style reference is provided, infer durable craft guidance from it without copying its exact sentences, imagery, names, or distinctive phrasing\n"
+                "- character_voice_map must give each major character a distinct pressure behavior, dialogue texture, and default verbal rhythm\n"
+                "- style_profile.avoid must include the user's style avoid items plus any generic prose habits that would make the draft sound flat\n"
                 "- keep the tone and world rules specific enough to govern later chapters"
             ),
         },
@@ -408,6 +427,7 @@ def build_chapter_draft_messages(
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
     profile = _story_bible_genre_profile(bible)
+    style_profile = bible.get("style_profile") or {}
     relevant_canon = _filter_canon_registry(bible, entry, ledger, chapter_plan)
     return [
         {
@@ -425,6 +445,7 @@ def build_chapter_draft_messages(
                 f"Target word range: {run.min_words_per_chapter}-{run.max_words_per_chapter}\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
                 f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prose style profile:\n{json.dumps(style_profile, indent=2)}\n\n"
                 f"Relevant canon registry:\n{json.dumps(relevant_canon, indent=2)}\n\n"
                 f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Recent prose summary:\n{prior_context}\n\n"
@@ -442,6 +463,10 @@ def build_chapter_draft_messages(
                 "- make the ideology_pressure visible in dialogue, argument, or a choice under pressure\n"
                 "- if the continuity ledger shows memory damage or trust fractures, carry those consequences into behavior and dialogue\n"
                 "- pay off the chapter plan's genre_specific_focus and genre_specific_beats on the page\n"
+                "- obey the prose style profile's narrative_voice, sentence_rhythm, imagery_palette, dialogue_rules, character_voice_map, and avoid list\n"
+                "- make dialogue carry tension through subtext, disagreement, withheld information, or asymmetrical goals rather than neutral exposition\n"
+                "- vary sentence length and paragraph shape enough that action, reflection, and dialogue do not share one default cadence\n"
+                "- use concrete sensory anchors that belong to this setting instead of generic atmosphere\n"
                 "- honor profile-specific drafting focus: "
                 + "; ".join(profile.drafting_focus)
                 + "\n"
@@ -469,6 +494,7 @@ def build_chapter_critique_messages(
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
     profile = _story_bible_genre_profile(bible)
+    style_profile = bible.get("style_profile") or {}
     return [
         {
             "role": "system",
@@ -482,6 +508,7 @@ def build_chapter_critique_messages(
                 f"Review chapter {chapter.chapter_number} of '{project.title}'.\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
                 f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prose style profile:\n{json.dumps(style_profile, indent=2)}\n\n"
                 f"Continuity ledger before update:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
@@ -503,19 +530,27 @@ def build_chapter_critique_messages(
                 '  "ideology_clarity_score": 0,\n'
                 '  "civilian_texture_score": 0,\n'
                 '  "genre_contract_score": 0,\n'
+                '  "style_alignment_score": 0,\n'
+                '  "voice_distinctness_score": 0,\n'
+                '  "sentence_rhythm_score": 0,\n'
+                '  "sensory_specificity_score": 0,\n'
+                '  "dialogue_tension_score": 0,\n'
                 '  "blocking_issues": ["string"],\n'
                 '  "soft_warnings": ["string"],\n'
                 '  "genre_contract_findings": ["string"],\n'
-                '  "repair_scope": "none|targeted_scene_and_ending|full_chapter"\n'
+                '  "repair_scope": "none|voice_and_texture|targeted_scene_and_ending|full_chapter"\n'
                 "}\n\n"
                 "Rules:\n"
-                "- set revision_required to true if the chapter has an abstract ending, a zero-cost major solution, a repeated premise beat, a side character who only helps or warns, a proper-noun inconsistency, emotional fallout that disappears, or blurred ideology positions\n"
+                "- set revision_required to true if the chapter has an abstract ending, a zero-cost major solution, a repeated premise beat, a side character who only helps or warns, a proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
+                "- use repair_scope 'voice_and_texture' when the main problem is flat prose, samey dialogue, repeated sentence rhythm, weak sensory specificity, or poor style-profile alignment\n"
                 "- use repair_scope 'targeted_scene_and_ending' for ending, cost, repetition-fatigue, or side-character pressure problems\n"
                 "- use repair_scope 'full_chapter' only when continuity or premise repetition is severe\n"
                 "- all score fields must be whole numbers from 0 to 10, not percentages\n"
                 "- forward_motion_score, ending_concreteness_score, cost_consequence_realism_score, side_character_independence_score, and proper_noun_continuity_score should be higher when the draft is stronger\n"
                 "- emotional_depth_score, ideology_clarity_score, and civilian_texture_score should be higher when the chapter creates human texture and belief conflict\n"
                 "- genre_contract_score should be higher when the chapter clearly serves the selected genre contract\n"
+                "- style_alignment_score, voice_distinctness_score, sentence_rhythm_score, sensory_specificity_score, and dialogue_tension_score should be higher when the prose obeys the style profile\n"
+                "- set revision_required to true if any style score is 5 or lower\n"
                 "- genre_contract_findings must call out any missing or especially strong profile-specific expectations\n"
                 "- include profile-specific lint focus: "
                 + "; ".join(profile.lint_focus)
@@ -542,6 +577,7 @@ def build_chapter_revision_messages(
     chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
     notes = critique if isinstance(critique, dict) else critique.model_dump()
     profile = _story_bible_genre_profile(bible)
+    style_profile = bible.get("style_profile") or {}
     return [
         {
             "role": "system",
@@ -555,6 +591,7 @@ def build_chapter_revision_messages(
                 f"Revise chapter {chapter.chapter_number} of '{project.title}'.\n\n"
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
                 f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prose style profile:\n{json.dumps(style_profile, indent=2)}\n\n"
                 f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
@@ -562,8 +599,11 @@ def build_chapter_revision_messages(
                 f"Deterministic lint findings to fix:\n{json.dumps(lint_findings, indent=2)}\n\n"
                 f"Current draft:\n{chapter.content or ''}\n\n"
                 "Revision instructions:\n"
+                "- if repair_scope is 'voice_and_texture', preserve the plot beats and rewrite for stronger style-profile alignment, sharper character voices, more concrete sensory anchors, and more varied sentence rhythm\n"
                 "- if repair_scope is 'targeted_scene_and_ending', preserve the good material and rewrite only the weakest scene plus the final 2 to 3 paragraphs\n"
                 "- if repair_scope is 'full_chapter', rebuild the chapter so it stops repeating the premise and restores continuity\n"
+                "- follow the prose style profile's narrative_voice, sentence_rhythm, imagery_palette, dialogue_rules, character_voice_map, and avoid list\n"
+                "- do not copy exact language from any user-provided style reference\n"
                 "- show a real price or fallout if a technical solution succeeds\n"
                 "- make side characters push back from their own agendas rather than existing only to help or warn\n"
                 "- restore any missing emotional fallout, civilian texture, or ideology clash that the plan called for\n"

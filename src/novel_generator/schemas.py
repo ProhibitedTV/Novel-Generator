@@ -80,14 +80,36 @@ class StoryBrief(BaseModel):
     world_rules: list[str] = Field(default_factory=list)
     must_include: list[str] = Field(default_factory=list)
     avoid: list[str] = Field(default_factory=list)
+    style_reference: str = ""
+    style_targets: list[str] = Field(default_factory=list)
+    dialogue_targets: list[str] = Field(default_factory=list)
+    style_avoid: list[str] = Field(default_factory=list)
     approved_canon: list[CanonicalEntity] = Field(default_factory=list)
 
-    @field_validator("supporting_cast", "world_rules", "must_include", "avoid", mode="before")
+    @field_validator(
+        "supporting_cast",
+        "world_rules",
+        "must_include",
+        "avoid",
+        "style_targets",
+        "dialogue_targets",
+        "style_avoid",
+        mode="before",
+    )
     @classmethod
     def validate_lists(cls, value: Any) -> list[str]:
         return _clean_list(value)
 
-    @field_validator("setting", "tone", "protagonist", "antagonist", "core_conflict", "ending_target", mode="before")
+    @field_validator(
+        "setting",
+        "tone",
+        "protagonist",
+        "antagonist",
+        "core_conflict",
+        "ending_target",
+        "style_reference",
+        mode="before",
+    )
     @classmethod
     def validate_strings(cls, value: Any) -> str:
         if value is None:
@@ -106,6 +128,40 @@ class ConcreteEndingHook(BaseModel):
     next_problem: str = ""
 
 
+class ProseStyleProfile(BaseModel):
+    narrative_voice: str = ""
+    sentence_rhythm: str = ""
+    imagery_palette: list[str] = Field(default_factory=list)
+    dialogue_rules: list[str] = Field(default_factory=list)
+    character_voice_map: dict[str, str] = Field(default_factory=dict)
+    avoid: list[str] = Field(default_factory=list)
+
+    @field_validator("imagery_palette", "dialogue_rules", "avoid", mode="before")
+    @classmethod
+    def validate_style_lists(cls, value: Any) -> list[str]:
+        return _clean_list(value)
+
+    @field_validator("narrative_voice", "sentence_rhythm", mode="before")
+    @classmethod
+    def validate_style_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @field_validator("character_voice_map", mode="before")
+    @classmethod
+    def validate_character_voice_map(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            return {}
+        return {
+            str(key).strip(): str(item).strip()
+            for key, item in value.items()
+            if str(key).strip() and str(item).strip()
+        }
+
+
 class StoryBible(BaseModel):
     genre_profile: str = DEFAULT_GENRE_PROFILE
     logline: str
@@ -119,6 +175,7 @@ class StoryBible(BaseModel):
     core_system_rules: list[str] = Field(default_factory=list)
     prose_guardrails: list[str] = Field(default_factory=list)
     genre_contract: list[str] = Field(default_factory=list)
+    style_profile: ProseStyleProfile = Field(default_factory=ProseStyleProfile)
     ending_promise: str
 
     @field_validator(
@@ -245,6 +302,11 @@ class ChapterCritique(BaseModel):
     ideology_clarity_score: int = Field(default=0, ge=0, le=10)
     civilian_texture_score: int = Field(default=0, ge=0, le=10)
     genre_contract_score: int = Field(default=10, ge=0, le=10)
+    style_alignment_score: int = Field(default=10, ge=0, le=10)
+    voice_distinctness_score: int = Field(default=10, ge=0, le=10)
+    sentence_rhythm_score: int = Field(default=10, ge=0, le=10)
+    sensory_specificity_score: int = Field(default=10, ge=0, le=10)
+    dialogue_tension_score: int = Field(default=10, ge=0, le=10)
     blocking_issues: list[str] = Field(default_factory=list)
     soft_warnings: list[str] = Field(default_factory=list)
     genre_contract_findings: list[str] = Field(default_factory=list)
@@ -261,6 +323,11 @@ class ChapterCritique(BaseModel):
         "ideology_clarity_score",
         "civilian_texture_score",
         "genre_contract_score",
+        "style_alignment_score",
+        "voice_distinctness_score",
+        "sentence_rhythm_score",
+        "sensory_specificity_score",
+        "dialogue_tension_score",
         mode="before",
     )
     @classmethod

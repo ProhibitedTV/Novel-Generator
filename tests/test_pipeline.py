@@ -430,6 +430,62 @@ def test_revision_pass_updates_chapter_and_continuity_ledger(configured_environm
         assert refreshed.continuity_ledger["memory_damage"]["Iris"] == "Memory damage 1"
 
 
+def test_style_lint_triggers_voice_and_texture_revision(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    (
+                        "Iris felt fear in the archive. Iris saw panic rising. Iris knew dread had settled. "
+                        "Iris thought grief would break her. Iris noticed guilt in the silence. "
+                        "Iris wondered if shame had won. Iris heard terror under every breath. "
+                        "Despair made the hallway impossible to name. Tarin resists in chapter 1 as Iris tries to run. "
+                        "Trigger 1 lands when the visible actor 1 seals the corridor and the next problem 1 is immediate."
+                    ),
+                    _critique_json(revision_required=False),
+                    (
+                        "Iris slowed at the shaft while Tarin blocked the route with one hand on the rail. "
+                        "The air tasted of rust, and each blue pulse from the map caught in the water on the floor. "
+                        "Tarin refused to move until Iris admitted what following the map would cost him. "
+                        "Trigger 1 lands when the visible actor 1 seals the corridor and the next problem 1 is immediate."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris accepts Tarin's resistance and follows the sealed corridor at a cost.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        chapter = refreshed.chapters[0]
+        assert refreshed.status == RunStatus.COMPLETED
+        assert chapter.content.startswith("Iris slowed at the shaft")
+        assert any(
+            event.event_type == "chapter_revision_started"
+            and event.payload.get("repair_scope") == "voice_and_texture"
+            for event in refreshed.events
+        )
+
+
 def test_canonical_entity_collision_hard_fails_run(configured_environment) -> None:
     settings = get_settings()
     session_factory = get_session_factory()

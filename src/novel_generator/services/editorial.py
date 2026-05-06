@@ -92,6 +92,73 @@ COST_KEYWORDS = [
     "price",
 ]
 
+FILTER_VERBS = [
+    "felt",
+    "feel",
+    "feels",
+    "saw",
+    "see",
+    "sees",
+    "heard",
+    "hear",
+    "hears",
+    "watched",
+    "watch",
+    "noticed",
+    "notice",
+    "realized",
+    "realize",
+    "wondered",
+    "wonder",
+    "knew",
+    "know",
+    "thought",
+    "think",
+    "seemed",
+    "seem",
+]
+
+ABSTRACT_EMOTION_TERMS = [
+    "anger",
+    "angry",
+    "despair",
+    "dread",
+    "emotion",
+    "emotional",
+    "fear",
+    "feared",
+    "grief",
+    "guilt",
+    "hope",
+    "panic",
+    "regret",
+    "sadness",
+    "shame",
+    "sorrow",
+    "terror",
+]
+
+SENSORY_ANCHOR_TERMS = [
+    "air",
+    "bitter",
+    "cold",
+    "dust",
+    "echo",
+    "heat",
+    "light",
+    "metal",
+    "odor",
+    "rain",
+    "rough",
+    "salt",
+    "scent",
+    "shadow",
+    "sound",
+    "taste",
+    "warm",
+    "wet",
+]
+
 CONCRETE_ENDING_CUES = [
     "said",
     "door",
@@ -139,6 +206,13 @@ COMMON_PROPER_NOUN_IGNORES = {
     "we",
     "when",
     "yes",
+}
+
+REPAIR_SCOPE_PRIORITY = {
+    "none": 0,
+    "voice_and_texture": 1,
+    "targeted_scene_and_ending": 2,
+    "full_chapter": 3,
 }
 
 MEANINGFUL_TERM_IGNORES = {
@@ -230,6 +304,20 @@ def _meaningful_terms(text: str) -> set[str]:
     }
 
 
+def _sentences(text: str) -> list[str]:
+    return [sentence.strip() for sentence in re.split(r"(?<=[.!?])\s+", text) if sentence.strip()]
+
+
+def _sentence_start_key(sentence: str, words: int) -> str:
+    normalized = _normalized_words(sentence)
+    return " ".join(normalized[:words])
+
+
+def _set_repair_scope(result: ChapterLintResult, scope: str) -> None:
+    if REPAIR_SCOPE_PRIORITY.get(scope, 0) > REPAIR_SCOPE_PRIORITY.get(result.repair_scope, 0):
+        result.repair_scope = scope
+
+
 def _entity_payload(entity: CanonicalEntity | dict[str, Any]) -> CanonicalEntity:
     return entity if isinstance(entity, CanonicalEntity) else CanonicalEntity.model_validate(entity)
 
@@ -288,6 +376,16 @@ def _proper_noun_candidates(text: str) -> set[str]:
         if normalized:
             candidates.add(normalized)
     return candidates
+
+
+def _style_avoid_terms(story_bible: StoryBible | dict[str, Any]) -> list[str]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    style_profile = bible.get("style_profile") or {}
+    return [
+        str(item).strip()
+        for item in style_profile.get("avoid", []) or []
+        if str(item).strip()
+    ]
 
 
 def detect_canonical_entity_collisions(
@@ -358,6 +456,7 @@ def lint_chapter(
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     content = (chapter.content or "").strip()
     lowered = content.lower()
+    words = _normalized_words(content)
     result = ChapterLintResult()
 
     tail = lowered[-220:]
@@ -398,6 +497,62 @@ def lint_chapter(
             result.soft_warnings.append(
                 f"Chapter {chapter.chapter_number} repeats atmospheric phrase '{phrase}' {count} times."
             )
+
+    sentences = _sentences(content)
+    if len(sentences) >= 6:
+        first_word_counts = Counter(
+            start
+            for sentence in sentences
+            if (start := _sentence_start_key(sentence, 1))
+        )
+        repeated_first_words = [
+            (start, count)
+            for start, count in first_word_counts.items()
+            if count >= max(4, len(sentences) // 3)
+        ]
+        three_word_starts = []
+        for sentence in sentences:
+            start = _sentence_start_key(sentence, 3)
+            if start and len(start.split()) == 3:
+                three_word_starts.append(start)
+        repeated_three_word_starts = [
+            (start, count)
+            for start, count in Counter(three_word_starts).items()
+            if count >= 3
+        ]
+        if repeated_first_words or repeated_three_word_starts:
+            repeated = repeated_three_word_starts[0] if repeated_three_word_starts else repeated_first_words[0]
+            result.soft_warnings.append(
+                f"Chapter {chapter.chapter_number} repeats sentence openings around '{repeated[0]}' {repeated[1]} times."
+            )
+            result.needs_repair = True
+            _set_repair_scope(result, "voice_and_texture")
+
+    filter_hits = [word for word in words if word in FILTER_VERBS]
+    if len(filter_hits) >= 6:
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} leans on filter verbs {len(filter_hits)} times; convert perception summaries into direct sensory action."
+        )
+        result.needs_repair = True
+        _set_repair_scope(result, "voice_and_texture")
+
+    abstract_emotion_hits = [word for word in words if word in ABSTRACT_EMOTION_TERMS]
+    sensory_hits = [word for word in words if word in SENSORY_ANCHOR_TERMS]
+    if len(abstract_emotion_hits) >= 8 and len(sensory_hits) <= 2:
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} names abstract emotions heavily without enough concrete sensory anchors."
+        )
+        result.needs_repair = True
+        _set_repair_scope(result, "voice_and_texture")
+
+    for phrase in _style_avoid_terms(story_bible):
+        count = lowered.count(phrase.lower())
+        if count:
+            result.soft_warnings.append(
+                f"Chapter {chapter.chapter_number} uses style-avoid phrase '{phrase}' {count} times."
+            )
+            result.needs_repair = True
+            _set_repair_scope(result, "voice_and_texture")
 
     opening_signature = _opening_signature(content)
     opening_prefix = _opening_signature(content, words=10)
