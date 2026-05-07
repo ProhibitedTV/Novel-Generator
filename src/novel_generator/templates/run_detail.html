@@ -834,6 +834,38 @@
       <p class="empty-state">Artifacts will appear here when the run reaches the export stage.</p>
     {% endif %}
   </article>
+
+  <article class="panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2>Export For Publication</h2>
+        <p>Create an ebook or print-helper manuscript with front matter and profile-specific formatting.</p>
+      </div>
+      <p>Optional</p>
+    </div>
+    {% if run.status.value == "completed" %}
+      <form class="form-stack" method="post" action="/runs/{{ run.id }}/publication-export">
+        <div class="field-grid two-column">
+          <label>
+            Export profile
+            <select name="profile_id">
+              {% for profile in publication_profile_options %}
+                <option value="{{ profile.id }}">{{ profile.label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="checkbox-row">
+            <input type="checkbox" name="include_ai_disclosure" value="1">
+            Include AI-assisted disclosure placeholder
+          </label>
+        </div>
+        <p class="field-note">Print-ready exports are formatting helpers for review and cleanup, not a platform acceptance guarantee.</p>
+        <button type="submit">Create publication export</button>
+      </form>
+    {% else %}
+      <p class="empty-state">Publication exports become available after the run completes.</p>
+    {% endif %}
+  </article>
 </section>
 
 <section class="panel">

@@ -32,6 +32,7 @@ from ..schemas import CanonicalEntity, ProjectCreate, ProjectUpdate, ProviderCap
 from ..services.genre_profiles import genre_profile, genre_profile_options
 from ..services.openai_compatible import OpenAICompatibleClient
 from ..services.ollama import OllamaClient
+from ..services.exports import export_publication_artifact, publication_export_options
 from ..services.provider_errors import ProviderError, ProviderTransportError
 from ..services.providers import ProviderManager, TASK_ROUTE_STAGES, provider_definition, provider_options
 from ..services.state import approve_outline_review, request_run_cancellation
@@ -1377,6 +1378,7 @@ def _artifact_context(run: GenerationRun) -> dict[str, Any]:
     return {
         "qa_artifact": qa_artifact,
         "manuscript_artifacts": manuscript_artifacts,
+        "publication_profile_options": publication_export_options(),
     }
 
 
@@ -2338,6 +2340,71 @@ def run_detail(
             **_artifact_context(run),
             **_run_dashboard_context(run),
         },
+    )
+
+
+@router.post("/runs/{run_id}/publication-export")
+def publication_export_ui(
+    run_id: str,
+    profile_id: str = Form(...),
+    include_ai_disclosure: str | None = Form(None),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+):
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status != RunStatus.COMPLETED:
+        return _redirect(
+            f"/runs/{run.id}",
+            message="Publication exports are available after a run completes.",
+            message_tone="warning",
+        )
+
+    chapters = [
+        chapter
+        for chapter in _sorted_run_chapters(run)
+        if chapter.status == ChapterStatus.COMPLETED and (chapter.content or "").strip()
+    ]
+    if not chapters:
+        return _redirect(
+            f"/runs/{run.id}",
+            message="No completed chapter prose is available to export yet.",
+            message_tone="warning",
+        )
+
+    try:
+        artifact = export_publication_artifact(
+            settings.artifacts_dir,
+            run.project,
+            run,
+            chapters,
+            profile_id,
+            include_ai_disclosure=_coerce_checkbox(include_ai_disclosure),
+        )
+    except ValueError as exc:
+        return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="warning")
+
+    for existing in list(run.artifacts):
+        if existing.filename == artifact.filename and existing.kind == artifact.kind:
+            db.delete(existing)
+    artifact.run_id = run.id
+    db.add(artifact)
+    record_event(
+        db,
+        run,
+        "publication_export_created",
+        {
+            "message": f"Publication export created: {artifact.filename}.",
+            "profile_id": profile_id,
+            "filename": artifact.filename,
+        },
+    )
+    db.commit()
+    return _redirect(
+        f"/runs/{run.id}",
+        message=f"Publication export created: {artifact.filename}.",
+        message_tone="success",
     )
 
 

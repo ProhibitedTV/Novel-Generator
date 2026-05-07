@@ -1,11 +1,145 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+import re
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt
 
 from ..models import Artifact, ChapterDraft, GenerationRun, Project
 from .prompts import sanitize_chapter_content
+
+
+@dataclass(frozen=True)
+class ExportProfile:
+    id: str
+    label: str
+    output_format: str
+    filename: str
+    kind: str
+    description: str
+    page_width_inches: float | None = None
+    page_height_inches: float | None = None
+    top_margin_inches: float = 0.75
+    bottom_margin_inches: float = 0.75
+    inner_margin_inches: float = 0.75
+    outer_margin_inches: float = 0.75
+    include_front_matter: bool = False
+    chapter_page_breaks: bool = False
+    publication_ready: bool = False
+
+
+EXPORT_PROFILES = {
+    "draft_markdown": ExportProfile(
+        id="draft_markdown",
+        label="Draft Markdown",
+        output_format="markdown",
+        filename="manuscript.md",
+        kind="markdown",
+        description="Review-oriented Markdown draft.",
+    ),
+    "draft_docx": ExportProfile(
+        id="draft_docx",
+        label="Draft DOCX",
+        output_format="docx",
+        filename="manuscript.docx",
+        kind="docx",
+        description="Review-oriented DOCX draft.",
+    ),
+    "ebook_markdown": ExportProfile(
+        id="ebook_markdown",
+        label="Ebook Markdown",
+        output_format="markdown",
+        filename="publication-ebook.md",
+        kind="publication-markdown",
+        description="Markdown manuscript with publication front matter placeholders.",
+        include_front_matter=True,
+        publication_ready=True,
+    ),
+    "ebook_docx": ExportProfile(
+        id="ebook_docx",
+        label="Ebook DOCX",
+        output_format="docx",
+        filename="publication-ebook.docx",
+        kind="publication-docx",
+        description="DOCX manuscript with front matter and chapter page starts.",
+        include_front_matter=True,
+        chapter_page_breaks=True,
+        publication_ready=True,
+    ),
+    "print_5x8": ExportProfile(
+        id="print_5x8",
+        label='Print 5" x 8"',
+        output_format="docx",
+        filename="publication-print-5x8.docx",
+        kind="publication-docx",
+        description='Print helper interior sized to 5" x 8".',
+        page_width_inches=5,
+        page_height_inches=8,
+        inner_margin_inches=0.75,
+        outer_margin_inches=0.6,
+        include_front_matter=True,
+        chapter_page_breaks=True,
+        publication_ready=True,
+    ),
+    "print_5_5x8_5": ExportProfile(
+        id="print_5_5x8_5",
+        label='Print 5.5" x 8.5"',
+        output_format="docx",
+        filename="publication-print-5-5x8-5.docx",
+        kind="publication-docx",
+        description='Print helper interior sized to 5.5" x 8.5".',
+        page_width_inches=5.5,
+        page_height_inches=8.5,
+        include_front_matter=True,
+        chapter_page_breaks=True,
+        publication_ready=True,
+    ),
+    "print_6x9": ExportProfile(
+        id="print_6x9",
+        label='Print 6" x 9"',
+        output_format="docx",
+        filename="publication-print-6x9.docx",
+        kind="publication-docx",
+        description='Print helper interior sized to 6" x 9".',
+        page_width_inches=6,
+        page_height_inches=9,
+        top_margin_inches=0.8,
+        bottom_margin_inches=0.8,
+        include_front_matter=True,
+        chapter_page_breaks=True,
+        publication_ready=True,
+    ),
+    "print_a5": ExportProfile(
+        id="print_a5",
+        label='Print A5 / 5.83" x 8.27"',
+        output_format="docx",
+        filename="publication-print-a5.docx",
+        kind="publication-docx",
+        description='Print helper interior sized to A5 / 5.83" x 8.27".',
+        page_width_inches=5.83,
+        page_height_inches=8.27,
+        include_front_matter=True,
+        chapter_page_breaks=True,
+        publication_ready=True,
+    ),
+}
+
+
+PUBLICATION_PROFILE_IDS = ["ebook_markdown", "ebook_docx", "print_5x8", "print_5_5x8_5", "print_6x9", "print_a5"]
+
+
+def publication_export_options() -> list[ExportProfile]:
+    return [EXPORT_PROFILES[profile_id] for profile_id in PUBLICATION_PROFILE_IDS]
+
+
+def export_profile(profile_id: str) -> ExportProfile:
+    try:
+        return EXPORT_PROFILES[profile_id]
+    except KeyError as exc:
+        raise ValueError("Choose a supported export profile.") from exc
 
 
 def export_run_artifacts(
@@ -55,6 +189,43 @@ def export_run_artifacts(
     return artifacts
 
 
+def export_publication_artifact(
+    artifacts_dir: Path,
+    project: Project,
+    run: GenerationRun,
+    chapters: list[ChapterDraft],
+    profile_id: str,
+    *,
+    include_ai_disclosure: bool = False,
+) -> Artifact:
+    profile = export_profile(profile_id)
+    if not profile.publication_ready:
+        raise ValueError("Choose a publication export profile.")
+
+    run_dir = artifacts_dir / run.id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    destination = run_dir / profile.filename
+
+    if profile.output_format == "markdown":
+        destination.write_text(
+            render_publication_markdown(project, chapters, profile, include_ai_disclosure=include_ai_disclosure),
+            encoding="utf-8",
+        )
+        content_type = "text/markdown"
+    elif profile.output_format == "docx":
+        render_publication_docx(project, chapters, destination, profile, include_ai_disclosure=include_ai_disclosure)
+        content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        raise ValueError("Unsupported export profile format.")
+
+    return Artifact(
+        kind=profile.kind,
+        filename=profile.filename,
+        relative_path=str(destination.relative_to(artifacts_dir)),
+        content_type=content_type,
+    )
+
+
 def render_markdown(project: Project, chapters: list[ChapterDraft]) -> str:
     lines = [f"# {project.title}", "", project.premise, ""]
     for chapter in chapters:
@@ -81,3 +252,181 @@ def render_docx(project: Project, chapters: list[ChapterDraft], destination: Pat
             if paragraph.strip():
                 document.add_paragraph(paragraph.strip())
     document.save(destination)
+
+
+def render_publication_markdown(
+    project: Project,
+    chapters: list[ChapterDraft],
+    profile: ExportProfile,
+    *,
+    include_ai_disclosure: bool = False,
+) -> str:
+    lines: list[str] = [f"# {project.title}", ""]
+    if profile.include_front_matter:
+        lines.extend(_front_matter_markdown(project, include_ai_disclosure=include_ai_disclosure))
+    for chapter in chapters:
+        lines.extend(
+            [
+                f"## Chapter {chapter.chapter_number}: {chapter.title}",
+                "",
+                _clean_publication_text(chapter.content or ""),
+                "",
+            ]
+        )
+    return "\n".join(line.rstrip() for line in lines).strip() + "\n"
+
+
+def render_publication_docx(
+    project: Project,
+    chapters: list[ChapterDraft],
+    destination: Path,
+    profile: ExportProfile,
+    *,
+    include_ai_disclosure: bool = False,
+) -> None:
+    document = Document()
+    _configure_publication_document(document, profile)
+    _add_title_page(document, project)
+    if profile.include_front_matter:
+        _add_front_matter(document, project, include_ai_disclosure=include_ai_disclosure)
+    for chapter in chapters:
+        if profile.chapter_page_breaks:
+            document.add_page_break()
+        heading = document.add_paragraph()
+        heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        heading.style = document.styles["Heading 1"]
+        heading.add_run(f"Chapter {chapter.chapter_number}: {chapter.title}")
+        for paragraph in _publication_paragraphs(chapter.content or ""):
+            document.add_paragraph(paragraph)
+    document.save(destination)
+
+
+def _configure_publication_document(document: Document, profile: ExportProfile) -> None:
+    section = document.sections[0]
+    if profile.page_width_inches and profile.page_height_inches:
+        section.page_width = Inches(profile.page_width_inches)
+        section.page_height = Inches(profile.page_height_inches)
+    section.top_margin = Inches(profile.top_margin_inches)
+    section.bottom_margin = Inches(profile.bottom_margin_inches)
+    section.left_margin = Inches(profile.inner_margin_inches)
+    section.right_margin = Inches(profile.outer_margin_inches)
+
+    normal = document.styles["Normal"]
+    normal.font.name = "Times New Roman"
+    normal.font.size = Pt(11)
+    normal.paragraph_format.line_spacing = 1.15
+    normal.paragraph_format.space_after = Pt(0)
+    normal.paragraph_format.first_line_indent = Inches(0.25)
+
+    heading = document.styles["Heading 1"]
+    heading.font.name = "Times New Roman"
+    heading.font.size = Pt(16)
+    heading.paragraph_format.space_before = Pt(24)
+    heading.paragraph_format.space_after = Pt(18)
+    heading.paragraph_format.first_line_indent = None
+
+
+def _add_title_page(document: Document, project: Project) -> None:
+    title = document.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.paragraph_format.space_before = Pt(180)
+    title.paragraph_format.first_line_indent = None
+    title_run = title.add_run(project.title)
+    title_run.bold = True
+    title_run.font.size = Pt(20)
+
+    byline = document.add_paragraph()
+    byline.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    byline.paragraph_format.first_line_indent = None
+    byline.add_run("by [Author Name]")
+
+
+def _add_front_matter(document: Document, project: Project, *, include_ai_disclosure: bool) -> None:
+    _add_front_matter_page(
+        document,
+        "Copyright",
+        [
+            f"{project.title}",
+            "Copyright (c) [Year] [Author Name]. All rights reserved.",
+            "Publisher: [Publisher or imprint]",
+            "ISBN: [ISBN]",
+        ],
+    )
+    _add_front_matter_page(document, "Dedication", ["[Dedication]"])
+    _add_front_matter_page(document, "Author Note", ["[Author note]"])
+    if include_ai_disclosure:
+        _add_front_matter_page(
+            document,
+            "AI-Assisted Disclosure",
+            ["[Describe any AI-assisted drafting, editing, or production process you choose to disclose.]"],
+        )
+
+
+def _add_front_matter_page(document: Document, heading_text: str, paragraphs: list[str]) -> None:
+    document.add_page_break()
+    heading = document.add_paragraph()
+    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    heading.paragraph_format.first_line_indent = None
+    run = heading.add_run(heading_text)
+    run.bold = True
+    for text in paragraphs:
+        paragraph = document.add_paragraph(text)
+        paragraph.paragraph_format.first_line_indent = None
+
+
+def _front_matter_markdown(project: Project, *, include_ai_disclosure: bool) -> list[str]:
+    lines = [
+        "## Copyright",
+        "",
+        f"{project.title}",
+        "",
+        "Copyright (c) [Year] [Author Name]. All rights reserved.",
+        "",
+        "Publisher: [Publisher or imprint]",
+        "",
+        "ISBN: [ISBN]",
+        "",
+        "## Dedication",
+        "",
+        "[Dedication]",
+        "",
+        "## Author Note",
+        "",
+        "[Author note]",
+        "",
+    ]
+    if include_ai_disclosure:
+        lines.extend(
+            [
+                "## AI-Assisted Disclosure",
+                "",
+                "[Describe any AI-assisted drafting, editing, or production process you choose to disclose.]",
+                "",
+            ]
+        )
+    return lines
+
+
+def _publication_paragraphs(content: str) -> list[str]:
+    text = _clean_publication_text(content)
+    return [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text) if paragraph.strip()]
+
+
+def _clean_publication_text(content: str) -> str:
+    cleaned = sanitize_chapter_content(content)
+    lines: list[str] = []
+    for line in cleaned.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            continue
+        if re.match(r"^#{1,6}\s*chapter\s+\d+\b", stripped, flags=re.IGNORECASE):
+            continue
+        stripped = re.sub(r"^#{1,6}\s+", "", stripped)
+        if re.match(r"^chapter\s+\d+\b", stripped, flags=re.IGNORECASE) and len(stripped) <= 80:
+            continue
+        stripped = re.sub(r"^\s*[-*+]\s+", "", stripped)
+        stripped = re.sub(r"\*\*(.*?)\*\*", r"\1", stripped)
+        stripped = re.sub(r"__(.*?)__", r"\1", stripped)
+        stripped = stripped.replace("`", "")
+        lines.append(stripped)
+    return "\n".join(lines).strip()

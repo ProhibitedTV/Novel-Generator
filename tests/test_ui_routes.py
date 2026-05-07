@@ -8,6 +8,7 @@ from novel_generator.models import Artifact, ChapterStatus, RunStatus
 from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, get_project, get_run
 from novel_generator.schemas import ProjectCreate, ProviderCapabilities, RunCreate
 from novel_generator.services.ollama import OllamaClient
+from novel_generator.settings import get_settings
 
 
 def reachable_status(default_model: str = "test-model", models: list[str] | None = None) -> ProviderCapabilities:
@@ -470,6 +471,59 @@ def test_run_detail_surfaces_qa_report_artifact(client, monkeypatch) -> None:
     assert response.status_code == 200
     assert "editorial feedback" in response.text
     assert "qa-report.md" in response.text
+
+
+def test_completed_run_can_create_publication_export(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.COMPLETED
+        run.current_step = "completed"
+        run.outline = [
+            {
+                "chapter_number": 1,
+                "act": "Act I",
+                "title": "Signal",
+                "objective": "Find the patch.",
+                "conflict_turn": "The system isolates Nora.",
+                "character_turn": "Nora stops hiding what she knows.",
+                "reveal": "The patch is signed with her key.",
+                "ending_state": "Nora commits to tracing it.",
+            }
+        ]
+        create_chapters_from_outline(session, run)
+        chapter = run.chapters[0]
+        chapter.status = ChapterStatus.COMPLETED
+        chapter.title = "Signal"
+        chapter.content = "Chapter 1\n\nNora opened the hatch."
+        session.commit()
+
+    detail_response = client.get(f"/runs/{run_id}")
+    assert detail_response.status_code == 200
+    assert "Export For Publication" in detail_response.text
+    assert 'value="print_5x8"' in detail_response.text
+
+    response = client.post(
+        f"/runs/{run_id}/publication-export",
+        data={"profile_id": "print_5x8", "include_ai_disclosure": "1"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        publication_artifact = next(
+            artifact for artifact in run.artifacts if artifact.kind == "publication-docx"
+        )
+        assert publication_artifact.filename == "publication-print-5x8.docx"
+        assert publication_artifact.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        assert (get_settings().artifacts_dir / publication_artifact.relative_path).exists()
+        assert any(event.event_type == "publication_export_created" for event in run.events)
 
 
 def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
