@@ -138,8 +138,13 @@ def _generate_structured_output(
     raw_output = _provider_chat(client, provider_name, model_name, build_messages())
     try:
         return parser(raw_output)
-    except Exception:
-        repaired_output = _provider_chat(client, provider_name, model_name, build_json_repair_messages(raw_output, label))
+    except Exception as exc:
+        repaired_output = _provider_chat(
+            client,
+            provider_name,
+            model_name,
+            build_json_repair_messages(raw_output, label, str(exc)),
+        )
         return parser(repaired_output)
 
 
@@ -696,14 +701,33 @@ def _run_manuscript_qa(
         {"message": "Running manuscript QA.", "provider_name": provider_name, "model_name": model_name},
     )
     session.commit()
-    qa_report = _generate_structured_output(
-        client,
-        provider_name,
-        model_name,
-        lambda: build_manuscript_qa_messages(run.project, story_bible, lint_findings, chapters),
-        parse_manuscript_qa_report,
-        "manuscript QA report",
-    )
+    try:
+        qa_report = _generate_structured_output(
+            client,
+            provider_name,
+            model_name,
+            lambda: build_manuscript_qa_messages(run.project, story_bible, lint_findings, chapters),
+            parse_manuscript_qa_report,
+            "manuscript QA report",
+        )
+    except Exception as exc:
+        fallback_message = (
+            "Manuscript QA model output was unusable after repair; generated a deterministic QA report instead."
+        )
+        record_event(
+            session,
+            run,
+            "manuscript_qa_fallback",
+            {"message": fallback_message, "error": str(exc)},
+        )
+        session.commit()
+        qa_report = ManuscriptQaReport(
+            overall_verdict=(
+                "Manuscript QA completed with deterministic lint and chapter QA signals because the model QA "
+                "response was unusable."
+            ),
+            warnings=[fallback_message],
+        )
     qa_report = qa_report.model_copy(
         update={
             "lint_findings": _dedupe([*qa_report.lint_findings, *lint_findings]),

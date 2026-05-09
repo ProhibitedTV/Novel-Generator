@@ -398,6 +398,48 @@ def test_approved_run_completes_and_generates_qa_report(configured_environment) 
         assert refreshed.summary_context is not None
 
 
+def test_manuscript_qa_fallback_completes_when_model_output_stays_invalid(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    (
+                        "Iris slips out of the archive while Tarin resists following her. "
+                        "Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris discovers the living map and commits to following it underground.",
+                    _continuity_json(1),
+                    "not valid json",
+                    "still not valid json",
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.COMPLETED
+        assert any(artifact.kind == "qa-report" for artifact in refreshed.artifacts)
+        assert any(event.event_type == "manuscript_qa_fallback" for event in refreshed.events)
+
+
 def test_revision_pass_updates_chapter_and_continuity_ledger(configured_environment) -> None:
     settings = get_settings()
     session_factory = get_session_factory()

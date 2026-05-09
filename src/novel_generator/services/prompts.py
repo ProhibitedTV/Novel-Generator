@@ -807,17 +807,21 @@ def build_manuscript_qa_messages(
     ]
 
 
-def build_json_repair_messages(raw_text: str, label: str) -> list[dict[str, str]]:
+def build_json_repair_messages(raw_text: str, label: str, issue: str | None = None) -> list[dict[str, str]]:
+    issue_text = f"\nParser or schema error:\n{issue}\n\n" if issue else "\n"
     return [
         {
             "role": "system",
-            "content": "Repair malformed JSON. Return valid JSON only with no markdown fences or commentary.",
+            "content": (
+                "Repair malformed or schema-invalid JSON. Return valid JSON only with no markdown fences or commentary."
+            ),
         },
         {
             "role": "user",
             "content": (
-                f"The following {label} output should have been valid JSON but is malformed.\n"
-                "Repair it into valid JSON while preserving the original meaning as closely as possible.\n\n"
+                f"The following {label} output should have been valid JSON matching the requested schema.\n"
+                "Repair it into schema-valid JSON while preserving the original meaning as closely as possible."
+                f"{issue_text}"
                 f"{raw_text}"
             ),
         },

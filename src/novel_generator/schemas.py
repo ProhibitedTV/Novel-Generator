@@ -284,7 +284,7 @@ class ChapterPlan(BaseModel):
     genre_specific_focus: str = ""
     genre_specific_beats: list[str] = Field(default_factory=list)
 
-    @field_validator("genre_specific_beats", mode="before")
+    @field_validator("scene_beats", "genre_specific_beats", mode="before")
     @classmethod
     def validate_plan_genre_specific_beats(cls, value: Any) -> list[str]:
         return _clean_list(value)
@@ -310,6 +310,17 @@ class ChapterContinuityUpdate(BaseModel):
     emotional_open_loops: dict[str, str] = Field(default_factory=dict)
     side_character_decisions: dict[str, list[str]] = Field(default_factory=dict)
     genre_state: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator(
+        "open_threads",
+        "resolved_threads",
+        "timeline",
+        "civilian_pressure_points",
+        mode="before",
+    )
+    @classmethod
+    def validate_continuity_lists(cls, value: Any) -> list[str]:
+        return _clean_list(value)
 
     @field_validator("side_character_decisions", mode="before")
     @classmethod
@@ -344,6 +355,19 @@ class ChapterCritique(BaseModel):
     soft_warnings: list[str] = Field(default_factory=list)
     genre_contract_findings: list[str] = Field(default_factory=list)
     repair_scope: str = "none"
+
+    @field_validator(
+        "strengths",
+        "warnings",
+        "focus",
+        "blocking_issues",
+        "soft_warnings",
+        "genre_contract_findings",
+        mode="before",
+    )
+    @classmethod
+    def validate_note_lists(cls, value: Any) -> list[str]:
+        return _clean_list(value)
 
     @field_validator(
         "forward_motion_score",
@@ -398,7 +422,7 @@ class ChapterCritique(BaseModel):
 
 
 class ManuscriptQaReport(BaseModel):
-    overall_verdict: str
+    overall_verdict: str = "Manuscript QA completed; no overall verdict was provided by the model."
     strengths: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     continuity_risks: list[str] = Field(default_factory=list)
@@ -415,6 +439,35 @@ class ManuscriptQaReport(BaseModel):
     civilian_texture_findings: list[str] = Field(default_factory=list)
     technical_escalation_fatigue_findings: list[str] = Field(default_factory=list)
     genre_contract_notes: list[str] = Field(default_factory=list)
+
+    @field_validator("overall_verdict", mode="before")
+    @classmethod
+    def validate_overall_verdict(cls, value: Any) -> str:
+        rendered = str(value or "").strip()
+        return rendered or "Manuscript QA completed; no overall verdict was provided by the model."
+
+    @field_validator(
+        "strengths",
+        "warnings",
+        "continuity_risks",
+        "repetition_risks",
+        "ending_coherence_notes",
+        "lint_findings",
+        "chapter_ending_quality_notes",
+        "easy_win_warnings",
+        "proper_noun_continuity_findings",
+        "side_character_agency_notes",
+        "atmospheric_repetition_findings",
+        "emotional_pacing_notes",
+        "ideology_consistency_findings",
+        "civilian_texture_findings",
+        "technical_escalation_fatigue_findings",
+        "genre_contract_notes",
+        mode="before",
+    )
+    @classmethod
+    def validate_report_lists(cls, value: Any) -> list[str]:
+        return _clean_list(value)
 
 
 class TaskRouteOverride(BaseModel):

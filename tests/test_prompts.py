@@ -9,6 +9,7 @@ from novel_generator.services.prompts import (
     parse_chapter_critique,
     parse_chapter_plan,
     parse_continuity_update,
+    parse_manuscript_qa_report,
     parse_outline,
     parse_story_bible,
     rolling_context,
@@ -520,6 +521,23 @@ def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
     assert critique.sensory_specificity_score == 7
     assert critique.dialogue_tension_score == 4
     assert critique.technical_escalation_fatigue_score == 8
+
+
+def test_manuscript_qa_parser_coerces_scalar_note_fields() -> None:
+    report = parse_manuscript_qa_report(
+        """
+        {
+          "overall_verdict": "The manuscript is coherent enough to export.",
+          "warnings": "The middle needs one cleaner physical escalation.",
+          "genre_contract_notes": "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
+        }
+        """
+    )
+
+    assert report.warnings == ["The middle needs one cleaner physical escalation."]
+    assert report.genre_contract_notes == [
+        "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
+    ]
 
 
 def test_prompt_builders_include_prose_voice_profile() -> None:
