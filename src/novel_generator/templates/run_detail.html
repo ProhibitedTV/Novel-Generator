@@ -19,7 +19,7 @@
     <div class="page-header-copy">
       <p class="eyebrow">Run</p>
       <h1>{{ project.title }}</h1>
-      <p class="hero-copy">This page keeps the live pipeline view, stage explanations, quality signals, outline approval, exports, and chapter-level recovery actions in one place.</p>
+      <p class="hero-copy">Follow progress, review the plan, inspect quality signals, and recover chapters without leaving the run.</p>
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
@@ -45,9 +45,43 @@
     </div>
   </div>
 
-  <div class="run-overview">
-    <div class="overview-card">
-      <div class="overview-grid">
+  <div class="run-command-center">
+    <div class="run-status-strip">
+      <div class="run-status-primary">
+        <span class="detail-label">Status</span>
+        <span class="badge status-{{ run.status.value }}" data-run-status-label>{{ run.status.value.replace("_", " ") }}</span>
+        <strong data-run-step-label>{{ current_stage_context.label }}</strong>
+      </div>
+      <div class="run-status-item">
+        <span class="detail-label">Chapter</span>
+        <strong data-run-chapter-label>{{ run.current_chapter or "-" }}</strong>
+        <span class="field-note">{{ run.requested_chapters }} planned</span>
+      </div>
+      <div class="run-status-item">
+        <span class="detail-label">Elapsed</span>
+        <strong data-run-elapsed>{{ "Starting soon" if not run.started_at else "-" }}</strong>
+        <span class="field-note">Pipeline v{{ run.pipeline_version or 1 }}</span>
+      </div>
+      <div class="run-status-item">
+        <span class="detail-label">Words</span>
+        <strong data-run-word-progress>{{ total_run_words }}</strong>
+        <span class="field-note"><span data-run-word-progress-label>{{ word_progress_percent }}%</span> of {{ run.target_word_count }}</span>
+      </div>
+      <div class="run-status-item">
+        <span class="detail-label">Complete</span>
+        <strong data-run-completed-chapters>{{ completed_chapter_count }}</strong>
+        <span class="field-note">chapters saved</span>
+      </div>
+      <div class="run-status-item">
+        <span class="detail-label">Events</span>
+        <strong data-run-event-count>{{ event_count }}</strong>
+        <span class="field-note"><span data-run-artifact-count>{{ run.artifacts|length }}</span> artifacts</span>
+      </div>
+    </div>
+
+    <details class="compact-details run-meta-details">
+      <summary>Run details and route</summary>
+      <div class="run-meta-grid">
         <div class="detail-item">
           <span class="detail-label">Run</span>
           <span class="detail-value">#{{ run.id[:8] }}</span>
@@ -61,66 +95,41 @@
           <span class="detail-label">Provider default</span>
           <span class="detail-value long-value">{{ run.provider_name }} / {{ run.model_name }}</span>
         </div>
-        <div class="detail-item inline-detail">
+        <div class="detail-item">
           <span class="detail-label">Genre profile</span>
           <span class="detail-value">{{ run_genre_profile.label }}</span>
         </div>
-        <div class="detail-item inline-detail">
-          <span class="detail-label">Status</span>
-          <span class="badge status-{{ run.status.value }}" data-run-status-label>{{ run.status.value.replace("_", " ") }}</span>
-        </div>
-        <div class="detail-item inline-detail">
-          <span class="detail-label">Current stage</span>
-          <span class="detail-value" data-run-step-label>{{ current_stage_context.label }}</span>
-        </div>
-        <div class="detail-item inline-detail">
-          <span class="detail-label">Current chapter</span>
-          <span class="detail-value" data-run-chapter-label>{{ run.current_chapter or "-" }}</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="overview-card">
-      <div class="overview-grid">
-        <div class="detail-item inline-detail">
+        <div class="detail-item">
           <span class="detail-label">Queued</span>
           <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
         </div>
-        <div class="detail-item inline-detail">
-          <span class="detail-label">Elapsed</span>
-          <span class="detail-value" data-run-elapsed>{{ "Starting soon" if not run.started_at else "-" }}</span>
-        </div>
-        <div class="detail-item inline-detail">
+        <div class="detail-item">
           <span class="detail-label">Started</span>
           <span class="detail-value">{{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') if run.started_at else "-" }}</span>
         </div>
-        <div class="detail-item inline-detail">
+        <div class="detail-item">
           <span class="detail-label">Finished</span>
           <span class="detail-value">{{ run.completed_at.strftime('%Y-%m-%d %H:%M:%S') if run.completed_at else "-" }}</span>
         </div>
-        <div class="detail-item inline-detail">
-          <span class="detail-label">Pipeline</span>
-          <span class="detail-value">v{{ run.pipeline_version or 1 }}</span>
-        </div>
       </div>
-    </div>
-  </div>
 
-  <div class="callout callout-{{ run_route_disclosure.tone }} route-disclosure">
-    <div class="callout-copy">
-      <h2>{{ run_route_disclosure.title }}</h2>
-      <p>{{ run_route_disclosure.body }}</p>
-      {% if run_route_disclosure.cost_body %}
-        <p>{{ run_route_disclosure.cost_body }}</p>
-      {% endif %}
-    </div>
-    {% if run_route_disclosure.is_external %}
-      <div class="disclosure-stage-list">
-        {% for row in run_route_disclosure.stage_rows %}
-          <span class="meta-chip">{{ row.label }}: {{ row.provider_label }}</span>
-        {% endfor %}
+      <div class="callout callout-{{ run_route_disclosure.tone }} route-disclosure">
+        <div class="callout-copy">
+          <h2>{{ run_route_disclosure.title }}</h2>
+          <p>{{ run_route_disclosure.body }}</p>
+          {% if run_route_disclosure.cost_body %}
+            <p>{{ run_route_disclosure.cost_body }}</p>
+          {% endif %}
+        </div>
+        {% if run_route_disclosure.is_external %}
+          <div class="disclosure-stage-list">
+            {% for row in run_route_disclosure.stage_rows %}
+              <span class="meta-chip">{{ row.label }}: {{ row.provider_label }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
       </div>
-    {% endif %}
+    </details>
   </div>
 
   <div class="run-stepper" data-run-stepper>
@@ -133,34 +142,6 @@
         </div>
       </article>
     {% endfor %}
-  </div>
-
-  <div class="metric-grid">
-    <div class="metric-card">
-      <span class="detail-label">Planned chapters</span>
-      <strong>{{ run.requested_chapters }}</strong>
-      <p class="metric-copy">Targeted for this run.</p>
-    </div>
-    <div class="metric-card">
-      <span class="detail-label">Completed chapters</span>
-      <strong data-run-completed-chapters>{{ completed_chapter_count }}</strong>
-      <p class="metric-copy">Saved with prose, summary, and continuity update.</p>
-    </div>
-    <div class="metric-card">
-      <span class="detail-label">Word progress</span>
-      <strong data-run-word-progress>{{ total_run_words }}</strong>
-      <p class="metric-copy"><span data-run-word-progress-label>{{ word_progress_percent }}%</span> of the {{ run.target_word_count }}-word target drafted so far.</p>
-    </div>
-    <div class="metric-card">
-      <span class="detail-label">Events logged</span>
-      <strong data-run-event-count>{{ event_count }}</strong>
-      <p class="metric-copy">Recent pipeline actions captured in the live event feed.</p>
-    </div>
-    <div class="metric-card">
-      <span class="detail-label">Artifacts ready</span>
-      <strong data-run-artifact-count>{{ run.artifacts|length }}</strong>
-      <p class="metric-copy">Manuscript exports plus editorial feedback.</p>
-    </div>
   </div>
 
   <div class="grid two-up run-dashboard-grid">

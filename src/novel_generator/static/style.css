@@ -1,22 +1,25 @@
 :root {
-  --bg: #f4efe7;
-  --panel: rgba(255, 250, 243, 0.94);
+  --bg: #eef2f0;
+  --panel: rgba(252, 253, 250, 0.96);
   --panel-strong: #fff;
-  --ink: #182126;
-  --muted: #5d676d;
-  --line: #d9cfc0;
-  --line-strong: #ccbda9;
-  --accent: #176a5a;
-  --accent-strong: #0c4f43;
-  --accent-soft: rgba(23, 106, 90, 0.12);
-  --danger: #a13a2a;
-  --danger-soft: rgba(161, 58, 42, 0.12);
-  --warning: #9a6a15;
-  --warning-soft: rgba(154, 106, 21, 0.12);
-  --success: #126b3f;
-  --success-soft: rgba(18, 107, 63, 0.12);
-  --shadow: 0 18px 45px rgba(24, 33, 38, 0.08);
+  --ink: #152026;
+  --muted: #5b6670;
+  --line: #d4ddd7;
+  --line-strong: #b8c8c0;
+  --accent: #17635a;
+  --accent-strong: #0b4a45;
+  --accent-soft: rgba(23, 99, 90, 0.11);
+  --danger: #a64233;
+  --danger-soft: rgba(166, 66, 51, 0.11);
+  --warning: #8d6818;
+  --warning-soft: rgba(141, 104, 24, 0.12);
+  --success: #17653b;
+  --success-soft: rgba(23, 101, 59, 0.12);
+  --shadow: 0 12px 32px rgba(21, 32, 38, 0.07);
   --focus: 0 0 0 3px rgba(23, 106, 90, 0.18);
+  --radius: 8px;
+  --radius-lg: 10px;
+  --radius-sm: 6px;
 }
 
 * {
@@ -27,11 +30,9 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--ink);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.55;
-  background:
-    radial-gradient(circle at top left, rgba(23, 106, 90, 0.18), transparent 28rem),
-    linear-gradient(180deg, #f6f2eb 0%, #eee3d2 100%);
+  background: linear-gradient(180deg, #f6f8f6 0%, var(--bg) 100%);
 }
 
 a {
@@ -54,6 +55,7 @@ summary {
 
 button,
 input,
+select,
 textarea,
 .shell-nav a,
 .project-card,
@@ -72,6 +74,7 @@ textarea,
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible,
 .model-chip:focus-visible {
   outline: none;
@@ -150,7 +153,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 0.78rem 1.18rem;
   border: 1px solid transparent;
   background: var(--accent);
@@ -170,7 +173,7 @@ button:hover {
 .shell-nav a {
   background: transparent;
   color: var(--ink);
-  border-color: rgba(217, 207, 192, 0.9);
+  border-color: rgba(212, 221, 215, 0.95);
 }
 
 .shell-nav a.is-active {
@@ -189,7 +192,7 @@ button.secondary:hover {
 button.secondary {
   background: transparent;
   color: var(--ink);
-  border-color: rgba(217, 207, 192, 0.9);
+  border-color: rgba(212, 221, 215, 0.95);
 }
 
 button.danger {
@@ -201,9 +204,10 @@ button.danger:hover {
 }
 
 input,
+select,
 textarea {
   width: 100%;
-  border-radius: 16px;
+  border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--panel-strong);
   padding: 0.88rem 1rem;
@@ -216,11 +220,13 @@ textarea {
 }
 
 input:hover,
+select:hover,
 textarea:hover {
   border-color: rgba(24, 33, 38, 0.3);
 }
 
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible {
   border-color: rgba(23, 106, 90, 0.45);
 }
@@ -265,8 +271,8 @@ textarea:focus-visible {
 .action-card,
 .callout {
   background: var(--panel);
-  border: 1px solid rgba(217, 207, 192, 0.78);
-  border-radius: 24px;
+  border: 1px solid rgba(212, 221, 215, 0.9);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
 }
 
@@ -1383,6 +1389,197 @@ code {
   display: none !important;
 }
 
+.panel,
+.status-card,
+.project-card,
+.run-row,
+.artifact-card,
+.chapter-card,
+.action-card,
+.callout,
+.overview-card,
+.metric-card,
+.run-stage,
+.event-item,
+.signal-card,
+.management-card,
+.story-card,
+.outline-card,
+.toggle-card,
+.story-brief-shell,
+.model-picker,
+.chapter-preview,
+.empty-state,
+.error-text,
+.notice,
+.inline-note {
+  border-radius: var(--radius);
+}
+
+.run-setup-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.run-cardlet {
+  padding: 0.9rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.run-cardlet .section-header-copy p {
+  font-size: 0.94rem;
+}
+
+.run-route-fields {
+  grid-template-columns: 1fr;
+}
+
+.compact-details {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.78rem 0.85rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.compact-details summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 700;
+  list-style: none;
+}
+
+.compact-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.compact-details summary::after {
+  content: "+";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius-sm);
+  color: var(--accent-strong);
+}
+
+.compact-details[open] summary::after {
+  content: "-";
+}
+
+.compact-details > :not(summary) {
+  margin-top: 0.75rem;
+}
+
+.route-details .route-disclosure,
+.run-meta-details .route-disclosure {
+  margin-top: 0.75rem;
+}
+
+.run-mode-card {
+  padding: 0.85rem 0.95rem;
+  background: rgba(23, 99, 90, 0.06);
+  border-color: rgba(23, 99, 90, 0.18);
+}
+
+.run-mode-note {
+  padding: 0.72rem 0.85rem;
+}
+
+.run-command-center {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.run-status-strip {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1.25fr) repeat(5, minmax(7.2rem, 1fr));
+  gap: 0.65rem;
+}
+
+.run-status-primary,
+.run-status-item {
+  display: grid;
+  gap: 0.28rem;
+  align-content: start;
+  min-width: 0;
+  min-height: 6rem;
+  padding: 0.78rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.run-status-primary {
+  background: rgba(23, 99, 90, 0.08);
+  border-color: rgba(23, 99, 90, 0.2);
+}
+
+.run-status-primary strong,
+.run-status-item strong {
+  font-size: 1.08rem;
+  line-height: 1.22;
+}
+
+.run-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
+.run-stepper {
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  margin-top: 0.85rem;
+}
+
+.run-stage {
+  padding: 0.72rem;
+  gap: 0.55rem;
+}
+
+.run-stage-marker {
+  width: 1.65rem;
+  height: 1.65rem;
+  font-size: 0.84rem;
+}
+
+.run-stage-copy {
+  gap: 0.15rem;
+}
+
+.run-stage-copy p {
+  display: none;
+}
+
+.stack-panels,
+.routing-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.provider-card-secondary {
+  border-style: dashed;
+}
+
+.routing-row {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.48);
+}
+
 @media (max-width: 980px) {
   .hero-card,
   .two-up,
@@ -1392,6 +1589,9 @@ code {
   .run-row,
   .run-overview,
   .metric-grid,
+  .run-setup-grid,
+  .run-status-strip,
+  .run-meta-grid,
   .management-grid,
   .quick-action-grid,
   .stats-grid,
@@ -1426,36 +1626,17 @@ code {
   .event-topline,
   .model-picker-header,
   .form-actions,
-.row-actions {
-  align-items: start;
-}
+  .row-actions {
+    align-items: start;
+  }
 
-.stack-panels {
-  display: grid;
-  gap: 1rem;
-}
+  .stack-panels {
+    gap: 1rem;
+  }
 
-.provider-card-secondary {
-  border-style: dashed;
-}
-
-.routing-grid {
-  display: grid;
-  gap: 0.9rem;
-}
-
-.routing-row {
-  display: grid;
-  gap: 0.75rem;
-  padding: 0.9rem;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.compact-details {
-  margin-top: 0.5rem;
-}
+  .compact-details {
+    margin-top: 0.5rem;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1473,7 +1654,7 @@ code {
   .chapter-card,
   .action-card,
   .callout {
-    border-radius: 20px;
+    border-radius: var(--radius);
   }
 
   .hero-card,
@@ -1489,6 +1670,8 @@ code {
   .artifact-card,
   .run-stepper,
   .metric-grid,
+  .run-status-strip,
+  .run-setup-grid,
   .quick-action-grid {
     grid-template-columns: 1fr;
   }
@@ -1501,6 +1684,6 @@ code {
   .model-chip {
     width: 100%;
     justify-content: flex-start;
-    border-radius: 18px;
+    border-radius: var(--radius);
   }
 }

@@ -383,7 +383,7 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Queue a run</h2>
-        <p>Use the project defaults as a starting point, then decide whether you want a deliberate outline review stop before the long draft begins.</p>
+        <p>Confirm the route, draft shape, and review mode in one pass.</p>
       </div>
     </div>
 
@@ -391,115 +391,132 @@
       <p class="error-text">{{ run_errors.__all__ }}</p>
     {% endif %}
 
-    <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form">
-      <label>
-        Provider
-        <select name="provider_name">
-          {% for option in provider_options %}
-            <option value="{{ option.name }}" {% if run_values.provider_name == option.name %}selected{% endif %}>{{ option.label }} - {{ option.privacy_label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      {% if run_errors.provider_name %}<p class="field-error">{{ run_errors.provider_name }}</p>{% endif %}
-
-      <label>
-        Model
-        <input id="project-run-model" data-model-input class="{{ 'input-invalid' if run_errors.model_name }}" type="text" name="model_name" value="{{ run_values.model_name }}" required>
-      </label>
-      {% if run_errors.model_name %}<p class="field-error">{{ run_errors.model_name }}</p>{% endif %}
-      <p class="field-note">The run inherits this project's advanced task routing. Verified chips below still reflect the saved Ollama connection for the default self-hosted path.</p>
-      <div class="callout callout-{{ run_route_disclosure.tone }} route-disclosure">
-        <div class="callout-copy">
-          <h3>{{ run_route_disclosure.title }}</h3>
-          <p>{{ run_route_disclosure.body }}</p>
-          {% if run_route_disclosure.cost_body %}
-            <p>{{ run_route_disclosure.cost_body }}</p>
-          {% endif %}
-        </div>
-        {% if run_route_disclosure.is_external %}
-          <div class="disclosure-stage-list">
-            {% for row in run_route_disclosure.stage_rows %}
-              <span class="meta-chip">{{ row.label }}: {{ row.provider_label }}</span>
-            {% endfor %}
+    <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form run-queue-form">
+      <div class="run-setup-grid">
+        <div class="form-section run-cardlet">
+          <div class="section-header-copy">
+            <h3>Route</h3>
+            <p>Choose the default provider/model for this run. Saved per-task routing still applies underneath.</p>
           </div>
-        {% endif %}
-      </div>
+          <div class="grid compact run-route-fields">
+            <label>
+              Provider
+              <select name="provider_name">
+                {% for option in provider_options %}
+                  <option value="{{ option.name }}" {% if run_values.provider_name == option.name %}selected{% endif %}>{{ option.label }} - {{ option.privacy_label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Model
+              <input id="project-run-model" data-model-input class="{{ 'input-invalid' if run_errors.model_name }}" type="text" name="model_name" value="{{ run_values.model_name }}" required>
+            </label>
+          </div>
+          {% if run_errors.provider_name %}<p class="field-error">{{ run_errors.provider_name }}</p>{% endif %}
+          {% if run_errors.model_name %}<p class="field-error">{{ run_errors.model_name }}</p>{% endif %}
 
-      {% if provider_status.available_models %}
-        <div class="model-picker">
-          <div class="model-picker-header">
-            <div class="section-header-copy">
-              <p class="model-picker-title">Verified models for this run</p>
-              <p class="model-picker-copy">Click a model to fill the run form instantly.</p>
+          <details class="compact-details route-details">
+            <summary>Route and verified models</summary>
+            <div class="callout callout-{{ run_route_disclosure.tone }} route-disclosure">
+              <div class="callout-copy">
+                <h3>{{ run_route_disclosure.title }}</h3>
+                <p>{{ run_route_disclosure.body }}</p>
+                {% if run_route_disclosure.cost_body %}
+                  <p>{{ run_route_disclosure.cost_body }}</p>
+                {% endif %}
+              </div>
+              {% if run_route_disclosure.is_external %}
+                <div class="disclosure-stage-list">
+                  {% for row in run_route_disclosure.stage_rows %}
+                    <span class="meta-chip">{{ row.label }}: {{ row.provider_label }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
             </div>
-            <p class="selection-note">The selected chip follows the current input value.</p>
+
+            {% if provider_status.available_models %}
+              <div class="model-picker">
+                <div class="model-picker-header">
+                  <div class="section-header-copy">
+                    <p class="model-picker-title">Verified models</p>
+                    <p class="model-picker-copy">Click a model to fill the run form instantly.</p>
+                  </div>
+                  <p class="selection-note">Selected chips sync with the input above.</p>
+                </div>
+                <ul class="model-chip-list">
+                  {% for model in provider_status.available_models %}
+                    <li>
+                      <button
+                        class="model-chip"
+                        type="button"
+                        data-model-choice
+                        data-target="project-run-model"
+                        data-model="{{ model }}"
+                        aria-pressed="false"
+                      >
+                        <span class="model-chip-value">{{ model }}</span>
+                      </button>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% else %}
+              <p class="empty-state">No verified models are available right now. Fix the provider or pull a model before queueing the run.</p>
+            {% endif %}
+          </details>
+        </div>
+
+        <div class="form-section run-cardlet">
+          <div class="section-header-copy">
+            <h3>Draft shape</h3>
+            <p>Adjust the run without changing the saved project defaults.</p>
           </div>
-          <ul class="model-chip-list">
-            {% for model in provider_status.available_models %}
-              <li>
-                <button
-                  class="model-chip"
-                  type="button"
-                  data-model-choice
-                  data-target="project-run-model"
-                  data-model="{{ model }}"
-                  aria-pressed="false"
-                >
-                  <span class="model-chip-value">{{ model }}</span>
-                </button>
-              </li>
-            {% endfor %}
-          </ul>
-        </div>
-      {% else %}
-        <p class="empty-state">No verified models are available right now. Fix the provider or pull a model before queueing the run.</p>
-      {% endif %}
+          <div class="grid compact run-shape-grid">
+            <label>
+              Total words
+              <input class="{{ 'input-invalid' if run_errors.target_word_count }}" type="number" name="target_word_count" value="{{ run_values.target_word_count }}" min="1000">
+            </label>
+            <label>
+              Chapters
+              <input class="{{ 'input-invalid' if run_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ run_values.requested_chapters }}" min="1">
+            </label>
+          </div>
+          {% if run_errors.target_word_count %}<p class="field-error">{{ run_errors.target_word_count }}</p>{% endif %}
+          {% if run_errors.requested_chapters %}<p class="field-error">{{ run_errors.requested_chapters }}</p>{% endif %}
 
-      <div class="form-section">
-        <div class="section-header-copy">
-          <h3>Basic defaults for this run</h3>
-          <p>These values are easy to tweak here without changing the saved project.</p>
+          <div class="grid compact">
+            <label>
+              Min words per chapter
+              <input class="{{ 'input-invalid' if run_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ run_values.min_words_per_chapter }}" min="100">
+            </label>
+            <label>
+              Max words per chapter
+              <input class="{{ 'input-invalid' if run_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ run_values.max_words_per_chapter }}" min="100">
+            </label>
+          </div>
+          {% if run_errors.min_words_per_chapter %}<p class="field-error">{{ run_errors.min_words_per_chapter }}</p>{% endif %}
+          {% if run_errors.max_words_per_chapter %}<p class="field-error">{{ run_errors.max_words_per_chapter }}</p>{% endif %}
         </div>
-        <div class="grid compact">
-          <label>
-            Total words
-            <input class="{{ 'input-invalid' if run_errors.target_word_count }}" type="number" name="target_word_count" value="{{ run_values.target_word_count }}" min="1000">
-          </label>
-          <label>
-            Chapters
-            <input class="{{ 'input-invalid' if run_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ run_values.requested_chapters }}" min="1">
-          </label>
-        </div>
-        {% if run_errors.target_word_count %}<p class="field-error">{{ run_errors.target_word_count }}</p>{% endif %}
-        {% if run_errors.requested_chapters %}<p class="field-error">{{ run_errors.requested_chapters }}</p>{% endif %}
-
-        <div class="grid compact">
-          <label>
-            Min words per chapter
-            <input class="{{ 'input-invalid' if run_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ run_values.min_words_per_chapter }}" min="100">
-          </label>
-          <label>
-            Max words per chapter
-            <input class="{{ 'input-invalid' if run_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ run_values.max_words_per_chapter }}" min="100">
-          </label>
-        </div>
-        {% if run_errors.min_words_per_chapter %}<p class="field-error">{{ run_errors.min_words_per_chapter }}</p>{% endif %}
-        {% if run_errors.max_words_per_chapter %}<p class="field-error">{{ run_errors.max_words_per_chapter }}</p>{% endif %}
       </div>
 
-      <label class="toggle-card">
+      <label class="toggle-card run-mode-card">
         <span class="toggle-input">
           <input type="checkbox" name="pause_after_outline" value="1" {% if run_values.pause_after_outline %}checked{% endif %}>
-          <strong>Pause after outline review</strong>
+          <strong>Review the plan before drafting</strong>
         </span>
-        <span class="field-note">Recommended. The run stops after the story bible and structured outline so you can reject a weak plan before the expensive chapter pass.</span>
+        <span class="field-note">Recommended for long runs. Turn it off when you trust the project brief and want the worker to draft straight through.</span>
       </label>
 
-      <div class="inline-note inline-note-success">
+      <div
+        class="inline-note inline-note-success run-mode-note"
+        data-run-mode-note
+        data-pause-message="Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, and export artifacts."
+        data-straight-message="Move straight from story bible and outline generation into chapter drafting, editorial QA, and export."
+      >
         {% if run_values.pause_after_outline %}
-          This run will build the story bible, generate the full outline, wait for your approval, then draft every requested chapter, run editorial QA, and export artifacts.
+          Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, and export artifacts.
         {% else %}
-          This run will move straight from story bible and outline generation into full drafting, editorial QA, and export without pausing.
+          Move straight from story bible and outline generation into chapter drafting, editorial QA, and export.
         {% endif %}
       </div>
 

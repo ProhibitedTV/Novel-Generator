@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   setupConfirmActions(document);
   setupModelPickers(document);
+  setupRunModeNotes(document);
   setupProviderConsole();
   setupRunDetail();
 });
@@ -67,6 +68,24 @@ function bindModelChoice(choice, syncChoices) {
     input.focus();
     input.scrollIntoView({ behavior: "smooth", block: "nearest" });
     syncChoices(targetId);
+  });
+}
+
+function setupRunModeNotes(root) {
+  const notes = Array.from(root.querySelectorAll("[data-run-mode-note]"));
+  notes.forEach((note) => {
+    const form = note.closest("form");
+    const checkbox = form?.querySelector('input[name="pause_after_outline"]');
+    if (!checkbox || checkbox.dataset.runModeBound === "true") {
+      return;
+    }
+
+    checkbox.dataset.runModeBound = "true";
+    const sync = () => {
+      note.textContent = checkbox.checked ? note.dataset.pauseMessage || "" : note.dataset.straightMessage || "";
+    };
+    checkbox.addEventListener("change", sync);
+    sync();
   });
 }
 
