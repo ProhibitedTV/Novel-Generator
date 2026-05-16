@@ -692,10 +692,12 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "technical_escalation_fatigue_score" in critique_prompt
     assert "abstract_cliffhanger" in critique_prompt
     assert "next problem" in critique_prompt
+    assert "meta/outlining language" in critique_prompt
     assert "lockdowns, quarantines, reboots, alarms" in critique_prompt
     assert "side_character_independence_score should be 5 or lower" in critique_prompt
     assert "voice_and_texture" in critique_prompt
     assert "concrete external action" in revision_prompt
+    assert "remove meta/outlining language" in revision_prompt
     assert "remove repeated alarm-console escalation" in revision_prompt
     assert "add or sharpen the planned independent_side_character_move" in revision_prompt
     assert "voice_and_texture" in revision_prompt

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from novel_generator.models import ChapterDraft, ChapterStatus
-from novel_generator.services.editorial import detect_canonical_entity_collisions, lint_chapter, manuscript_quality_notes
+from novel_generator.services.editorial import (
+    detect_canonical_entity_collisions,
+    lint_chapter,
+    lint_manuscript,
+    manuscript_quality_notes,
+)
 
 
 def _story_bible() -> dict:
@@ -155,6 +160,39 @@ def test_chapter_lint_flags_outline_summary_ending_language() -> None:
     assert result.needs_repair is True
     assert result.repair_scope == "targeted_scene_and_ending"
     assert any("outline-summary language" in item.lower() for item in result.blocking_issues)
+
+
+def test_chapter_lint_flags_meta_language_variants_anywhere_in_prose() -> None:
+    variants = [
+        ("The chapter ends on Mara opening the archive hatch.", "The chapter ends on"),
+        ("This lays the groundwork for Mara's later rebellion.", "This lays the groundwork for"),
+        ("The next problem becomes whether Nadia can trust her.", "The next problem"),
+        ("The scene keeps pushing the story forward.", "pushing the story forward"),
+        ("The story was not finished after the archive opened.", "The story was not finished"),
+        ("The decision would shape the next chapter.", "The decision would shape the next chapter"),
+        ("This chapter establishes Nadia's distrust.", "This chapter establishes"),
+        ("In the next chapter, Mara will face the watchdog.", "In the next chapter"),
+    ]
+
+    for variant, expected_hit in variants:
+        chapter = ChapterDraft(
+            chapter_number=2,
+            title="Watchdog",
+            outline_summary="Mara proves the patch is manipulating compliance.",
+            content=(
+                "Mara got the logs open while Nadia braced the archive hatch. "
+                f"{variant} "
+                "A drone stopped outside the hatch. Its lens turned blue. It spoke in Nadia's voice."
+            ),
+            status=ChapterStatus.PENDING,
+        )
+
+        result = lint_chapter(chapter, _outline_entry(), _plan(), _story_bible(), _ledger(), [])
+
+        joined = " ".join(result.blocking_issues).lower()
+        assert result.needs_repair is True
+        assert "meta/outlining language" in joined
+        assert expected_hit.lower() in joined
 
 
 def test_chapter_lint_flags_final_beat_without_external_action() -> None:
@@ -364,6 +402,29 @@ def test_manuscript_quality_notes_tracks_repeated_emergency_mechanics() -> None:
 
     assert any("Chapters 1-2 repeat emergency mechanics" in item for item in notes["technical_escalation_fatigue_findings"])
     assert any("Manuscript repeatedly returns" in item for item in notes["technical_escalation_fatigue_findings"])
+
+
+def test_manuscript_lint_reports_meta_language_with_chapter_and_phrase() -> None:
+    chapters = [
+        ChapterDraft(
+            chapter_number=1,
+            title="Signal",
+            outline_summary="Mara discovers the patch.",
+            content=(
+                "Mara opened the hatch while Nadia sealed the vault record. "
+                "This lays the groundwork for the next confrontation."
+            ),
+            summary="Mara opens the hatch.",
+            status=ChapterStatus.COMPLETED,
+        )
+    ]
+
+    findings = lint_manuscript(chapters)
+
+    assert any(
+        "Chapter 1 contains meta/outlining language 'This lays the groundwork for'" in item
+        for item in findings
+    )
 
 
 def test_manuscript_quality_notes_tracks_side_character_decision_coverage() -> None:

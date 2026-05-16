@@ -50,6 +50,18 @@ ABSTRACT_ENDING_PATTERNS = [
     r"the colony breathed",
 ]
 
+META_LANGUAGE_PATTERNS = [
+    r"\bthe chapter ends(?: on| with| by)?\b",
+    r"\bthis (?:lays|sets) (?:the )?groundwork for\b",
+    r"\bthe next problem\b",
+    r"\bpushing the story forward\b",
+    r"\bthe story was not finished\b",
+    r"\bthe decision would shape the next chapter\b",
+    r"\bthis (?:scene|chapter) (?:shows|reveals|establishes|foreshadows|sets up)\b",
+    r"\bthis (?:sets up|foreshadows) (?:the )?next\b",
+    r"\bin the next chapter\b",
+]
+
 ENDING_ACTION_VERBS = {
     "accepts",
     "accepted",
@@ -813,6 +825,14 @@ def _looks_like_internal_or_atmospheric_ending(text: str) -> bool:
     return has_abstract_emotion or has_theme_language
 
 
+def _meta_language_hits(text: str) -> list[str]:
+    hits: list[str] = []
+    for pattern in META_LANGUAGE_PATTERNS:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            hits.append(match.group(0).strip())
+    return list(dict.fromkeys(hits))
+
+
 def detect_canonical_entity_collisions(
     existing_entities: list[CanonicalEntity | dict[str, Any]],
     new_entities: list[CanonicalEntity | dict[str, Any]],
@@ -883,6 +903,15 @@ def lint_chapter(
     lowered = content.lower()
     words = _normalized_words(content)
     result = ChapterLintResult()
+
+    meta_language_hits = _meta_language_hits(content)
+    if meta_language_hits:
+        rendered_hits = ", ".join(f"'{hit}'" for hit in meta_language_hits[:5])
+        result.blocking_issues.append(
+            f"Chapter {chapter.chapter_number} contains meta/outlining language {rendered_hits} that belongs in planning notes, not manuscript prose."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
 
     ending_text = _ending_text(content)
     final_beat = _final_beat_text(content)
@@ -1232,6 +1261,12 @@ def lint_manuscript(chapters: list[ChapterDraft]) -> list[str]:
         count = manuscript_text.count(phrase)
         if count >= 4:
             findings.append(f"Repeated stock phrase '{phrase}' appears {count} times.")
+
+    for chapter in chapters:
+        for hit in _meta_language_hits(chapter.content or ""):
+            findings.append(
+                f"Chapter {chapter.chapter_number} contains meta/outlining language '{hit}' that belongs in planning notes, not manuscript prose."
+            )
 
     for previous, current in zip(chapters, chapters[1:]):
         previous_words = set(_normalized_words(previous.summary or previous.content or ""))

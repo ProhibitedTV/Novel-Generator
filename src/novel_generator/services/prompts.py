@@ -480,6 +480,7 @@ def build_chapter_draft_messages(
                 + "; ".join(profile.drafting_focus)
                 + "\n"
                 "- limit new system acronyms in breather or aftermath chapters unless absolutely necessary\n"
+                "- do not include meta-drafting or outline language in the prose, including phrases like 'The chapter ends on', 'This lays the groundwork for', 'pushing the story forward', or 'in the next chapter'\n"
                 "- do not introduce abstract chapter endings about destiny, choices, or the future hanging in the balance\n"
                 "- the final paragraph must include a concrete external action, visible consequence, irreversible decision, reveal, reversal, or state change\n"
                 "- do not end with planning-language such as 'the next problem', 'the next step', 'the choice ahead', or equivalent outline-summary language\n"
@@ -557,6 +558,7 @@ def build_chapter_critique_messages(
                 "}\n\n"
                 "Rules:\n"
                 "- classify ending_hook_type as concrete_action_hook when the final beat is a visible event/action/reversal, resolved_scene_turn when it quietly completes the scene turn with a tangible decision or state change, abstract_cliffhanger when it only gestures at future stakes, image_or_feeling_beat when it ends on mood/image without external consequence, or outline_summary when it uses planning language such as 'next problem' or 'next step'\n"
+                "- set revision_required to true if any draft prose contains meta/outlining language such as 'The chapter ends on', 'This lays the groundwork for', 'pushing the story forward', 'The story was not finished', 'the decision would shape the next chapter', or 'in the next chapter'\n"
                 "- set revision_required to true if the chapter has an abstract ending, outline-summary ending, image/feeling-only ending, unresolved immediate scene turn, zero-cost major solution, repeated emergency mechanics, repeated premise beat, side character who only helps or warns, proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
                 "- use repair_scope 'voice_and_texture' when the main problem is flat prose, samey dialogue, repeated sentence rhythm, weak sensory specificity, or poor style-profile alignment\n"
                 "- use repair_scope 'targeted_scene_and_ending' for ending, cost, repetition-fatigue, or side-character pressure problems\n"
@@ -626,6 +628,7 @@ def build_chapter_revision_messages(
                 "- if repair_scope is 'full_chapter', rebuild the chapter so it stops repeating the premise and restores continuity\n"
                 "- if ending_hook_type is abstract_cliffhanger, image_or_feeling_beat, or outline_summary, replace the final beat with a concrete external action, visible consequence, irreversible decision, reveal, reversal, or state change\n"
                 "- make the revised ending resolve the chapter's immediate scene tension while opening the next problem through something visible on the page\n"
+                "- remove meta/outlining language such as 'The chapter ends on', 'This lays the groundwork for', 'The next problem', 'pushing the story forward', 'The story was not finished', 'the decision would shape the next chapter', or 'in the next chapter' while preserving the actual scene event\n"
                 "- do not end with planning-language such as 'the next problem', 'the next step', 'the choice ahead', or equivalent outline-summary language\n"
                 "- follow the prose style profile's narrative_voice, sentence_rhythm, imagery_palette, dialogue_rules, character_voice_map, and avoid list\n"
                 "- do not copy exact language from any user-provided style reference\n"
@@ -799,7 +802,7 @@ def build_manuscript_qa_messages(
                 '  "genre_contract_notes": ["string"]\n'
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
-                "proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
+                "meta/outlining language in chapter prose, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)
             ),
