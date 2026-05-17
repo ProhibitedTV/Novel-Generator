@@ -131,6 +131,7 @@ def _same_settings_payload(run, *, pause_after_outline: bool = True) -> RunCreat
         min_words_per_chapter=run.min_words_per_chapter,
         max_words_per_chapter=run.max_words_per_chapter,
         pause_after_outline=pause_after_outline,
+        developmental_rewrite_enabled=run.developmental_rewrite_enabled,
         task_routing=run.task_routing or {},
     )
 

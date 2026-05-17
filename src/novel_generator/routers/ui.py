@@ -106,6 +106,13 @@ RUN_STAGES = [
         "result": "A QA report artifact should appear with strengths, warnings, and structural risks.",
     },
     {
+        "id": "developmental_rewrite",
+        "label": "Developmental rewrite",
+        "description": "Creating a full-manuscript structural rewrite plan when enabled.",
+        "why": "This optional stage turns QA risks into chapter-level keep, merge, cut, bridge, reorder, or rewrite actions.",
+        "result": "Rewrite report, revised-outline, and QA comparison artifacts should appear beside the manuscript exports.",
+    },
+    {
         "id": "export",
         "label": "Export",
         "description": "Rendering manuscript and QA artifacts.",
@@ -171,6 +178,7 @@ RUN_STAGE_PROGRESS_ORDER = [
     "chapter_revision",
     "chapter_summary",
     "manuscript_qa",
+    "developmental_rewrite",
     "export",
     "completed",
 ]
@@ -959,6 +967,7 @@ def _run_form_values(project: Project, values: dict[str, Any] | None = None) -> 
         "min_words_per_chapter": project.min_words_per_chapter,
         "max_words_per_chapter": project.max_words_per_chapter,
         "pause_after_outline": True,
+        "developmental_rewrite_enabled": False,
         **_task_routing_form_values(project.task_routing),
     }
     if values:
@@ -1596,6 +1605,7 @@ def _same_settings_payload(run: GenerationRun, *, source_run_id: str | None = No
         min_words_per_chapter=run.min_words_per_chapter,
         max_words_per_chapter=run.max_words_per_chapter,
         pause_after_outline=True,
+        developmental_rewrite_enabled=run.developmental_rewrite_enabled,
         task_routing=run.task_routing or {},
         source_run_id=source_run_id,
         resume_from_chapter=resume_from_chapter,
@@ -2238,6 +2248,7 @@ def create_run_ui(
     min_words_per_chapter: str = Form(""),
     max_words_per_chapter: str = Form(""),
     pause_after_outline: str | None = Form(None),
+    developmental_rewrite_enabled: str | None = Form(None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -2253,6 +2264,7 @@ def create_run_ui(
         "min_words_per_chapter": min_words_per_chapter,
         "max_words_per_chapter": max_words_per_chapter,
         "pause_after_outline": _coerce_checkbox(pause_after_outline),
+        "developmental_rewrite_enabled": _coerce_checkbox(developmental_rewrite_enabled),
     }
     provider_configs_by_name, provider_statuses_by_name, manager = _provider_catalog(settings, db)
 

@@ -35,7 +35,12 @@ def create_project_payload() -> dict:
     }
 
 
-def create_project_and_run(client, *, pause_after_outline: bool = True) -> tuple[str, str]:
+def create_project_and_run(
+    client,
+    *,
+    pause_after_outline: bool = True,
+    developmental_rewrite_enabled: bool = False,
+) -> tuple[str, str]:
     project_response = client.post("/api/projects", json=create_project_payload())
     assert project_response.status_code == 201
     project_id = project_response.json()["id"]
@@ -46,6 +51,7 @@ def create_project_and_run(client, *, pause_after_outline: bool = True) -> tuple
             "project_id": project_id,
             "model_name": "test-model",
             "pause_after_outline": pause_after_outline,
+            "developmental_rewrite_enabled": developmental_rewrite_enabled,
         },
     )
     assert run_response.status_code == 201
@@ -61,6 +67,7 @@ def test_project_and_run_api_flow(client, monkeypatch) -> None:
     assert detail_response.status_code == 200
     assert detail_response.json()["project_id"] == project_id
     assert detail_response.json()["pause_after_outline"] is True
+    assert detail_response.json()["developmental_rewrite_enabled"] is False
 
     cancel_response = client.post(f"/api/runs/{run_id}/cancel")
     assert cancel_response.status_code == 200
@@ -139,7 +146,11 @@ def test_invalid_model_is_rejected_when_queueing_run(client, monkeypatch) -> Non
 def test_rerun_api_requeues_same_settings_as_v2_run(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
 
-    project_id, run_id = create_project_and_run(client, pause_after_outline=False)
+    project_id, run_id = create_project_and_run(
+        client,
+        pause_after_outline=False,
+        developmental_rewrite_enabled=True,
+    )
     session_factory = get_session_factory()
     with session_factory() as session:
         run = get_run(session, run_id)
@@ -156,6 +167,7 @@ def test_rerun_api_requeues_same_settings_as_v2_run(client, monkeypatch) -> None
     assert rerun_response.json()["status"] == "queued"
     assert rerun_response.json()["pipeline_version"] == 2
     assert rerun_response.json()["pause_after_outline"] is True
+    assert rerun_response.json()["developmental_rewrite_enabled"] is True
     assert rerun_response.json()["id"] != run_id
 
 

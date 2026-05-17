@@ -672,6 +672,8 @@ def test_project_run_setup_warns_for_external_default_provider(client, monkeypat
     assert "This route may send manuscript text and story data to the configured external provider." in response.text
     assert "Full novel runs can use large prompts" in response.text
     assert "Chapter draft: OpenAI-compatible API" in response.text
+    assert "Run developmental rewrite planning" in response.text
+    assert "Developmental rewrite: OpenAI-compatible API" in response.text
 
 
 def test_run_detail_warns_for_external_provider_routes(client, monkeypatch) -> None:

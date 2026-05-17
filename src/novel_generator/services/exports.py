@@ -148,6 +148,9 @@ def export_run_artifacts(
     run: GenerationRun,
     chapters: list[ChapterDraft],
     qa_report_markdown: str | None = None,
+    developmental_rewrite_markdown: str | None = None,
+    revised_outline_markdown: str | None = None,
+    developmental_qa_markdown: str | None = None,
 ) -> list[Artifact]:
     run_dir = artifacts_dir / run.id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -183,6 +186,42 @@ def export_run_artifacts(
                 kind="qa-report",
                 filename=qa_name,
                 relative_path=str(qa_path.relative_to(artifacts_dir)),
+                content_type="text/markdown",
+            )
+        )
+    if developmental_rewrite_markdown is not None:
+        rewrite_name = "developmental-rewrite-report.md"
+        rewrite_path = run_dir / rewrite_name
+        rewrite_path.write_text(developmental_rewrite_markdown, encoding="utf-8")
+        artifacts.append(
+            Artifact(
+                kind="developmental-rewrite-report",
+                filename=rewrite_name,
+                relative_path=str(rewrite_path.relative_to(artifacts_dir)),
+                content_type="text/markdown",
+            )
+        )
+    if revised_outline_markdown is not None:
+        outline_name = "revised-outline.md"
+        outline_path = run_dir / outline_name
+        outline_path.write_text(revised_outline_markdown, encoding="utf-8")
+        artifacts.append(
+            Artifact(
+                kind="revised-outline",
+                filename=outline_name,
+                relative_path=str(outline_path.relative_to(artifacts_dir)),
+                content_type="text/markdown",
+            )
+        )
+    if developmental_qa_markdown is not None:
+        qa_comparison_name = "developmental-qa-comparison.md"
+        qa_comparison_path = run_dir / qa_comparison_name
+        qa_comparison_path.write_text(developmental_qa_markdown, encoding="utf-8")
+        artifacts.append(
+            Artifact(
+                kind="developmental-qa-report",
+                filename=qa_comparison_name,
+                relative_path=str(qa_comparison_path.relative_to(artifacts_dir)),
                 content_type="text/markdown",
             )
         )

@@ -299,6 +299,31 @@ def _qa_report_json() -> str:
     )
 
 
+def _developmental_rewrite_json() -> str:
+    return json.dumps(
+        {
+            "overall_diagnosis": "The draft needs one structural compression pass after QA.",
+            "act_structure_notes": ["Act I works but should externalize the cost sooner."],
+            "chapter_actions": [
+                {
+                    "chapter_numbers": [1],
+                    "action": "rewrite",
+                    "reason": "Make the archive breach cost a named relationship.",
+                    "required_story_change": "Force Iris to burn the archive key in view of Tarin.",
+                    "permanent_consequence": "The lower stair stays open and Tarin loses his escort.",
+                }
+            ],
+            "merge_candidates": [],
+            "cut_candidates": [],
+            "continuity_repairs": ["Track the burned archive key in the ledger."],
+            "theme_arc_repairs": ["Tie consent to a visible loss of access."],
+            "prose_pattern_repairs": ["Remove future-hangs summary language."],
+            "pre_rewrite_risks": ["One technical escape is too smooth."],
+            "post_rewrite_risk_targets": ["Revised chapter should show a distinct permanent consequence."],
+        }
+    )
+
+
 class FakeOllamaClient:
     def __init__(self, responses: list[str]):
         self._responses = iter(responses)
@@ -434,6 +459,56 @@ def test_approved_run_completes_and_generates_qa_report(configured_environment) 
         assert len(refreshed.artifacts) == 3
         assert any(artifact.kind == "qa-report" for artifact in refreshed.artifacts)
         assert refreshed.summary_context is not None
+
+
+def test_developmental_rewrite_pass_exports_report_and_revised_outline(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(
+                project_id=project.id,
+                model_name="test-model",
+                pause_after_outline=False,
+                developmental_rewrite_enabled=True,
+            ),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    (
+                        "Iris slips out of the archive while Tarin resists following her. "
+                        "Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris discovers the living map and commits to following it underground.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                    _developmental_rewrite_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.COMPLETED
+        artifact_kinds = {artifact.kind for artifact in refreshed.artifacts}
+        assert "developmental-rewrite-report" in artifact_kinds
+        assert "revised-outline" in artifact_kinds
+        assert "developmental-qa-report" in artifact_kinds
+        assert any(event.event_type == "developmental_rewrite_completed" for event in refreshed.events)
 
 
 def test_manuscript_qa_fallback_completes_when_model_output_stays_invalid(configured_environment) -> None:

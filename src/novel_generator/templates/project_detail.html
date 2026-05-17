@@ -507,16 +507,24 @@
         <span class="field-note">Recommended for long runs. Turn it off when you trust the project brief and want the worker to draft straight through.</span>
       </label>
 
+      <label class="toggle-card run-mode-card">
+        <span class="toggle-input">
+          <input type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled %}checked{% endif %}>
+          <strong>Run developmental rewrite planning</strong>
+        </span>
+        <span class="field-note">After manuscript QA, produce a structural rewrite report, revised outline, and QA comparison for merge, cut, bridge, reorder, or rewrite decisions.</span>
+      </label>
+
       <div
         class="inline-note inline-note-success run-mode-note"
         data-run-mode-note
-        data-pause-message="Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, and export artifacts."
-        data-straight-message="Move straight from story bible and outline generation into chapter drafting, editorial QA, and export."
+        data-pause-message="Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, optional developmental rewrite planning, and export artifacts."
+        data-straight-message="Move straight from story bible and outline generation into chapter drafting, editorial QA, optional developmental rewrite planning, and export."
       >
         {% if run_values.pause_after_outline %}
-          Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, and export artifacts.
+          Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, optional developmental rewrite planning, and export artifacts.
         {% else %}
-          Move straight from story bible and outline generation into chapter drafting, editorial QA, and export.
+          Move straight from story bible and outline generation into chapter drafting, editorial QA, optional developmental rewrite planning, and export.
         {% endif %}
       </div>
 
@@ -568,6 +576,13 @@
           <div>
             <strong>Run editorial QA before export</strong>
             <p class="field-note">The QA report calls out repetition, continuity drift, and ending issues instead of silently shipping them.</p>
+          </div>
+        </li>
+        <li class="run-flow-item">
+          <span class="run-flow-number">5</span>
+          <div>
+            <strong>Plan a developmental rewrite</strong>
+            <p class="field-note">Optional full-manuscript planning converts QA risks into structural actions, a revised outline, and a before/after QA comparison.</p>
           </div>
         </li>
       </ol>
