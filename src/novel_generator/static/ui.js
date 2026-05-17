@@ -365,6 +365,9 @@ function setupRunDetail() {
     { field: "dialogue_tension_score", label: "Dialogue tension", lowerIsBetter: false, defaultScore: 10 },
     { field: "repetition_risk_score", label: "Repetition risk", lowerIsBetter: true },
     { field: "technical_escalation_fatigue_score", label: "Technical fatigue", lowerIsBetter: true },
+    { field: "irreversibility_score", label: "Irreversibility", lowerIsBetter: false, defaultScore: 10 },
+    { field: "choice_clarity_score", label: "Choice clarity", lowerIsBetter: false, defaultScore: 10 },
+    { field: "cuttable_chapter_risk_score", label: "Cuttable risk", lowerIsBetter: true },
   ];
   const terminalStatuses = new Set(["completed", "failed", "canceled"]);
   const reviewStatuses = new Set(["awaiting_approval"]);

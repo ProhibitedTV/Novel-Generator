@@ -356,6 +356,8 @@ ENDING_REPAIR_TYPES = {"abstract_cliffhanger", "image_or_feeling_beat", "outline
 ENDING_REPAIR_THRESHOLD = 5
 TECHNICAL_FATIGUE_REPAIR_THRESHOLD = 6
 SIDE_CHARACTER_REPAIR_THRESHOLD = 5
+STORY_TURN_REPAIR_THRESHOLD = 5
+CUTTABLE_CHAPTER_REPAIR_THRESHOLD = 6
 
 
 def _ending_score_warnings(critique: ChapterCritique) -> list[str]:
@@ -391,11 +393,32 @@ def _side_character_warnings(critique: ChapterCritique) -> list[str]:
     ]
 
 
+def _story_turn_warnings(critique: ChapterCritique) -> list[str]:
+    warnings: list[str] = []
+    if critique.irreversibility_score <= STORY_TURN_REPAIR_THRESHOLD:
+        warnings.append(
+            "Story turn needs a stronger irreversible change: "
+            f"irreversibility {critique.irreversibility_score}/10."
+        )
+    if critique.choice_clarity_score <= STORY_TURN_REPAIR_THRESHOLD:
+        warnings.append(
+            "Story turn needs a clearer protagonist choice: "
+            f"choice clarity {critique.choice_clarity_score}/10."
+        )
+    if critique.cuttable_chapter_risk_score >= CUTTABLE_CHAPTER_REPAIR_THRESHOLD:
+        warnings.append(
+            "Chapter may be cuttable without damaging manuscript state: "
+            f"cuttable risk {critique.cuttable_chapter_risk_score}/10."
+        )
+    return warnings
+
+
 def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLintResult) -> ChapterCritique:
     style_warnings = _style_score_warnings(critique)
     ending_warnings = _ending_score_warnings(critique)
     technical_warnings = _technical_fatigue_warnings(critique)
     side_character_warnings = _side_character_warnings(critique)
+    story_turn_warnings = _story_turn_warnings(critique)
     blocking_issues = _dedupe([*critique.blocking_issues, *lint_result.blocking_issues])
     soft_warnings = _dedupe(
         [
@@ -405,6 +428,7 @@ def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLin
             *ending_warnings,
             *technical_warnings,
             *side_character_warnings,
+            *story_turn_warnings,
         ]
     )
     warnings = _dedupe([*critique.warnings, *soft_warnings])
@@ -417,6 +441,7 @@ def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLin
         or bool(ending_warnings)
         or bool(technical_warnings)
         or bool(side_character_warnings)
+        or bool(story_turn_warnings)
     )
     repair_scope = _resolve_repair_scope(
         critique.repair_scope,
@@ -424,6 +449,7 @@ def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLin
         "targeted_scene_and_ending" if ending_warnings else "none",
         "targeted_scene_and_ending" if technical_warnings else "none",
         "targeted_scene_and_ending" if side_character_warnings else "none",
+        "targeted_scene_and_ending" if story_turn_warnings else "none",
         "voice_and_texture" if style_warnings else "none",
     )
     return critique.model_copy(
@@ -811,6 +837,12 @@ def _run_manuscript_qa(
                 [
                     *qa_report.scene_mode_distribution_notes,
                     *deterministic_notes["scene_mode_distribution_notes"],
+                ]
+            ),
+            "story_turn_quality_notes": _dedupe(
+                [
+                    *qa_report.story_turn_quality_notes,
+                    *deterministic_notes["story_turn_quality_notes"],
                 ]
             ),
             "genre_contract_notes": _dedupe(

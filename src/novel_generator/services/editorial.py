@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
+import json
 import re
 from typing import Any
 
@@ -30,6 +31,25 @@ STOCK_PHRASES = [
 BREATHER_MODES = {"breather", "aftermath"}
 
 TECHNICAL_SCENE_MODES = {"systems_crisis", "technical_operation"}
+
+STORY_TURN_REQUIRED_FIELDS = (
+    "irreversible_change",
+    "protagonist_choice",
+    "permanent_consequence",
+    "why_this_chapter_cannot_be_cut",
+    "state_before",
+    "state_after",
+)
+
+ABSTRACT_STORY_TURN_PATTERNS = [
+    r"\bstakes? (?:rise|increase|escalate)\b",
+    r"\bthe story (?:moves|pushes|continues|goes) forward\b",
+    r"\bthings? (?:change|changed)\b",
+    r"\beverything (?:changes|changed)\b",
+    r"\bthe next problem\b",
+    r"\bthe future\b",
+    r"\bthe choice (?:is|was) clear\b",
+]
 
 ABSTRACT_ENDING_PATTERNS = [
     r"\bnext problem\b",
@@ -845,6 +865,94 @@ def _meta_language_hits(text: str) -> list[str]:
     return list(dict.fromkeys(hits))
 
 
+def _coerce_story_turn(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if value is None:
+        return {}
+    return getattr(value, "model_dump", lambda: {})()
+
+
+def _story_turn_from_plan(chapter_plan: dict[str, Any]) -> dict[str, Any]:
+    return _coerce_story_turn(chapter_plan.get("story_turn"))
+
+
+def _story_turn_from_chapter(chapter: ChapterDraft) -> dict[str, Any]:
+    continuity_update = chapter.continuity_update or {}
+    if not isinstance(continuity_update, dict):
+        continuity_update = getattr(continuity_update, "model_dump", lambda: {})()
+    continuity_turn = _coerce_story_turn(continuity_update.get("story_turn"))
+    if continuity_turn:
+        return continuity_turn
+    plan_text = (chapter.plan or "").strip()
+    if not plan_text:
+        return {}
+    try:
+        plan_payload = json.loads(plan_text)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(plan_payload, dict):
+        return {}
+    return _coerce_story_turn(plan_payload.get("story_turn"))
+
+
+def _story_turn_text(story_turn: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for field_name in STORY_TURN_REQUIRED_FIELDS:
+        parts.append(str(story_turn.get(field_name, "")))
+    parts.extend(str(item) for item in story_turn.get("choice_alternatives", []) or [])
+    return " ".join(part for part in parts if part).strip()
+
+
+def _missing_story_turn_fields(story_turn: dict[str, Any]) -> list[str]:
+    missing = [
+        field_name
+        for field_name in STORY_TURN_REQUIRED_FIELDS
+        if not str(story_turn.get(field_name, "")).strip()
+    ]
+    if not _clean_story_turn_alternatives(story_turn):
+        missing.append("choice_alternatives")
+    return missing
+
+
+def _clean_story_turn_alternatives(story_turn: dict[str, Any]) -> list[str]:
+    return [
+        str(item).strip()
+        for item in story_turn.get("choice_alternatives", []) or []
+        if str(item).strip()
+    ]
+
+
+def _abstract_story_turn_hits(story_turn: dict[str, Any]) -> list[str]:
+    text = _story_turn_text(story_turn)
+    hits: list[str] = []
+    for pattern in ABSTRACT_STORY_TURN_PATTERNS:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            hits.append(match.group(0).strip())
+    return list(dict.fromkeys(hits))
+
+
+def _story_turn_terms(story_turn: dict[str, Any]) -> set[str]:
+    text = " ".join(
+        str(story_turn.get(field_name, ""))
+        for field_name in (
+            "irreversible_change",
+            "protagonist_choice",
+            "permanent_consequence",
+            "state_after",
+        )
+    )
+    return _meaningful_terms(text)
+
+
+def _story_turn_similarity(first: dict[str, Any], second: dict[str, Any]) -> float:
+    first_terms = _story_turn_terms(first)
+    second_terms = _story_turn_terms(second)
+    if not first_terms or not second_terms:
+        return 0
+    return len(first_terms & second_terms) / max(1, min(len(first_terms), len(second_terms)))
+
+
 def detect_canonical_entity_collisions(
     existing_entities: list[CanonicalEntity | dict[str, Any]],
     new_entities: list[CanonicalEntity | dict[str, Any]],
@@ -924,6 +1032,36 @@ def lint_chapter(
         )
         result.needs_repair = True
         result.repair_scope = "targeted_scene_and_ending"
+
+    story_turn = _story_turn_from_plan(chapter_plan)
+    missing_story_turn_fields = _missing_story_turn_fields(story_turn)
+    if missing_story_turn_fields:
+        result.blocking_issues.append(
+            f"Chapter {chapter.chapter_number} is missing required story_turn fields: "
+            + ", ".join(missing_story_turn_fields)
+            + "."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+    else:
+        abstract_hits = _abstract_story_turn_hits(story_turn)
+        if abstract_hits:
+            result.blocking_issues.append(
+                f"Chapter {chapter.chapter_number} has an abstract or reversible story_turn: "
+                + ", ".join(f"'{hit}'" for hit in abstract_hits[:5])
+                + "."
+            )
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+        for previous in prior_chapters:
+            previous_turn = _story_turn_from_chapter(previous)
+            if previous_turn and _story_turn_similarity(story_turn, previous_turn) >= 0.75:
+                result.soft_warnings.append(
+                    f"Chapter {chapter.chapter_number} repeats a similar irreversible story turn from chapter {previous.chapter_number}."
+                )
+                result.needs_repair = True
+                result.repair_scope = "targeted_scene_and_ending"
+                break
 
     ending_text = _ending_text(content)
     final_beat = _final_beat_text(content)
@@ -1338,6 +1476,7 @@ def manuscript_quality_notes(
         "civilian_texture_findings": [],
         "technical_escalation_fatigue_findings": [],
         "scene_mode_distribution_notes": [],
+        "story_turn_quality_notes": [],
         "genre_contract_notes": [],
     }
 
@@ -1387,10 +1526,36 @@ def manuscript_quality_notes(
             notes["technical_escalation_fatigue_findings"].append(
                 f"Chapter {chapter.chapter_number} may be too dense with emergency-system language."
             )
+        if (
+            qa.get("irreversibility_score", 10) <= 5
+            or qa.get("choice_clarity_score", 10) <= 5
+            or qa.get("cuttable_chapter_risk_score", 0) >= 6
+            or "story turn" in lowered_warnings
+            or "cuttable" in lowered_warnings
+        ):
+            notes["story_turn_quality_notes"].append(
+                f"Chapter {chapter.chapter_number} may need a stronger irreversible choice/consequence turn."
+            )
         if qa.get("genre_contract_score", 10) <= 5 or "genre" in lowered_warnings:
             notes["genre_contract_notes"].append(
                 f"Chapter {chapter.chapter_number} may need stronger delivery against the selected genre contract."
             )
+        story_turn = _story_turn_from_chapter(chapter)
+        missing_fields = _missing_story_turn_fields(story_turn)
+        if missing_fields:
+            notes["story_turn_quality_notes"].append(
+                f"Chapter {chapter.chapter_number} is missing stored story_turn fields: "
+                + ", ".join(missing_fields)
+                + "."
+            )
+        else:
+            abstract_hits = _abstract_story_turn_hits(story_turn)
+            if abstract_hits:
+                notes["story_turn_quality_notes"].append(
+                    f"Chapter {chapter.chapter_number} has an abstract or reversible stored story_turn: "
+                    + ", ".join(f"'{hit}'" for hit in abstract_hits[:5])
+                    + "."
+                )
         for item in qa.get("genre_contract_findings", []) or []:
             notes["genre_contract_notes"].append(f"Chapter {chapter.chapter_number}: {item}")
         for phrase in STOCK_PHRASES:
@@ -1430,6 +1595,12 @@ def manuscript_quality_notes(
                 notes["scene_mode_distribution_notes"].append(
                     f"Chapters {previous.chapter_number}-{current.chapter_number} repeat scene mode {current_mode}; consider varying the dominant dramatic mode."
                 )
+        previous_turn = _story_turn_from_chapter(previous)
+        current_turn = _story_turn_from_chapter(current)
+        if previous_turn and current_turn and _story_turn_similarity(previous_turn, current_turn) >= 0.75:
+            notes["story_turn_quality_notes"].append(
+                f"Chapters {previous.chapter_number}-{current.chapter_number} have equivalent irreversible story turns; consider merge, cut, or a replacement choice/consequence."
+            )
 
     chapter_modes = [
         _chapter_mode_from_summary(chapter.outline_summary or "")
@@ -1516,6 +1687,7 @@ def manuscript_quality_notes(
     notes["civilian_texture_findings"] = list(dict.fromkeys(notes["civilian_texture_findings"]))
     notes["technical_escalation_fatigue_findings"] = list(dict.fromkeys(notes["technical_escalation_fatigue_findings"]))
     notes["scene_mode_distribution_notes"] = list(dict.fromkeys(notes["scene_mode_distribution_notes"]))
+    notes["story_turn_quality_notes"] = list(dict.fromkeys(notes["story_turn_quality_notes"]))
     notes["genre_contract_notes"] = list(dict.fromkeys(notes["genre_contract_notes"]))
     return notes
 
@@ -1585,6 +1757,10 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Scene Mode Distribution",
         "",
         *([f"- {item}" for item in report.scene_mode_distribution_notes] or ["- No scene-mode distribution notes recorded."]),
+        "",
+        "## Story Turn Quality",
+        "",
+        *([f"- {item}" for item in report.story_turn_quality_notes] or ["- No story-turn quality notes recorded."]),
         "",
         "## Genre Contract",
         "",

@@ -101,6 +101,15 @@ def _plan() -> dict:
         "ideology_clash": "Nadia argues that truth without shelter is just another cruelty.",
         "primary_interpersonal_conflict": "Nadia refuses to keep enabling Mara's collateral damage.",
         "independent_side_character_move": "Nadia refuses to falsify the archive to protect Mara.",
+        "story_turn": {
+            "irreversible_change": "Nadia's archive credentials are burned and the source node becomes Mara's only lead.",
+            "protagonist_choice": "Mara chooses to expose the audit trail even though it burns Nadia's access.",
+            "choice_alternatives": ["Mara could abandon the logs to protect Nadia's credentials."],
+            "permanent_consequence": "Nadia loses archive access and her trust in Mara fractures.",
+            "why_this_chapter_cannot_be_cut": "Without this turn, Mara never loses Nadia's trust or narrows the chase to the source node.",
+            "state_before": "Mara and Nadia can still use the archive quietly.",
+            "state_after": "Nadia is locked out and Mara has one dangerous source node to chase.",
+        },
     }
 
 
@@ -160,6 +169,36 @@ def test_chapter_lint_flags_outline_summary_ending_language() -> None:
     assert result.needs_repair is True
     assert result.repair_scope == "targeted_scene_and_ending"
     assert any("outline-summary language" in item.lower() for item in result.blocking_issues)
+
+
+def test_chapter_lint_flags_abstract_story_turn() -> None:
+    chapter = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content=(
+            "Mara got the logs open while Nadia braced the archive hatch. "
+            "A drone stopped outside the hatch. Its lens turned blue. It spoke in Nadia's voice."
+        ),
+        status=ChapterStatus.PENDING,
+    )
+    weak_plan = {
+        **_plan(),
+        "story_turn": {
+            "irreversible_change": "The stakes rise and everything changes.",
+            "protagonist_choice": "Mara keeps going because the choice is clear.",
+            "choice_alternatives": ["Mara could stop."],
+            "permanent_consequence": "The future is different.",
+            "why_this_chapter_cannot_be_cut": "The story moves forward.",
+            "state_before": "There is a problem.",
+            "state_after": "The next problem becomes clear.",
+        },
+    }
+
+    result = lint_chapter(chapter, _outline_entry(), weak_plan, _story_bible(), _ledger(), [])
+
+    assert result.needs_repair is True
+    assert any("abstract or reversible story_turn" in item for item in result.blocking_issues)
 
 
 def test_chapter_lint_flags_meta_language_variants_anywhere_in_prose() -> None:
@@ -405,6 +444,42 @@ def test_manuscript_quality_notes_tracks_repeated_emergency_mechanics() -> None:
     assert any("Manuscript repeatedly returns" in item for item in notes["technical_escalation_fatigue_findings"])
     assert any("Scene mode distribution" in item for item in notes["scene_mode_distribution_notes"])
     assert any("repeat scene mode systems_crisis" in item for item in notes["scene_mode_distribution_notes"])
+
+
+def test_manuscript_quality_notes_flags_equivalent_story_turns() -> None:
+    story_turn = {
+        "irreversible_change": "Mara burns Nadia's archive access to expose the source node.",
+        "protagonist_choice": "Mara chooses proof over Nadia's credentials.",
+        "choice_alternatives": ["Mara could protect Nadia and abandon the source logs."],
+        "permanent_consequence": "Nadia is locked out and no longer trusts Mara.",
+        "why_this_chapter_cannot_be_cut": "The manuscript needs Nadia locked out and mistrustful.",
+        "state_before": "Mara and Nadia can still use the archive.",
+        "state_after": "Nadia is locked out and Mara has the source node.",
+    }
+    chapters = [
+        ChapterDraft(
+            chapter_number=1,
+            title="Signal",
+            outline_summary="Mara discovers the patch. Mode: investigation.",
+            content="Mara burns Nadia's access to expose the source node.",
+            summary="Mara burns Nadia's access.",
+            status=ChapterStatus.COMPLETED,
+        ),
+        ChapterDraft(
+            chapter_number=2,
+            title="Watchdog",
+            outline_summary="Mara proves the patch is manipulating compliance. Mode: aftermath.",
+            content="Mara again burns Nadia's access to expose the source node.",
+            summary="Mara repeats the same proof turn.",
+            status=ChapterStatus.COMPLETED,
+        ),
+    ]
+    for chapter in chapters:
+        chapter.continuity_update = {"story_turn": story_turn}
+
+    notes = manuscript_quality_notes(chapters, _story_bible())
+
+    assert any("equivalent irreversible story turns" in item for item in notes["story_turn_quality_notes"])
 
 
 def test_manuscript_lint_reports_meta_language_with_chapter_and_phrase() -> None:

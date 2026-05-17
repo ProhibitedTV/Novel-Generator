@@ -192,6 +192,9 @@ QUALITY_SIGNAL_DEFS = [
     {"field": "dialogue_tension_score", "label": "Dialogue tension", "lower_is_better": False, "default": 10},
     {"field": "repetition_risk_score", "label": "Repetition risk", "lower_is_better": True},
     {"field": "technical_escalation_fatigue_score", "label": "Technical fatigue", "lower_is_better": True},
+    {"field": "irreversibility_score", "label": "Irreversibility", "lower_is_better": False, "default": 10},
+    {"field": "choice_clarity_score", "label": "Choice clarity", "lower_is_better": False, "default": 10},
+    {"field": "cuttable_chapter_risk_score", "label": "Cuttable risk", "lower_is_better": True},
 ]
 COMPARISON_CATEGORY_DEFS = [
     {
@@ -225,6 +228,14 @@ COMPARISON_CATEGORY_DEFS = [
         "threshold": 6,
         "mode": "high",
         "keywords": ["repetition", "repeated", "stock phrase"],
+    },
+    {
+        "id": "story_turn",
+        "label": "Story-turn risks",
+        "field": "cuttable_chapter_risk_score",
+        "threshold": 6,
+        "mode": "high",
+        "keywords": ["story turn", "cuttable", "irreversible"],
     },
     {
         "id": "emotional",
