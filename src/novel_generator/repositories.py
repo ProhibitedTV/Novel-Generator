@@ -201,6 +201,7 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
         max_words_per_chapter=max_words_per_chapter,
         pipeline_version=2,
         pause_after_outline=payload.pause_after_outline,
+        developmental_rewrite_enabled=payload.developmental_rewrite_enabled,
         task_routing=task_routing,
         status=RunStatus.QUEUED,
         current_step="queued",

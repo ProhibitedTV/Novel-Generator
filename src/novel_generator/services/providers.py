@@ -21,6 +21,7 @@ TASK_ROUTE_STAGES: list[dict[str, str]] = [
     {"id": "chapter_summary", "label": "Chapter summary"},
     {"id": "continuity_update", "label": "Continuity update"},
     {"id": "manuscript_qa", "label": "Manuscript QA"},
+    {"id": "developmental_rewrite", "label": "Developmental rewrite"},
 ]
 TASK_ROUTE_STAGE_IDS = tuple(item["id"] for item in TASK_ROUTE_STAGES)
 TASK_ROUTE_LABELS = {item["id"]: item["label"] for item in TASK_ROUTE_STAGES}

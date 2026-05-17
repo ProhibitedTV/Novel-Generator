@@ -15,6 +15,7 @@ from ..schemas import (
     ChapterPlan,
     CanonicalEntity,
     ContinuityLedger,
+    DevelopmentalRewritePlan,
     ManuscriptQaReport,
     StoryBible,
     StructuredOutlineEntry,
@@ -28,7 +29,10 @@ from .editorial import (
     lint_manuscript,
     manuscript_quality_notes,
     merge_canonical_entities,
+    render_developmental_qa_comparison_markdown,
+    render_developmental_rewrite_report_markdown,
     render_qa_report_markdown,
+    render_revised_outline_markdown,
 )
 from .exports import export_run_artifacts
 from .genre_profiles import genre_profile
@@ -40,6 +44,7 @@ from .prompts import (
     build_chapter_plan_messages,
     build_chapter_revision_messages,
     build_continuity_update_messages,
+    build_developmental_rewrite_messages,
     build_json_repair_messages,
     build_manuscript_qa_messages,
     build_outline_messages,
@@ -48,6 +53,7 @@ from .prompts import (
     parse_chapter_critique,
     parse_chapter_plan,
     parse_continuity_update,
+    parse_developmental_rewrite_plan,
     parse_manuscript_qa_report,
     parse_outline,
     parse_story_bible,
@@ -854,6 +860,104 @@ def _run_manuscript_qa(
     return qa_report, qa_markdown
 
 
+def _fallback_developmental_rewrite_plan(
+    chapters: list,
+    qa_report: ManuscriptQaReport,
+) -> DevelopmentalRewritePlan:
+    pre_rewrite_risks = _dedupe(
+        [
+            *qa_report.warnings,
+            *qa_report.continuity_risks,
+            *qa_report.repetition_risks,
+            *qa_report.chapter_ending_quality_notes,
+            *qa_report.technical_escalation_fatigue_findings,
+            *qa_report.scene_mode_distribution_notes,
+            *qa_report.story_turn_quality_notes,
+        ]
+    )
+    chapter_actions = []
+    for chapter in chapters:
+        qa_notes = chapter.qa_notes or {}
+        cuttable_risk = int(qa_notes.get("cuttable_chapter_risk_score") or 0)
+        repetition_risk = int(qa_notes.get("repetition_risk_score") or 0)
+        revision_required = bool(qa_notes.get("revision_required"))
+        action = "rewrite" if revision_required or cuttable_risk >= 6 or repetition_risk >= 7 else "keep"
+        reason = "Chapter-level QA indicates structural risk." if action == "rewrite" else "Chapter has a stored story turn and no high deterministic risk."
+        story_turn = (chapter.continuity_update or {}).get("story_turn", {}) if isinstance(chapter.continuity_update, dict) else {}
+        chapter_actions.append(
+            {
+                "chapter_numbers": [chapter.chapter_number],
+                "action": action,
+                "reason": reason,
+                "required_story_change": story_turn.get("why_this_chapter_cannot_be_cut") or chapter.outline_summary,
+                "permanent_consequence": story_turn.get("permanent_consequence") or "Preserve a concrete before/after state change.",
+            }
+        )
+    return DevelopmentalRewritePlan(
+        overall_diagnosis=(
+            "Deterministic developmental rewrite plan generated from manuscript QA because the model rewrite plan was unavailable."
+        ),
+        act_structure_notes=["Review chapter actions against the original act plan before rewriting prose."],
+        chapter_actions=chapter_actions,
+        pre_rewrite_risks=pre_rewrite_risks,
+        post_rewrite_risk_targets=[
+            "Every retained or rewritten chapter should carry a distinct irreversible story turn.",
+            "Merged or cut chapters should preserve any necessary permanent consequence elsewhere.",
+            "A follow-up QA pass should show lower repetition, continuity, and cuttable-chapter risk.",
+        ],
+    )
+
+
+def _run_developmental_rewrite(
+    session: Session,
+    run: GenerationRun,
+    chapters: list,
+    qa_report: ManuscriptQaReport,
+    client: ProviderManager | OllamaClient,
+) -> tuple[str, str, str]:
+    story_bible = _story_bible_from_run(run)
+    continuity_ledger = _continuity_ledger_from_run(run)
+    provider_name, model_name = _resolve_stage_route(client, run, "developmental_rewrite")
+    run.current_step = "developmental_rewrite"
+    record_event(
+        session,
+        run,
+        "developmental_rewrite_started",
+        {"message": "Planning a developmental rewrite.", "provider_name": provider_name, "model_name": model_name},
+    )
+    session.commit()
+    try:
+        plan = _generate_structured_output(
+            client,
+            provider_name,
+            model_name,
+            lambda: build_developmental_rewrite_messages(run.project, story_bible, continuity_ledger, qa_report, chapters),
+            parse_developmental_rewrite_plan,
+            "developmental rewrite plan",
+        )
+    except Exception as exc:
+        record_event(
+            session,
+            run,
+            "developmental_rewrite_fallback",
+            {"message": "Developmental rewrite model output was unusable; generated a deterministic plan.", "error": str(exc)},
+        )
+        session.commit()
+        plan = _fallback_developmental_rewrite_plan(chapters, qa_report)
+
+    rewrite_markdown = render_developmental_rewrite_report_markdown(plan, qa_report)
+    revised_outline_markdown = render_revised_outline_markdown(run.project.title, plan, chapters)
+    developmental_qa_markdown = render_developmental_qa_comparison_markdown(plan, qa_report)
+    record_event(
+        session,
+        run,
+        "developmental_rewrite_completed",
+        {"message": "Developmental rewrite plan created.", "chapter_action_count": len(plan.chapter_actions)},
+    )
+    session.commit()
+    return rewrite_markdown, revised_outline_markdown, developmental_qa_markdown
+
+
 def process_run(session: Session, run: GenerationRun, settings: Settings, client: ProviderManager | OllamaClient) -> None:
     _ensure_not_canceled(session, run)
 
@@ -903,13 +1007,33 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
             + ", ".join(str(chapter_number) for chapter_number in incomplete_chapters)
         )
 
-    _, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
+    qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
+    rewrite_markdown = None
+    revised_outline_markdown = None
+    developmental_qa_markdown = None
+    if run.developmental_rewrite_enabled:
+        rewrite_markdown, revised_outline_markdown, developmental_qa_markdown = _run_developmental_rewrite(
+            session,
+            run,
+            completed_chapters,
+            qa_report,
+            client,
+        )
 
     run.current_step = "export"
     record_event(session, run, "artifact_export_started", {"message": "Rendering manuscript artifacts."})
     session.commit()
 
-    artifacts = export_run_artifacts(settings.artifacts_dir, run.project, run, completed_chapters, qa_markdown)
+    artifacts = export_run_artifacts(
+        settings.artifacts_dir,
+        run.project,
+        run,
+        completed_chapters,
+        qa_markdown,
+        rewrite_markdown,
+        revised_outline_markdown,
+        developmental_qa_markdown,
+    )
     replace_artifacts(session, run, artifacts)
     run.current_step = "completed"
     run.current_chapter = None

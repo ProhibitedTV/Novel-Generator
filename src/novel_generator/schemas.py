@@ -568,6 +568,82 @@ class ManuscriptQaReport(BaseModel):
         return _clean_list(value)
 
 
+class DevelopmentalChapterAction(BaseModel):
+    chapter_numbers: list[int] = Field(default_factory=list)
+    action: str = "rewrite"
+    reason: str = ""
+    required_story_change: str = ""
+    permanent_consequence: str = ""
+
+    @field_validator("chapter_numbers", mode="before")
+    @classmethod
+    def validate_chapter_numbers(cls, value: Any) -> list[int]:
+        if value is None:
+            return []
+        if isinstance(value, int):
+            return [value]
+        if isinstance(value, str):
+            value = [item.strip() for item in value.replace(",", "\n").splitlines()]
+        if isinstance(value, list):
+            numbers: list[int] = []
+            for item in value:
+                try:
+                    number = int(str(item).strip())
+                except ValueError:
+                    continue
+                if number > 0:
+                    numbers.append(number)
+            return list(dict.fromkeys(numbers))
+        return []
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def validate_action(cls, value: Any) -> str:
+        action = str(value or "rewrite").strip().lower().replace("-", "_").replace(" ", "_")
+        return action or "rewrite"
+
+    @field_validator("reason", "required_story_change", "permanent_consequence", mode="before")
+    @classmethod
+    def validate_action_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+
+class DevelopmentalRewritePlan(BaseModel):
+    overall_diagnosis: str = "Developmental rewrite assessment completed."
+    act_structure_notes: list[str] = Field(default_factory=list)
+    chapter_actions: list[DevelopmentalChapterAction] = Field(default_factory=list)
+    merge_candidates: list[str] = Field(default_factory=list)
+    cut_candidates: list[str] = Field(default_factory=list)
+    continuity_repairs: list[str] = Field(default_factory=list)
+    theme_arc_repairs: list[str] = Field(default_factory=list)
+    prose_pattern_repairs: list[str] = Field(default_factory=list)
+    pre_rewrite_risks: list[str] = Field(default_factory=list)
+    post_rewrite_risk_targets: list[str] = Field(default_factory=list)
+
+    @field_validator("overall_diagnosis", mode="before")
+    @classmethod
+    def validate_overall_diagnosis(cls, value: Any) -> str:
+        rendered = str(value or "").strip()
+        return rendered or "Developmental rewrite assessment completed."
+
+    @field_validator(
+        "act_structure_notes",
+        "merge_candidates",
+        "cut_candidates",
+        "continuity_repairs",
+        "theme_arc_repairs",
+        "prose_pattern_repairs",
+        "pre_rewrite_risks",
+        "post_rewrite_risk_targets",
+        mode="before",
+    )
+    @classmethod
+    def validate_plan_lists(cls, value: Any) -> list[str]:
+        return _clean_list(value)
+
+
 class TaskRouteOverride(BaseModel):
     provider_name: str = Field(min_length=1)
     model_name: str = Field(min_length=1)
@@ -590,6 +666,7 @@ class TaskRouting(BaseModel):
     chapter_summary: TaskRouteOverride | None = None
     continuity_update: TaskRouteOverride | None = None
     manuscript_qa: TaskRouteOverride | None = None
+    developmental_rewrite: TaskRouteOverride | None = None
 
 
 class ProviderCapabilities(BaseModel):
@@ -724,6 +801,7 @@ class RunCreate(BaseModel):
     min_words_per_chapter: int | None = Field(default=None, ge=1)
     max_words_per_chapter: int | None = Field(default=None, ge=1)
     pause_after_outline: bool = True
+    developmental_rewrite_enabled: bool = False
     task_routing: TaskRouting | None = None
     source_run_id: str | None = None
     resume_from_chapter: int | None = Field(default=None, ge=1)
@@ -743,6 +821,7 @@ class GenerationRunRead(BaseModel):
     max_words_per_chapter: int
     pipeline_version: int
     pause_after_outline: bool
+    developmental_rewrite_enabled: bool
     status: RunStatus
     current_step: str
     current_chapter: int | None

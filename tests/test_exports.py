@@ -53,6 +53,52 @@ def test_export_run_artifacts_writes_manuscript_and_qa_report_without_duplicate_
     assert "# QA Report" in qa_report
 
 
+def test_export_run_artifacts_writes_developmental_rewrite_outputs(tmp_path) -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="A disgraced archivist finds a living map under a failing city.",
+        desired_word_count=2000,
+        requested_chapters=1,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+        preferred_provider_name="ollama",
+        preferred_model="test-model",
+        task_routing={},
+    )
+    run = GenerationRun(
+        id="run-1",
+        project_id="project-1",
+        provider_name="ollama",
+        model_name="test-model",
+        target_word_count=2000,
+        requested_chapters=1,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+        task_routing={},
+        current_step="completed",
+    )
+    chapters = [ChapterDraft(chapter_number=1, title="Arrival", outline_summary="Wake the map.", content="A beginning.")]
+
+    artifacts = export_run_artifacts(
+        tmp_path,
+        project,
+        run,
+        chapters,
+        "# QA Report\n",
+        "# Developmental Rewrite Report\n",
+        "# Revised Outline\n",
+        "# Developmental QA Comparison\n",
+    )
+
+    artifact_kinds = {artifact.kind for artifact in artifacts}
+    assert "developmental-rewrite-report" in artifact_kinds
+    assert "revised-outline" in artifact_kinds
+    assert "developmental-qa-report" in artifact_kinds
+    assert (tmp_path / "run-1" / "developmental-rewrite-report.md").exists()
+    assert (tmp_path / "run-1" / "revised-outline.md").exists()
+    assert (tmp_path / "run-1" / "developmental-qa-comparison.md").exists()
+
+
 def test_publication_docx_profile_adds_front_matter_page_size_and_page_breaks(tmp_path) -> None:
     project = Project(
         title="The Glass Orchard",

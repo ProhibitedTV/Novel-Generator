@@ -6,10 +6,12 @@ from novel_generator.services.prompts import (
     build_chapter_draft_messages,
     build_chapter_plan_messages,
     build_chapter_revision_messages,
+    build_developmental_rewrite_messages,
     build_story_bible_messages,
     parse_chapter_critique,
     parse_chapter_plan,
     parse_continuity_update,
+    parse_developmental_rewrite_plan,
     parse_manuscript_qa_report,
     parse_outline,
     parse_story_bible,
@@ -677,6 +679,90 @@ def test_manuscript_qa_parser_coerces_scalar_note_fields() -> None:
     assert report.genre_contract_notes == [
         "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
     ]
+
+
+def test_developmental_rewrite_parser_accepts_wrapped_plan() -> None:
+    plan = parse_developmental_rewrite_plan(
+        """
+        {
+          "developmental_rewrite_plan": {
+            "overall_diagnosis": "The middle repeats the same alarm loop.",
+            "act_structure_notes": "Act II needs a non-technical consequence.",
+            "chapter_actions": [
+              {
+                "chapter_numbers": "1, 2",
+                "action": "merge",
+                "reason": "Both chapters perform the same access-and-lockout beat.",
+                "required_story_change": "Collapse the duplicated breach into one civilian-facing reversal.",
+                "permanent_consequence": "Iris loses shelter access."
+              }
+            ],
+            "merge_candidates": ["Chapters 1-2"],
+            "cut_candidates": [],
+            "continuity_repairs": [],
+            "theme_arc_repairs": [],
+            "prose_pattern_repairs": ["Remove repeated future-hangs phrasing."],
+            "pre_rewrite_risks": ["Repeated alarm loop."],
+            "post_rewrite_risk_targets": ["One merged chapter creates a unique consequence."]
+          }
+        }
+        """
+    )
+
+    assert plan.chapter_actions[0].chapter_numbers == [1, 2]
+    assert plan.chapter_actions[0].action == "merge"
+    assert plan.act_structure_notes == ["Act II needs a non-technical consequence."]
+    assert plan.post_rewrite_risk_targets == ["One merged chapter creates a unique consequence."]
+
+
+def test_developmental_rewrite_prompt_includes_full_manuscript_and_qa() -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="An archivist finds a living map under a failing city.",
+        desired_word_count=2000,
+        requested_chapters=1,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+        preferred_model="test-model",
+        story_brief={},
+    )
+    chapter = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Iris follows the map.",
+        content="Chapter 1: Signal\n\nIris follows the map. Tarin refuses the easy route.",
+        summary="Iris follows the map.",
+        qa_notes={"repetition_risk_score": 7},
+    )
+    chapter.continuity_update = {
+        "story_turn": {
+            "irreversible_change": "Iris burns the archive key.",
+            "protagonist_choice": "Iris chooses entry over permission.",
+            "permanent_consequence": "The lower stair stays open.",
+        }
+    }
+    qa_report = parse_manuscript_qa_report(
+        """
+        {
+          "overall_verdict": "The manuscript is coherent but repetitive.",
+          "repetition_risks": ["The first act repeats access-and-warning beats."]
+        }
+        """
+    )
+
+    messages = build_developmental_rewrite_messages(
+        project,
+        {"logline": "A map wakes.", "genre_profile": "sci_fi_thriller"},
+        {"current_patch_status": "No repair yet."},
+        qa_report,
+        [chapter],
+    )
+    prompt = messages[-1]["content"]
+
+    assert "Full manuscript chapters" in prompt
+    assert "Iris follows the map. Tarin refuses the easy route." in prompt
+    assert "pre_rewrite_risks" in prompt
+    assert "post_rewrite_risk_targets" in prompt
 
 
 def test_prompt_builders_include_prose_voice_profile() -> None:

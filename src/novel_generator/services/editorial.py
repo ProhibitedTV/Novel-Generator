@@ -11,6 +11,7 @@ from ..schemas import (
     CanonicalEntity,
     ChapterPlan,
     ContinuityLedger,
+    DevelopmentalRewritePlan,
     ManuscriptQaReport,
     StoryBible,
     StructuredOutlineEntry,
@@ -1771,4 +1772,145 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         *([f"- {item}" for item in report.lint_findings] or ["- No deterministic lint findings recorded."]),
         "",
     ]
+    return "\n".join(sections).strip() + "\n"
+
+
+def render_developmental_rewrite_report_markdown(
+    plan: DevelopmentalRewritePlan,
+    qa_report: ManuscriptQaReport,
+) -> str:
+    action_lines = []
+    for item in plan.chapter_actions:
+        chapters = ", ".join(f"Chapter {number}" for number in item.chapter_numbers) or "Unassigned chapter"
+        action_lines.extend(
+            [
+                f"### {chapters}: {item.action.replace('_', ' ').title()}",
+                "",
+                f"- Reason: {item.reason or 'No reason recorded.'}",
+                f"- Required story change: {item.required_story_change or 'No required story change recorded.'}",
+                f"- Permanent consequence: {item.permanent_consequence or 'No permanent consequence recorded.'}",
+                "",
+            ]
+        )
+    sections = [
+        "# Developmental Rewrite Report",
+        "",
+        f"**Overall diagnosis:** {plan.overall_diagnosis}",
+        "",
+        "## Act Structure Notes",
+        "",
+        *([f"- {item}" for item in plan.act_structure_notes] or ["- No act-structure notes recorded."]),
+        "",
+        "## Chapter Actions",
+        "",
+        *(action_lines or ["- No chapter actions recorded.", ""]),
+        "## Merge Candidates",
+        "",
+        *([f"- {item}" for item in plan.merge_candidates] or ["- No merge candidates recorded."]),
+        "",
+        "## Cut Candidates",
+        "",
+        *([f"- {item}" for item in plan.cut_candidates] or ["- No cut candidates recorded."]),
+        "",
+        "## Continuity Repairs",
+        "",
+        *([f"- {item}" for item in plan.continuity_repairs] or ["- No continuity repairs recorded."]),
+        "",
+        "## Theme Arc Repairs",
+        "",
+        *([f"- {item}" for item in plan.theme_arc_repairs] or ["- No theme-arc repairs recorded."]),
+        "",
+        "## Prose Pattern Repairs",
+        "",
+        *([f"- {item}" for item in plan.prose_pattern_repairs] or ["- No prose-pattern repairs recorded."]),
+        "",
+        "## QA Comparison",
+        "",
+        "### Pre-Rewrite Risks",
+        "",
+        *(
+            [f"- {item}" for item in plan.pre_rewrite_risks]
+            or [f"- {item}" for item in [*qa_report.warnings, *qa_report.repetition_risks, *qa_report.continuity_risks]]
+            or ["- No pre-rewrite risks recorded."]
+        ),
+        "",
+        "### Post-Rewrite Risk Targets",
+        "",
+        *([f"- {item}" for item in plan.post_rewrite_risk_targets] or ["- No post-rewrite risk targets recorded."]),
+        "",
+    ]
+    return "\n".join(sections).strip() + "\n"
+
+
+def render_developmental_qa_comparison_markdown(
+    plan: DevelopmentalRewritePlan,
+    qa_report: ManuscriptQaReport,
+) -> str:
+    pre_rewrite_risks = (
+        plan.pre_rewrite_risks
+        or [
+            *qa_report.warnings,
+            *qa_report.continuity_risks,
+            *qa_report.repetition_risks,
+            *qa_report.chapter_ending_quality_notes,
+            *qa_report.technical_escalation_fatigue_findings,
+            *qa_report.story_turn_quality_notes,
+        ]
+    )
+    sections = [
+        "# Developmental QA Comparison",
+        "",
+        f"**Pre-rewrite verdict:** {qa_report.overall_verdict}",
+        "",
+        "## Pre-Rewrite Risks",
+        "",
+        *([f"- {item}" for item in pre_rewrite_risks] or ["- No pre-rewrite risks recorded."]),
+        "",
+        "## Post-Rewrite Risk Targets",
+        "",
+        *([f"- {item}" for item in plan.post_rewrite_risk_targets] or ["- No post-rewrite risk targets recorded."]),
+        "",
+        "## Verification Focus",
+        "",
+        "- Run manuscript QA again after applying the revised outline.",
+        "- Confirm cut or merged chapters still preserve their permanent consequences.",
+        "- Confirm repetition, continuity, and cuttable-chapter risks trend down from the pre-rewrite report.",
+        "",
+    ]
+    return "\n".join(sections).strip() + "\n"
+
+
+def render_revised_outline_markdown(
+    project_title: str,
+    plan: DevelopmentalRewritePlan,
+    chapters: list[ChapterDraft],
+) -> str:
+    chapter_lookup = {chapter.chapter_number: chapter for chapter in chapters}
+    sections = [
+        "# Revised Outline",
+        "",
+        f"Project: {project_title}",
+        "",
+        "This outline is a developmental rewrite map, not rewritten prose.",
+        "",
+    ]
+    for item in plan.chapter_actions:
+        chapters = [chapter_lookup.get(number) for number in item.chapter_numbers]
+        titles = [
+            f"Chapter {chapter.chapter_number}: {chapter.title}"
+            for chapter in chapters
+            if chapter is not None
+        ]
+        heading = ", ".join(titles) or ", ".join(f"Chapter {number}" for number in item.chapter_numbers) or "Unassigned chapter"
+        sections.extend(
+            [
+                f"## {heading}",
+                "",
+                f"- Action: {item.action.replace('_', ' ').title()}",
+                f"- Reason: {item.reason or 'No reason recorded.'}",
+                f"- Required story change: {item.required_story_change or 'No required story change recorded.'}",
+                f"- Permanent consequence: {item.permanent_consequence or 'No permanent consequence recorded.'}",
+                "",
+            ]
+        )
     return "\n".join(sections).strip() + "\n"

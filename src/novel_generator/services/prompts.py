@@ -14,6 +14,7 @@ from ..schemas import (
     ChapterCritique,
     ChapterPlan,
     ContinuityLedger,
+    DevelopmentalRewritePlan,
     ManuscriptQaReport,
     StoryBible,
     StructuredOutlineEntry,
@@ -873,6 +874,75 @@ def build_manuscript_qa_messages(
     ]
 
 
+def build_developmental_rewrite_messages(
+    project: Project,
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any] | None,
+    qa_report: ManuscriptQaReport,
+    chapters: list[ChapterDraft],
+) -> list[dict[str, str]]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else (continuity_ledger.model_dump() if continuity_ledger else {})
+    profile = _story_bible_genre_profile(bible)
+    chapter_payload = [
+        {
+            "chapter_number": chapter.chapter_number,
+            "title": chapter.title,
+            "outline_summary": chapter.outline_summary,
+            "summary": chapter.summary or "",
+            "word_count": chapter.word_count,
+            "story_turn": _chapter_continuity_payload(chapter).get("story_turn", {}),
+            "qa_notes": chapter.qa_notes or {},
+            "content": sanitize_chapter_content(chapter.content or ""),
+        }
+        for chapter in chapters
+    ]
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a developmental editor planning structural rewrites for AI-generated fiction. "
+                "Return valid JSON only. Do not rewrite prose; diagnose structure and produce actionable chapter-map changes."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Create a developmental rewrite plan for '{project.title}'.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Pre-rewrite manuscript QA report:\n{json.dumps(qa_report.model_dump(), indent=2)}\n\n"
+                f"Full manuscript chapters:\n{json.dumps(chapter_payload, indent=2)}\n\n"
+                "Return a JSON object with exactly these keys:\n"
+                "{\n"
+                '  "overall_diagnosis": "string",\n'
+                '  "act_structure_notes": ["string"],\n'
+                '  "chapter_actions": [\n'
+                "    {\n"
+                '      "chapter_numbers": [1],\n'
+                '      "action": "keep|merge|cut|rewrite|bridge|reorder",\n'
+                '      "reason": "string",\n'
+                '      "required_story_change": "string",\n'
+                '      "permanent_consequence": "string"\n'
+                "    }\n"
+                "  ],\n"
+                '  "merge_candidates": ["string"],\n'
+                '  "cut_candidates": ["string"],\n'
+                '  "continuity_repairs": ["string"],\n'
+                '  "theme_arc_repairs": ["string"],\n'
+                '  "prose_pattern_repairs": ["string"],\n'
+                '  "pre_rewrite_risks": ["string"],\n'
+                '  "post_rewrite_risk_targets": ["string"]\n'
+                "}\n\n"
+                "Every chapter must appear in chapter_actions. Identify chapters that do not permanently change the story. "
+                "Use merge or cut only when the story can preserve the permanent consequence elsewhere. "
+                "The post_rewrite_risk_targets field should compare the current QA risks with what the revised outline must prove has improved."
+            ),
+        },
+    ]
+
+
 def build_json_repair_messages(raw_text: str, label: str, issue: str | None = None) -> list[dict[str, str]]:
     issue_text = f"\nParser or schema error:\n{issue}\n\n" if issue else "\n"
     return [
@@ -1093,6 +1163,16 @@ def parse_manuscript_qa_report(text: str) -> ManuscriptQaReport:
     if isinstance(payload, dict) and "qa_report" in payload:
         payload = payload["qa_report"]
     return ManuscriptQaReport.model_validate(payload)
+
+
+def parse_developmental_rewrite_plan(text: str) -> DevelopmentalRewritePlan:
+    payload = extract_json_payload(text)
+    if isinstance(payload, dict):
+        for key in ("developmental_rewrite_plan", "rewrite_plan", "plan"):
+            if key in payload:
+                payload = payload[key]
+                break
+    return DevelopmentalRewritePlan.model_validate(payload)
 
 
 def sanitize_chapter_content(content: str) -> str:
