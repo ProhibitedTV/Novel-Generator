@@ -323,6 +323,42 @@ TECHNICAL_FATIGUE_PATTERNS = {
     "life support": [r"\blife[- ]support warning\b", r"\blife support\b"],
 }
 
+CRISIS_LOOP_BEAT_PATTERNS = {
+    "tech-room opening": [
+        r"\b(?:control room|control bay|maintenance bay|server room|data vault|terminal room|console bay)\b",
+        r"\b(?:console|terminal|server rack|diagnostic wall)\b",
+    ],
+    "access/log operation": [
+        r"\b(?:access(?:ed|es|ing)?|enter(?:ed|s|ing)? (?:the )?access code|enter(?:ed|s|ing)? code|input code|typ(?:ed|es|ing) (?:another )?code|unlock(?:ed|s|ing)?)\b",
+        r"\b(?:log|logs|archive file|system file|console|terminal|override|backdoor)\b",
+    ],
+    "alarm/warning activation": [
+        r"\b(?:alarm|alarms|siren|sirens|warning banner|warning|red warning|countdown)\b",
+    ],
+    "lockdown/drone response": [
+        r"\b(?:lockdown|locked down|lockout|locked out|quarantine|sealed|seal|drone|drones|hatch sealed)\b",
+    ],
+    "broadcast/feed consequence": [
+        r"\b(?:broadcast|feed|citywide feed|colony-wide feed|public channel|network feed|signal feed)\b",
+    ],
+    "abstract consequence language": [
+        r"\bthe cost (?:was|is) clear\b",
+        r"\bthe weight of (?:the )?(?:decision|choice|moment)\b",
+        r"\bthe next problem\b",
+        r"\bthe future (?:hung|hangs|rested|rests|waited|waits)\b",
+        r"\bfuture (?:hung|hangs) in the balance\b",
+    ],
+}
+
+CRISIS_LOOP_BEAT_ORDER = (
+    "tech-room opening",
+    "access/log operation",
+    "alarm/warning activation",
+    "lockdown/drone response",
+    "broadcast/feed consequence",
+    "abstract consequence language",
+)
+
 COST_KEYWORDS = [
     "burned",
     "locked out",
@@ -644,6 +680,228 @@ def _technical_fatigue_hits(text: str) -> Counter[str]:
         if count:
             hits[label] = count
     return hits
+
+
+def _pattern_phrases(text: str, patterns: list[str], limit: int = 3) -> list[str]:
+    phrases: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            phrase = " ".join(match.group(0).split())
+            if phrase:
+                phrases.append(phrase)
+            if len(phrases) >= limit:
+                return list(dict.fromkeys(phrases))
+    return list(dict.fromkeys(phrases))
+
+
+def _crisis_loop_profile(chapter: ChapterDraft) -> dict[str, Any]:
+    content = chapter.content or ""
+    opening = " ".join(_sentences(content)[:3])
+    beat_hits: dict[str, list[str]] = {}
+    for label, patterns in CRISIS_LOOP_BEAT_PATTERNS.items():
+        search_text = opening if label == "tech-room opening" else content
+        phrases = _pattern_phrases(search_text, patterns)
+        if phrases:
+            beat_hits[label] = phrases
+    sequence = [label for label in CRISIS_LOOP_BEAT_ORDER if label in beat_hits]
+    ending_hits = _pattern_phrases(_ending_text(content) or content[-600:], CRISIS_LOOP_BEAT_PATTERNS["abstract consequence language"])
+    if ending_hits:
+        beat_hits["abstract consequence language"] = ending_hits
+        if "abstract consequence language" not in sequence:
+            sequence.append("abstract consequence language")
+    return {
+        "chapter_number": chapter.chapter_number,
+        "mode": _chapter_mode_from_summary(chapter.outline_summary or ""),
+        "sequence": sequence,
+        "beat_hits": beat_hits,
+        "fatigue_hits": _technical_fatigue_hits(content),
+        "final_beat_terms": _meaningful_terms(_final_beat_text(content)),
+    }
+
+
+def _profile_phrases(profile: dict[str, Any], labels: list[str], limit: int = 4) -> list[str]:
+    phrases: list[str] = []
+    beat_hits = profile.get("beat_hits", {})
+    for label in labels:
+        phrase = next(iter(beat_hits.get(label, []) or []), "")
+        if phrase:
+            phrases.append(f"{label}: '{phrase}'")
+            if len(phrases) >= limit:
+                return phrases
+    for label in labels:
+        for phrase in (beat_hits.get(label, []) or [])[1:]:
+            phrases.append(f"{label}: '{phrase}'")
+            if len(phrases) >= limit:
+                return phrases
+    for label in _technical_fatigue_labels(profile.get("fatigue_hits", Counter()), limit=limit):
+        phrases.append(f"mechanic: '{label}'")
+        if len(phrases) >= limit:
+            return phrases
+    return phrases
+
+
+def _crisis_loop_severity(shared_count: int, same_mode: bool, has_abstract_consequence: bool) -> str:
+    score = shared_count + (1 if same_mode else 0) + (1 if has_abstract_consequence else 0)
+    if score >= 5:
+        return "high"
+    if score >= 3:
+        return "medium"
+    return "low"
+
+
+def _crisis_loop_fix(severity: str, same_mode: bool, has_abstract_consequence: bool) -> str:
+    if severity == "high":
+        return "merge or cut one repeated crisis beat, then preserve only the stronger permanent consequence."
+    if same_mode:
+        return "vary scene mode and replace one technical escalation with interpersonal or civilian consequence."
+    if has_abstract_consequence:
+        return "replace abstract consequence language with a visible irreversible cost."
+    return "replace one repeated technical step with interpersonal consequence."
+
+
+def _crisis_loop_finding(
+    chapter_numbers: list[int],
+    pattern_labels: list[str],
+    representative_phrases: list[str],
+    *,
+    severity: str,
+    suggested_fix: str,
+) -> str:
+    chapters = ", ".join(str(number) for number in chapter_numbers)
+    pattern = " -> ".join(pattern_labels) if pattern_labels else "repeated crisis mechanics"
+    phrases = "; ".join(representative_phrases) if representative_phrases else "No representative phrases captured."
+    return (
+        f"Chapters {chapters} repeat crisis-loop pattern: {pattern}. "
+        f"Representative phrases: {phrases}. "
+        f"Severity: {severity}. "
+        f"Suggested fix: {suggested_fix}"
+    )
+
+
+def _crisis_loop_findings(chapters: list[ChapterDraft]) -> list[str]:
+    sorted_chapters = sorted(chapters, key=lambda item: item.chapter_number)
+    profiles = [_crisis_loop_profile(chapter) for chapter in sorted_chapters]
+    findings: list[str] = []
+
+    for previous, current in zip(profiles, profiles[1:]):
+        previous_sequence = set(previous["sequence"])
+        current_sequence = set(current["sequence"])
+        shared_sequence = [label for label in CRISIS_LOOP_BEAT_ORDER if label in previous_sequence and label in current_sequence]
+        shared_mechanics = set(previous["fatigue_hits"]) & set(current["fatigue_hits"])
+        final_overlap = previous["final_beat_terms"] & current["final_beat_terms"]
+        same_mode = bool(previous["mode"] and previous["mode"] == current["mode"])
+        has_abstract = "abstract consequence language" in shared_sequence
+        if (
+            len(shared_sequence) >= 3
+            or (len(shared_mechanics) >= 3 and same_mode)
+            or (len(shared_mechanics) >= 2 and len(final_overlap) >= 2)
+        ):
+            repeated_labels = shared_sequence or sorted(shared_mechanics)[:5]
+            severity = _crisis_loop_severity(len(repeated_labels), same_mode, has_abstract)
+            phrases = [
+                f"Ch{previous['chapter_number']} {item}"
+                for item in _profile_phrases(previous, repeated_labels, limit=3)
+            ]
+            phrases.extend(
+                f"Ch{current['chapter_number']} {item}"
+                for item in _profile_phrases(current, repeated_labels, limit=3)
+            )
+            findings.append(
+                _crisis_loop_finding(
+                    [previous["chapter_number"], current["chapter_number"]],
+                    repeated_labels,
+                    phrases,
+                    severity=severity,
+                    suggested_fix=_crisis_loop_fix(severity, same_mode, has_abstract),
+                )
+            )
+
+    opening_groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for profile in profiles:
+        opening_signature = tuple(
+            label
+            for label in ("tech-room opening", "access/log operation", "alarm/warning activation")
+            if label in profile["sequence"]
+        )
+        if len(opening_signature) >= 2:
+            opening_groups.setdefault(opening_signature, []).append(profile)
+    for signature, grouped_profiles in opening_groups.items():
+        if len(grouped_profiles) < 2:
+            continue
+        chapter_numbers = [profile["chapter_number"] for profile in grouped_profiles]
+        phrases: list[str] = []
+        for profile in grouped_profiles[:3]:
+            phrases.extend(
+                f"Ch{profile['chapter_number']} {item}"
+                for item in _profile_phrases(profile, list(signature), limit=1)
+            )
+        findings.append(
+            _crisis_loop_finding(
+                chapter_numbers,
+                list(signature),
+                phrases,
+                severity="medium",
+                suggested_fix="vary chapter openings before the next technical escalation begins.",
+            )
+        )
+
+    sequence_groups: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+    for profile in profiles:
+        core_sequence = tuple(
+            label
+            for label in (
+                "access/log operation",
+                "alarm/warning activation",
+                "lockdown/drone response",
+                "broadcast/feed consequence",
+            )
+            if label in profile["sequence"]
+        )
+        if len(core_sequence) >= 3:
+            sequence_groups.setdefault(core_sequence, []).append(profile)
+    for sequence, grouped_profiles in sequence_groups.items():
+        if len(grouped_profiles) < 2:
+            continue
+        chapter_numbers = [profile["chapter_number"] for profile in grouped_profiles]
+        phrases: list[str] = []
+        for profile in grouped_profiles[:3]:
+            phrases.extend(
+                f"Ch{profile['chapter_number']} {item}"
+                for item in _profile_phrases(profile, list(sequence), limit=2)
+            )
+        findings.append(
+            _crisis_loop_finding(
+                chapter_numbers,
+                list(sequence),
+                phrases[:6],
+                severity="high",
+                suggested_fix="merge or reorder the duplicated access-warning-lockout chain, then replace one beat with interpersonal consequence.",
+            )
+        )
+
+    abstract_profiles = [
+        profile
+        for profile in profiles
+        if "abstract consequence language" in profile["sequence"]
+    ]
+    if len(abstract_profiles) >= 2:
+        chapter_numbers = [profile["chapter_number"] for profile in abstract_profiles]
+        phrases = [
+            f"Ch{profile['chapter_number']} {item}"
+            for profile in abstract_profiles[:4]
+            for item in _profile_phrases(profile, ["abstract consequence language"], limit=1)
+        ]
+        findings.append(
+            _crisis_loop_finding(
+                chapter_numbers,
+                ["abstract consequence language"],
+                phrases,
+                severity="medium",
+                suggested_fix="replace repeated summary-stakes endings with visible objects, decisions, or losses.",
+            )
+        )
+
+    return list(dict.fromkeys(findings))
 
 
 def _technical_fatigue_score(hits: Counter[str], adjacent_overlap_count: int = 0) -> int:
@@ -1476,6 +1734,7 @@ def manuscript_quality_notes(
         "ideology_consistency_findings": [],
         "civilian_texture_findings": [],
         "technical_escalation_fatigue_findings": [],
+        "crisis_loop_findings": [],
         "scene_mode_distribution_notes": [],
         "story_turn_quality_notes": [],
         "genre_contract_notes": [],
@@ -1573,6 +1832,7 @@ def manuscript_quality_notes(
                 )
 
     sorted_chapters = sorted(chapters, key=lambda item: item.chapter_number)
+    notes["crisis_loop_findings"].extend(_crisis_loop_findings(sorted_chapters))
     for previous, current in zip(sorted_chapters, sorted_chapters[1:]):
         previous_hits = chapter_fatigue_hits.get(previous.chapter_number, Counter())
         current_hits = chapter_fatigue_hits.get(current.chapter_number, Counter())
@@ -1687,6 +1947,7 @@ def manuscript_quality_notes(
     notes["ideology_consistency_findings"] = list(dict.fromkeys(notes["ideology_consistency_findings"]))
     notes["civilian_texture_findings"] = list(dict.fromkeys(notes["civilian_texture_findings"]))
     notes["technical_escalation_fatigue_findings"] = list(dict.fromkeys(notes["technical_escalation_fatigue_findings"]))
+    notes["crisis_loop_findings"] = list(dict.fromkeys(notes["crisis_loop_findings"]))
     notes["scene_mode_distribution_notes"] = list(dict.fromkeys(notes["scene_mode_distribution_notes"]))
     notes["story_turn_quality_notes"] = list(dict.fromkeys(notes["story_turn_quality_notes"]))
     notes["genre_contract_notes"] = list(dict.fromkeys(notes["genre_contract_notes"]))
@@ -1754,6 +2015,10 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Technical Escalation Fatigue",
         "",
         *([f"- {item}" for item in report.technical_escalation_fatigue_findings] or ["- No technical escalation fatigue findings recorded."]),
+        "",
+        "## Crisis Loop Findings",
+        "",
+        *([f"- {item}" for item in report.crisis_loop_findings] or ["- No crisis-loop findings recorded."]),
         "",
         "## Scene Mode Distribution",
         "",
@@ -1830,7 +2095,15 @@ def render_developmental_rewrite_report_markdown(
         "",
         *(
             [f"- {item}" for item in plan.pre_rewrite_risks]
-            or [f"- {item}" for item in [*qa_report.warnings, *qa_report.repetition_risks, *qa_report.continuity_risks]]
+            or [
+                f"- {item}"
+                for item in [
+                    *qa_report.warnings,
+                    *qa_report.repetition_risks,
+                    *qa_report.continuity_risks,
+                    *qa_report.crisis_loop_findings,
+                ]
+            ]
             or ["- No pre-rewrite risks recorded."]
         ),
         "",
@@ -1854,6 +2127,7 @@ def render_developmental_qa_comparison_markdown(
             *qa_report.repetition_risks,
             *qa_report.chapter_ending_quality_notes,
             *qa_report.technical_escalation_fatigue_findings,
+            *qa_report.crisis_loop_findings,
             *qa_report.story_turn_quality_notes,
         ]
     )

@@ -861,12 +861,13 @@ def build_manuscript_qa_messages(
                 '  "ideology_consistency_findings": ["string"],\n'
                 '  "civilian_texture_findings": ["string"],\n'
                 '  "technical_escalation_fatigue_findings": ["string"],\n'
+                '  "crisis_loop_findings": ["string"],\n'
                 '  "scene_mode_distribution_notes": ["string"],\n'
                 '  "story_turn_quality_notes": ["string"],\n'
                 '  "genre_contract_notes": ["string"]\n'
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
-                "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, story_turn quality, cuttable chapters, duplicated irreversible turns, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
+                "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, story_turn quality, cuttable chapters, duplicated irreversible turns, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated crisis loops with chapter numbers, exact beat patterns, representative phrases, severity, and suggested structural fixes, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)
             ),

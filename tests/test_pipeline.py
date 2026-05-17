@@ -294,6 +294,7 @@ def _qa_report_json() -> str:
             "ideology_consistency_findings": ["Track whether Tarin's survival doctrine hardens intentionally."],
             "civilian_texture_findings": ["Show more concrete shelter life when the city locks down."],
             "technical_escalation_fatigue_findings": ["Watch for stacked alert language in late Act II."],
+            "crisis_loop_findings": ["Chapters 1, 2 repeat crisis-loop pattern: alarm/warning activation -> lockdown/drone response."],
             "story_turn_quality_notes": ["Chapter turns are mostly non-cuttable."],
         }
     )
