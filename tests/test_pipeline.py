@@ -132,6 +132,41 @@ def _outline_json(chapters: int) -> str:
     return json.dumps(payload)
 
 
+def _story_turn_payload(index: int) -> dict[str, object]:
+    turns: dict[int, dict[str, object]] = {
+        1: {
+            "irreversible_change": "Iris burns the archive master key to open the sealed maintenance stair.",
+            "protagonist_choice": "Iris sacrifices her last bargaining token instead of waiting for council permission.",
+            "choice_alternatives": ["Iris could hide the key and return to the council chamber."],
+            "permanent_consequence": "The archive can never lock the stair again, and Tarin loses his council escort.",
+            "why_this_chapter_cannot_be_cut": "Without the burned key, the stair remains sealed and the underground route never exists.",
+            "state_before": "The archive key still controls every lower stair.",
+            "state_after": "The maintenance stair is open, the key is ash, and Tarin is separated from his escort.",
+        },
+        2: {
+            "irreversible_change": "Iris signs the shelter families onto the living map, exposing their names to the buried system.",
+            "protagonist_choice": "Iris shares the route with the civilians instead of keeping it between herself and Tarin.",
+            "choice_alternatives": ["Iris could leave the families unmarked and move through the hatch alone."],
+            "permanent_consequence": "The buried system now tracks the shelter by name and demands Iris answer for them.",
+            "why_this_chapter_cannot_be_cut": "Without the named families on the map, Iris reaches the hatch without owing them protection.",
+            "state_before": "The shelter families are invisible to the map.",
+            "state_after": "The families glow on the map and the lower hatch recognizes Iris as their sponsor.",
+        },
+    }
+    return turns.get(
+        index,
+        {
+            "irreversible_change": f"Iris breaks beacon-{index} to reveal vault-{index}.",
+            "protagonist_choice": f"Iris chooses the exposed vault-{index} route over retreat.",
+            "choice_alternatives": [f"Iris could leave beacon-{index} untouched and withdraw."],
+            "permanent_consequence": f"Vault-{index} stays visible and cannot be hidden from Tarin.",
+            "why_this_chapter_cannot_be_cut": f"Without beacon-{index} breaking, vault-{index} never enters the route.",
+            "state_before": f"Beacon-{index} hides the vault path.",
+            "state_after": f"Vault-{index} is visible and the beacon is broken.",
+        },
+    )
+
+
 def _plan_json(index: int) -> str:
     return json.dumps(
         {
@@ -150,15 +185,7 @@ def _plan_json(index: int) -> str:
             "ideology_clash": f"Ideology clash {index}",
             "primary_interpersonal_conflict": f"Primary interpersonal conflict {index}",
             "independent_side_character_move": "Tarin resists",
-            "story_turn": {
-                "irreversible_change": f"Iris permanently changes leverage point {index}.",
-                "protagonist_choice": f"Iris chooses the costly path {index}.",
-                "choice_alternatives": [f"Iris could preserve the safer option {index}."],
-                "permanent_consequence": f"The mission state changes permanently {index}.",
-                "why_this_chapter_cannot_be_cut": f"Chapter {index} creates the required before-after state change.",
-                "state_before": f"State before {index}",
-                "state_after": f"State after {index}",
-            },
+            "story_turn": _story_turn_payload(index),
         }
     )
 
@@ -230,15 +257,7 @@ def _continuity_json(index: int) -> str:
             "civilian_pressure_points": [f"Civilian pressure {index}"],
             "emotional_open_loops": {"Iris": f"Emotional loop {index}"},
             "side_character_decisions": {"Tarin": [f"Tarin resists in chapter {index}"]},
-            "story_turn": {
-                "irreversible_change": f"Iris permanently changes leverage point {index}.",
-                "protagonist_choice": f"Iris chooses the costly path {index}.",
-                "choice_alternatives": [f"Iris could preserve the safer option {index}."],
-                "permanent_consequence": f"The mission state changes permanently {index}.",
-                "why_this_chapter_cannot_be_cut": f"Chapter {index} creates the required before-after state change.",
-                "state_before": f"State before {index}",
-                "state_after": f"State after {index}",
-            },
+            "story_turn": _story_turn_payload(index),
         }
     )
 
