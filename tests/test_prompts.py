@@ -466,6 +466,25 @@ def test_outline_parser_rejects_chapter_mode_repeated_from_previous_two() -> Non
         raise AssertionError("Expected the outline parser to reject repeated recent chapter modes.")
 
 
+def test_chapter_plan_parser_requires_complete_story_turn() -> None:
+    try:
+        parse_chapter_plan(
+            """
+            {
+              "opening_state": "Iris hides in the maintenance shaft.",
+              "character_goal": "Reach Tarin.",
+              "scene_beats": ["Iris climbs", "Tarin blocks her"],
+              "conflict_turn": "Tarin refuses the shortcut.",
+              "ending_hook": "The door opens."
+            }
+            """
+        )
+    except ValueError as exc:
+        assert "complete story_turn" in str(exc)
+    else:
+        raise AssertionError("Expected chapter plans to require a complete story_turn.")
+
+
 def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> None:
     plan = parse_chapter_plan(
         """
@@ -486,7 +505,16 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "primary_interpersonal_conflict": "Tarin accuses Iris of treating people like systems.",
           "independent_side_character_move": "Tarin blocks the elevator route until Iris gives him the source shard.",
           "genre_specific_focus": "Keep the clue chain fair and visible.",
-          "genre_specific_beats": ["Iris misreads a planted clue", "Tarin notices the missing map seam"]
+          "genre_specific_beats": ["Iris misreads a planted clue", "Tarin notices the missing map seam"],
+          "story_turn": {
+            "irreversible_change": "Iris burns her archive badge and can no longer return through official doors.",
+            "protagonist_choice": "Iris chooses to burn the badge to draw drones away from Tarin.",
+            "choice_alternatives": ["Iris could keep the badge and leave Tarin exposed."],
+            "permanent_consequence": "The archive records Iris as a hostile intruder.",
+            "why_this_chapter_cannot_be_cut": "Without this chapter, Iris never loses official access or proves she will sacrifice status for Tarin.",
+            "state_before": "Iris can still pass as an archivist.",
+            "state_after": "Iris is locked out and Tarin knows she chose him over the archive."
+          }
         }
         """
     )
@@ -515,6 +543,9 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "sensory_specificity_score": 8,
           "dialogue_tension_score": 4,
           "technical_escalation_fatigue_score": 7,
+          "irreversibility_score": 5,
+          "choice_clarity_score": 6,
+          "cuttable_chapter_risk_score": 4,
           "blocking_issues": ["The ending does not land on the planned object/action beat."],
           "soft_warnings": ["Tarin could resist harder in scene two."],
           "genre_contract_findings": ["The chapter plants one clue but needs a cleaner deduction turn."],
@@ -543,6 +574,15 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "civilian_pressure_points": ["Families in the shelter lose archive access and heating."],
           "emotional_open_loops": {"Iris": "She fears she is choosing freedom with a damaged self."},
           "side_character_decisions": {"Tarin": ["Tarin blocks the elevator route until Iris gives him the source shard."]},
+          "story_turn": {
+            "irreversible_change": "Iris burns her badge and loses archive access.",
+            "protagonist_choice": "Iris chooses to protect Tarin instead of preserving her credentials.",
+            "choice_alternatives": ["Iris could keep her badge and leave Tarin exposed."],
+            "permanent_consequence": "Archive Security treats Iris as an intruder.",
+            "why_this_chapter_cannot_be_cut": "The manuscript needs Iris to lose institutional access before the undercity chase.",
+            "state_before": "Iris still has official access.",
+            "state_after": "Iris is cut off from the archive."
+          },
           "genre_state": {"clue_chain": "The first planted clue has been misread."}
         }
         """
@@ -557,12 +597,17 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert critique.ideology_clarity_score == 8
     assert continuity.memory_damage["Iris"].startswith("She loses")
     assert plan.genre_specific_focus.startswith("Keep the clue chain")
+    assert plan.story_turn.irreversible_change.startswith("Iris burns")
     assert plan.independent_side_character_move.startswith("Tarin blocks")
     assert critique.genre_contract_score == 7
     assert critique.voice_distinctness_score == 5
     assert critique.dialogue_tension_score == 4
     assert critique.technical_escalation_fatigue_score == 7
+    assert critique.irreversibility_score == 5
+    assert critique.choice_clarity_score == 6
+    assert critique.cuttable_chapter_risk_score == 4
     assert continuity.genre_state["clue_chain"].startswith("The first planted clue")
+    assert continuity.story_turn.permanent_consequence.startswith("Archive Security")
     assert continuity.side_character_decisions["Tarin"][0].startswith("Tarin blocks")
 
 
@@ -715,6 +760,15 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
         "conflict_turn": "Tarin blocks her.",
         "ending_hook": "The door opens.",
         "independent_side_character_move": "Tarin blocks the route until Iris admits the map may be manipulating her.",
+        "story_turn": {
+            "irreversible_change": "Iris gives Tarin the source route and loses unilateral control of the map.",
+            "protagonist_choice": "Iris chooses to admit the map may be manipulating her.",
+            "choice_alternatives": ["Iris could keep the route secret and force Tarin to follow."],
+            "permanent_consequence": "Tarin now has leverage over the undercity route.",
+            "why_this_chapter_cannot_be_cut": "Without it, Iris never gives up control or lets Tarin alter the mission.",
+            "state_before": "Iris controls the route alone.",
+            "state_after": "Tarin can block or redirect the mission.",
+        },
     }
     ledger = {
         "current_patch_status": "Unknown.",
@@ -776,6 +830,8 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "Recent chapter modes to avoid repeating" in plan_prompt
     assert "previous 2 chapters" in plan_prompt
     assert "chapter_mode" in plan_prompt
+    assert "irreversible_change" in plan_prompt
+    assert "why_this_chapter_cannot_be_cut" in plan_prompt
     assert "Prose style profile" in draft_prompt
     assert "character_voice_map" in draft_prompt
     assert "final paragraph must include" in draft_prompt
@@ -783,11 +839,15 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "at most one primary system-crisis mechanic" in draft_prompt
     assert "human-visible consequences" in draft_prompt
     assert "independent_side_character_move" in draft_prompt
+    assert "chapter_plan.story_turn" in draft_prompt
     assert "side characters who appear must pursue their own want" in draft_prompt
     assert "style_alignment_score" in critique_prompt
     assert "ending_hook_type" in critique_prompt
     assert "scene_turn_resolution_score" in critique_prompt
     assert "technical_escalation_fatigue_score" in critique_prompt
+    assert "irreversibility_score" in critique_prompt
+    assert "choice_clarity_score" in critique_prompt
+    assert "cuttable_chapter_risk_score" in critique_prompt
     assert "abstract_cliffhanger" in critique_prompt
     assert "next problem" in critique_prompt
     assert "meta/outlining language" in critique_prompt
@@ -795,6 +855,7 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "side_character_independence_score should be 5 or lower" in critique_prompt
     assert "voice_and_texture" in critique_prompt
     assert "concrete external action" in revision_prompt
+    assert "unique protagonist choice and one permanent consequence" in revision_prompt
     assert "remove meta/outlining language" in revision_prompt
     assert "remove repeated alarm-console escalation" in revision_prompt
     assert "add or sharpen the planned independent_side_character_move" in revision_prompt

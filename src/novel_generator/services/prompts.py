@@ -55,6 +55,13 @@ def _genre_profile_block(profile: GenreProfile) -> str:
     return json.dumps(_genre_profile_payload(profile), indent=2)
 
 
+def _chapter_continuity_payload(chapter: ChapterDraft) -> dict[str, Any]:
+    payload = chapter.continuity_update or {}
+    if isinstance(payload, dict):
+        return payload
+    return getattr(payload, "model_dump", lambda: {})()
+
+
 def _story_brief_lines(project: Project) -> str:
     brief = project.story_brief or {}
     profile = genre_profile(brief.get("genre_profile"))
@@ -408,7 +415,16 @@ def build_chapter_plan_messages(
                 '  "primary_interpersonal_conflict": "string",\n'
                 '  "independent_side_character_move": "string",\n'
                 '  "genre_specific_focus": "string",\n'
-                '  "genre_specific_beats": ["profile-specific beat 1", "profile-specific beat 2"]\n'
+                '  "genre_specific_beats": ["profile-specific beat 1", "profile-specific beat 2"],\n'
+                '  "story_turn": {\n'
+                '    "irreversible_change": "string",\n'
+                '    "protagonist_choice": "string",\n'
+                '    "choice_alternatives": ["credible path not taken"],\n'
+                '    "permanent_consequence": "string",\n'
+                '    "why_this_chapter_cannot_be_cut": "string",\n'
+                '    "state_before": "string",\n'
+                '    "state_after": "string"\n'
+                "  }\n"
                 "}\n\n"
                 "Rules:\n"
                 f"- use only these chapter_mode values: {chapter_mode_options}\n"
@@ -416,6 +432,10 @@ def build_chapter_plan_messages(
                 "- chapter_mode must describe the dominant dramatic mode of the planned scene, not the presence of a console, alarm, drone, or system prop\n"
                 "- include 4 to 6 concrete scene beats\n"
                 "- at least one beat must materially worsen or transform the conflict\n"
+                "- define story_turn before drafting; it must name what permanently changes, what the protagonist chooses, what credible alternatives they rejected, and what consequence cannot be undone\n"
+                "- story_turn.why_this_chapter_cannot_be_cut must explain the structural damage caused if the chapter were removed, not just say it advances the plot\n"
+                "- story_turn.state_before and story_turn.state_after must differ in concrete plot state, leverage, relationship, public consequence, system state, or belief position\n"
+                "- do not use generic story_turn language such as 'stakes rise', 'the story moves forward', 'things change', or 'the next problem becomes clear'\n"
                 "- if the protagonist uses a technical solution, the plan must include a visible cost or exposure\n"
                 "- side characters must exert pressure from their own agendas, not merely help or warn\n"
                 "- independent_side_character_move must name what a non-protagonist does on purpose to change the plot, not just what they say or explain\n"
@@ -477,6 +497,8 @@ def build_chapter_draft_messages(
                 "- do not include a chapter heading or title line\n"
                 "- do not repeat the inciting incident unless the situation has materially changed\n"
                 "- the chapter must change the external situation and at least one character state\n"
+                "- enact chapter_plan.story_turn on the page: the irreversible_change, protagonist_choice, rejected alternatives, permanent_consequence, and state_after must be visible in scene action or dialogue\n"
+                "- do not substitute repeated technical activity for the unique choice/consequence promised by chapter_plan.story_turn\n"
                 "- if a technical solution works, show the concrete cost, fallout, or exposure on the page\n"
                 "- use at most one primary system-crisis mechanic; avoid stacking lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, and countdown beats in the same chapter\n"
                 "- when technical pressure appears, translate it into human-visible consequences: changed options, endangered civilians, fractured trust, physical danger, political constraint, or emotional cost\n"
@@ -570,6 +592,9 @@ def build_chapter_critique_messages(
                 '  "sensory_specificity_score": 0,\n'
                 '  "dialogue_tension_score": 0,\n'
                 '  "technical_escalation_fatigue_score": 0,\n'
+                '  "irreversibility_score": 0,\n'
+                '  "choice_clarity_score": 0,\n'
+                '  "cuttable_chapter_risk_score": 0,\n'
                 '  "blocking_issues": ["string"],\n'
                 '  "soft_warnings": ["string"],\n'
                 '  "genre_contract_findings": ["string"],\n'
@@ -579,6 +604,7 @@ def build_chapter_critique_messages(
                 "- classify ending_hook_type as concrete_action_hook when the final beat is a visible event/action/reversal, resolved_scene_turn when it quietly completes the scene turn with a tangible decision or state change, abstract_cliffhanger when it only gestures at future stakes, image_or_feeling_beat when it ends on mood/image without external consequence, or outline_summary when it uses planning language such as 'next problem' or 'next step'\n"
                 "- set revision_required to true if any draft prose contains meta/outlining language such as 'The chapter ends on', 'This lays the groundwork for', 'pushing the story forward', 'The story was not finished', 'the decision would shape the next chapter', or 'in the next chapter'\n"
                 "- set revision_required to true if the chapter has an abstract ending, outline-summary ending, image/feeling-only ending, unresolved immediate scene turn, zero-cost major solution, repeated emergency mechanics, repeated premise beat, side character who only helps or warns, proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
+                "- set revision_required to true if the chapter lacks the planned irreversible story_turn, if protagonist_choice is unclear, if the permanent_consequence is reversible or abstract, or if the chapter could be cut without changing the manuscript state\n"
                 "- use repair_scope 'voice_and_texture' when the main problem is flat prose, samey dialogue, repeated sentence rhythm, weak sensory specificity, or poor style-profile alignment\n"
                 "- use repair_scope 'targeted_scene_and_ending' for ending, cost, repetition-fatigue, or side-character pressure problems\n"
                 "- use repair_scope 'full_chapter' only when continuity or premise repetition is severe\n"
@@ -594,6 +620,9 @@ def build_chapter_critique_messages(
                 "- set revision_required to true if any style score is 5 or lower\n"
                 "- technical_escalation_fatigue_score should be higher when the chapter stacks or repeats lockdowns, quarantines, reboots, alarms, warning banners, reserve percentages, core temperature spikes, critical failures, drone breaches, overrides, or countdowns\n"
                 "- set revision_required to true if technical_escalation_fatigue_score is 6 or higher, especially when the technical stakes are not translated into interpersonal, political, physical, civilian, or emotional consequences\n"
+                "- irreversibility_score and choice_clarity_score should be higher when the story_turn is concrete, visible, and decision-driven\n"
+                "- cuttable_chapter_risk_score should be higher when the chapter can be removed or reordered without damaging plot state, character state, leverage, or consequence\n"
+                "- set revision_required to true if irreversibility_score or choice_clarity_score is 5 or lower, or if cuttable_chapter_risk_score is 6 or higher\n"
                 "- genre_contract_findings must call out any missing or especially strong profile-specific expectations\n"
                 "- include profile-specific lint focus: "
                 + "; ".join(profile.lint_focus)
@@ -646,6 +675,8 @@ def build_chapter_revision_messages(
                 "- if repair_scope is 'targeted_scene_and_ending', preserve the good material and rewrite only the weakest scene plus the final 2 to 3 paragraphs\n"
                 "- if repair_scope is 'full_chapter', rebuild the chapter so it stops repeating the premise and restores continuity\n"
                 "- if ending_hook_type is abstract_cliffhanger, image_or_feeling_beat, or outline_summary, replace the final beat with a concrete external action, visible consequence, irreversible decision, reveal, reversal, or state change\n"
+                "- if the chapter lacks a strong story_turn, replace repeated technical activity with one unique protagonist choice and one permanent consequence that makes the chapter non-cuttable\n"
+                "- make the revised chapter deliver chapter_plan.story_turn, especially irreversible_change, protagonist_choice, permanent_consequence, why_this_chapter_cannot_be_cut, state_before, and state_after\n"
                 "- make the revised ending resolve the chapter's immediate scene tension while opening the next problem through something visible on the page\n"
                 "- remove meta/outlining language such as 'The chapter ends on', 'This lays the groundwork for', 'The next problem', 'pushing the story forward', 'The story was not finished', 'the decision would shape the next chapter', or 'in the next chapter' while preserving the actual scene event\n"
                 "- do not end with planning-language such as 'the next problem', 'the next step', 'the choice ahead', or equivalent outline-summary language\n"
@@ -748,6 +779,15 @@ def build_continuity_update_messages(
                 '  "civilian_pressure_points": ["concrete civilian consequence"],\n'
                 '  "emotional_open_loops": {"Character": "unresolved emotional burden"},\n'
                 '  "side_character_decisions": {"Character": ["independent action that changed the plot"]},\n'
+                '  "story_turn": {\n'
+                '    "irreversible_change": "what permanently changed in this completed chapter",\n'
+                '    "protagonist_choice": "what the protagonist chose on the page",\n'
+                '    "choice_alternatives": ["credible alternative not chosen"],\n'
+                '    "permanent_consequence": "consequence that cannot simply be undone next chapter",\n'
+                '    "why_this_chapter_cannot_be_cut": "specific state, leverage, relationship, or consequence the manuscript loses if cut",\n'
+                '    "state_before": "concrete state before the chapter",\n'
+                '    "state_after": "concrete state after the chapter"\n'
+                "  },\n"
                 '  "genre_state": {"profile state key": "current state after this chapter"}\n'
                 "}\n\n"
                 "Rules:\n"
@@ -759,6 +799,7 @@ def build_continuity_update_messages(
                 "- if a character's belief is contradicted, mark whether that contradiction is intentional in ideology_shift_notes\n"
                 "- preserve memory damage, trust fractures, civilian harm, and unresolved emotional fallout unless the chapter truly heals them\n"
                 "- track major side-character decisions when a non-protagonist takes an independent action that changes the protagonist's options\n"
+                "- story_turn must summarize the actual irreversible change, protagonist choice, rejected alternatives, permanent consequence, and before/after manuscript state created by this chapter\n"
                 "- update genre_state using the selected profile's continuity focus and default_genre_state\n"
                 "- include profile-specific continuity focus: "
                 + "; ".join(profile.continuity_focus)
@@ -781,6 +822,7 @@ def build_manuscript_qa_messages(
             "title": chapter.title,
             "summary": chapter.summary or "",
             "word_count": chapter.word_count,
+            "story_turn": _chapter_continuity_payload(chapter).get("story_turn", {}),
             "qa_notes": chapter.qa_notes or {},
         }
         for chapter in chapters
@@ -819,10 +861,11 @@ def build_manuscript_qa_messages(
                 '  "civilian_texture_findings": ["string"],\n'
                 '  "technical_escalation_fatigue_findings": ["string"],\n'
                 '  "scene_mode_distribution_notes": ["string"],\n'
+                '  "story_turn_quality_notes": ["string"],\n'
                 '  "genre_contract_notes": ["string"]\n'
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
-                "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
+                "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, story_turn quality, cuttable chapters, duplicated irreversible turns, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)
             ),
@@ -1010,7 +1053,25 @@ def parse_chapter_plan(text: str) -> ChapterPlan:
     payload = extract_json_payload(text)
     if isinstance(payload, dict) and "plan" in payload:
         payload = payload["plan"]
-    return ChapterPlan.model_validate(payload)
+    plan = ChapterPlan.model_validate(payload)
+    required_story_turn_fields = [
+        "irreversible_change",
+        "protagonist_choice",
+        "permanent_consequence",
+        "why_this_chapter_cannot_be_cut",
+        "state_before",
+        "state_after",
+    ]
+    missing_fields = [
+        field_name
+        for field_name in required_story_turn_fields
+        if not getattr(plan.story_turn, field_name).strip()
+    ]
+    if not plan.story_turn.choice_alternatives:
+        missing_fields.append("choice_alternatives")
+    if missing_fields:
+        raise ValueError("Chapter plan must include a complete story_turn: " + ", ".join(missing_fields) + ".")
+    return plan
 
 
 def parse_chapter_critique(text: str) -> ChapterCritique:

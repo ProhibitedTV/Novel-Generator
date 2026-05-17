@@ -918,6 +918,9 @@
                       <li>Sensory specificity: {{ chapter.qa_notes.sensory_specificity_score|default(10) }}/10</li>
                       <li>Dialogue tension: {{ chapter.qa_notes.dialogue_tension_score|default(10) }}/10</li>
                       <li>Technical fatigue: {{ chapter.qa_notes.technical_escalation_fatigue_score|default(0) }}/10</li>
+                      <li>Irreversibility: {{ chapter.qa_notes.irreversibility_score|default(10) }}/10</li>
+                      <li>Choice clarity: {{ chapter.qa_notes.choice_clarity_score|default(10) }}/10</li>
+                      <li>Cuttable risk: {{ chapter.qa_notes.cuttable_chapter_risk_score|default(0) }}/10</li>
                     </ul>
                   </div>
                   {% if chapter.qa_notes.strengths %}

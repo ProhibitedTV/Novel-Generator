@@ -315,6 +315,36 @@ class ContinuityLedger(BaseModel):
         return _clean_list_map(value)
 
 
+class ChapterStoryTurn(BaseModel):
+    irreversible_change: str = ""
+    protagonist_choice: str = ""
+    choice_alternatives: list[str] = Field(default_factory=list)
+    permanent_consequence: str = ""
+    why_this_chapter_cannot_be_cut: str = ""
+    state_before: str = ""
+    state_after: str = ""
+
+    @field_validator("choice_alternatives", mode="before")
+    @classmethod
+    def validate_choice_alternatives(cls, value: Any) -> list[str]:
+        return _clean_list(value)
+
+    @field_validator(
+        "irreversible_change",
+        "protagonist_choice",
+        "permanent_consequence",
+        "why_this_chapter_cannot_be_cut",
+        "state_before",
+        "state_after",
+        mode="before",
+    )
+    @classmethod
+    def validate_story_turn_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+
 class ChapterPlan(BaseModel):
     chapter_mode: str = ""
     opening_state: str
@@ -334,6 +364,7 @@ class ChapterPlan(BaseModel):
     independent_side_character_move: str = ""
     genre_specific_focus: str = ""
     genre_specific_beats: list[str] = Field(default_factory=list)
+    story_turn: "ChapterStoryTurn" = Field(default_factory=lambda: ChapterStoryTurn())
 
     @field_validator("scene_beats", "genre_specific_beats", mode="before")
     @classmethod
@@ -365,6 +396,7 @@ class ChapterContinuityUpdate(BaseModel):
     civilian_pressure_points: list[str] = Field(default_factory=list)
     emotional_open_loops: dict[str, str] = Field(default_factory=dict)
     side_character_decisions: dict[str, list[str]] = Field(default_factory=dict)
+    story_turn: "ChapterStoryTurn" = Field(default_factory=lambda: ChapterStoryTurn())
     genre_state: dict[str, str] = Field(default_factory=dict)
 
     @field_validator(
@@ -407,6 +439,9 @@ class ChapterCritique(BaseModel):
     sensory_specificity_score: int = Field(default=10, ge=0, le=10)
     dialogue_tension_score: int = Field(default=10, ge=0, le=10)
     technical_escalation_fatigue_score: int = Field(default=0, ge=0, le=10)
+    irreversibility_score: int = Field(default=10, ge=0, le=10)
+    choice_clarity_score: int = Field(default=10, ge=0, le=10)
+    cuttable_chapter_risk_score: int = Field(default=0, ge=0, le=10)
     blocking_issues: list[str] = Field(default_factory=list)
     soft_warnings: list[str] = Field(default_factory=list)
     genre_contract_findings: list[str] = Field(default_factory=list)
@@ -443,6 +478,9 @@ class ChapterCritique(BaseModel):
         "sensory_specificity_score",
         "dialogue_tension_score",
         "technical_escalation_fatigue_score",
+        "irreversibility_score",
+        "choice_clarity_score",
+        "cuttable_chapter_risk_score",
         mode="before",
     )
     @classmethod
@@ -495,6 +533,7 @@ class ManuscriptQaReport(BaseModel):
     civilian_texture_findings: list[str] = Field(default_factory=list)
     technical_escalation_fatigue_findings: list[str] = Field(default_factory=list)
     scene_mode_distribution_notes: list[str] = Field(default_factory=list)
+    story_turn_quality_notes: list[str] = Field(default_factory=list)
     genre_contract_notes: list[str] = Field(default_factory=list)
 
     @field_validator("overall_verdict", mode="before")
@@ -520,6 +559,7 @@ class ManuscriptQaReport(BaseModel):
         "civilian_texture_findings",
         "technical_escalation_fatigue_findings",
         "scene_mode_distribution_notes",
+        "story_turn_quality_notes",
         "genre_contract_notes",
         mode="before",
     )

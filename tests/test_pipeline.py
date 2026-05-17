@@ -150,6 +150,15 @@ def _plan_json(index: int) -> str:
             "ideology_clash": f"Ideology clash {index}",
             "primary_interpersonal_conflict": f"Primary interpersonal conflict {index}",
             "independent_side_character_move": "Tarin resists",
+            "story_turn": {
+                "irreversible_change": f"Iris permanently changes leverage point {index}.",
+                "protagonist_choice": f"Iris chooses the costly path {index}.",
+                "choice_alternatives": [f"Iris could preserve the safer option {index}."],
+                "permanent_consequence": f"The mission state changes permanently {index}.",
+                "why_this_chapter_cannot_be_cut": f"Chapter {index} creates the required before-after state change.",
+                "state_before": f"State before {index}",
+                "state_after": f"State after {index}",
+            },
         }
     )
 
@@ -221,6 +230,15 @@ def _continuity_json(index: int) -> str:
             "civilian_pressure_points": [f"Civilian pressure {index}"],
             "emotional_open_loops": {"Iris": f"Emotional loop {index}"},
             "side_character_decisions": {"Tarin": [f"Tarin resists in chapter {index}"]},
+            "story_turn": {
+                "irreversible_change": f"Iris permanently changes leverage point {index}.",
+                "protagonist_choice": f"Iris chooses the costly path {index}.",
+                "choice_alternatives": [f"Iris could preserve the safer option {index}."],
+                "permanent_consequence": f"The mission state changes permanently {index}.",
+                "why_this_chapter_cannot_be_cut": f"Chapter {index} creates the required before-after state change.",
+                "state_before": f"State before {index}",
+                "state_after": f"State after {index}",
+            },
         }
     )
 
@@ -257,6 +275,7 @@ def _qa_report_json() -> str:
             "ideology_consistency_findings": ["Track whether Tarin's survival doctrine hardens intentionally."],
             "civilian_texture_findings": ["Show more concrete shelter life when the city locks down."],
             "technical_escalation_fatigue_findings": ["Watch for stacked alert language in late Act II."],
+            "story_turn_quality_notes": ["Chapter turns are mostly non-cuttable."],
         }
     )
 
