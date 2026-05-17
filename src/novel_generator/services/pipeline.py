@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import re
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -17,6 +18,7 @@ from ..schemas import (
     ManuscriptQaReport,
     StoryBible,
     StructuredOutlineEntry,
+    normalize_chapter_mode,
 )
 from ..settings import Settings
 from .editorial import (
@@ -114,6 +116,51 @@ def _require_requested_chapters(session: Session, run: GenerationRun) -> list:
 
 def _sync_summary_context(run: GenerationRun, window: int) -> None:
     run.summary_context = rolling_context(run.chapters, window)
+
+
+def _recent_mode_entries(value: str) -> list[tuple[int, str]]:
+    entries: list[tuple[int, str]] = []
+    for part in str(value or "").split(";"):
+        part = part.strip()
+        if not part.lower().startswith("chapter "):
+            continue
+        match = re.match(r"chapter\s+(\d+)\s*:\s*(.+)", part, flags=re.IGNORECASE)
+        if not match:
+            continue
+        chapter_number = int(match.group(1))
+        mode_text = match.group(2)
+        mode = normalize_chapter_mode(mode_text)
+        if mode:
+            entries.append((chapter_number, mode))
+    return entries
+
+
+def _ledger_with_chapter_mode(
+    ledger: ContinuityLedger,
+    chapter_number: int,
+    chapter_mode: str,
+) -> ContinuityLedger:
+    mode = normalize_chapter_mode(chapter_mode)
+    if not mode:
+        return ledger
+
+    recent_entries = [
+        entry
+        for entry in _recent_mode_entries(ledger.genre_state.get("recent_chapter_modes", ""))
+        if entry[0] != chapter_number
+    ]
+    recent_entries.append((chapter_number, mode))
+    recent_entries = recent_entries[-2:]
+    recent_rendered = "; ".join(f"Chapter {number}: {entry_mode}" for number, entry_mode in recent_entries)
+    return ledger.model_copy(
+        update={
+            "genre_state": {
+                **ledger.genre_state,
+                "last_chapter_mode": mode,
+                "recent_chapter_modes": recent_rendered,
+            }
+        }
+    )
 
 
 def _ensure_not_canceled(session: Session, run: GenerationRun) -> None:
@@ -662,6 +709,7 @@ def _draft_chapter(
         f"chapter {chapter.chapter_number} continuity update",
     )
     ledger_after = _ledger_from_update(ledger, continuity_update)
+    ledger_after = _ledger_with_chapter_mode(ledger_after, chapter.chapter_number, outline_entry.chapter_mode)
     if continuity_update.timeline != ledger_after.timeline:
         continuity_update.timeline = ledger_after.timeline
     _apply_continuity_canon_warnings(chapter, continuity_update)
@@ -759,6 +807,12 @@ def _run_manuscript_qa(
                     *deterministic_notes["technical_escalation_fatigue_findings"],
                 ]
             ),
+            "scene_mode_distribution_notes": _dedupe(
+                [
+                    *qa_report.scene_mode_distribution_notes,
+                    *deterministic_notes["scene_mode_distribution_notes"],
+                ]
+            ),
             "genre_contract_notes": _dedupe(
                 [*qa_report.genre_contract_notes, *deterministic_notes["genre_contract_notes"]]
             ),
@@ -791,6 +845,8 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
         if chapter.status == ChapterStatus.COMPLETED and chapter.content and chapter.summary and chapter.continuity_update:
             ledger = _continuity_ledger_from_run(run)
             ledger_after = _ledger_from_update(ledger, ChapterContinuityUpdate.model_validate(chapter.continuity_update))
+            outline_entry = _outline_entry(run, chapter.chapter_number)
+            ledger_after = _ledger_with_chapter_mode(ledger_after, chapter.chapter_number, outline_entry.chapter_mode)
             run.continuity_ledger = ledger_after.model_dump()
             _sync_summary_context(run, settings.chapter_summary_window)
             session.commit()

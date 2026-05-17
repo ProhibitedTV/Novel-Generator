@@ -328,7 +328,7 @@ def test_lint_flags_adjacent_technical_emergency_repetition() -> None:
     prior = ChapterDraft(
         chapter_number=1,
         title="Signal",
-        outline_summary="Mara discovers the patch.",
+        outline_summary="Mara discovers the patch. Mode: systems_crisis.",
         content=(
             "The lockdown slammed through the archive. An alarm cut over the speakers. "
             "A countdown opened above the console before Mara dragged the families into the shelter."
@@ -352,6 +352,7 @@ def test_lint_flags_adjacent_technical_emergency_repetition() -> None:
     assert result.needs_repair is True
     assert result.repair_scope == "targeted_scene_and_ending"
     assert any("adjacent chapter" in item.lower() for item in result.soft_warnings)
+    assert any("same scene mode" in item.lower() for item in result.soft_warnings)
 
 
 def test_lint_flags_system_crisis_without_human_visible_consequence() -> None:
@@ -378,21 +379,21 @@ def test_manuscript_quality_notes_tracks_repeated_emergency_mechanics() -> None:
         ChapterDraft(
             chapter_number=1,
             title="Signal",
-            outline_summary="Mara discovers the patch.",
+            outline_summary="Mara discovers the patch. Mode: systems_crisis.",
             content="A lockdown hit the vault. An alarm started while a countdown opened over the console.",
             status=ChapterStatus.COMPLETED,
         ),
         ChapterDraft(
             chapter_number=2,
             title="Watchdog",
-            outline_summary="Mara proves the patch is manipulating compliance.",
+            outline_summary="Mara proves the patch is manipulating compliance. Mode: systems_crisis.",
             content="The lockdown returned. A second alarm cut across the hatch as the countdown resumed.",
             status=ChapterStatus.COMPLETED,
         ),
         ChapterDraft(
             chapter_number=3,
             title="Source",
-            outline_summary="Mara finds the source.",
+            outline_summary="Mara finds the source. Mode: investigation.",
             content="Another alarm rang when the lockdown sealed the source chamber.",
             status=ChapterStatus.COMPLETED,
         ),
@@ -402,6 +403,8 @@ def test_manuscript_quality_notes_tracks_repeated_emergency_mechanics() -> None:
 
     assert any("Chapters 1-2 repeat emergency mechanics" in item for item in notes["technical_escalation_fatigue_findings"])
     assert any("Manuscript repeatedly returns" in item for item in notes["technical_escalation_fatigue_findings"])
+    assert any("Scene mode distribution" in item for item in notes["scene_mode_distribution_notes"])
+    assert any("repeat scene mode systems_crisis" in item for item in notes["scene_mode_distribution_notes"])
 
 
 def test_manuscript_lint_reports_meta_language_with_chapter_and_phrase() -> None:

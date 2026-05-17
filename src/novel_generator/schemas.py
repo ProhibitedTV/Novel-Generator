@@ -10,6 +10,51 @@ from .models import ChapterStatus, RunStatus
 from .services.genre_profiles import DEFAULT_GENRE_PROFILE, GENRE_PROFILES
 
 
+ALLOWED_CHAPTER_MODES = {
+    "investigation",
+    "interpersonal_confrontation",
+    "public_debate",
+    "family_private_emotional_scene",
+    "physical_escape",
+    "civic_fallout",
+    "technical_operation",
+    "moral_negotiation",
+    "quiet_reflection",
+    "public_uprising",
+    "governance_rebuilding",
+    "systems_crisis",
+    "breather",
+    "aftermath",
+    "reversal",
+}
+
+CHAPTER_MODE_ALIASES = {
+    "confrontation": "interpersonal_confrontation",
+    "interpersonal confrontation": "interpersonal_confrontation",
+    "public debate": "public_debate",
+    "family/private emotional scene": "family_private_emotional_scene",
+    "family private emotional scene": "family_private_emotional_scene",
+    "physical escape": "physical_escape",
+    "civic fallout / civilian aftermath": "civic_fallout",
+    "civic fallout": "civic_fallout",
+    "civilian aftermath": "civic_fallout",
+    "technical operation": "technical_operation",
+    "moral negotiation": "moral_negotiation",
+    "quiet reflection": "quiet_reflection",
+    "public uprising": "public_uprising",
+    "governance/rebuilding": "governance_rebuilding",
+    "governance rebuilding": "governance_rebuilding",
+    "systems crisis": "systems_crisis",
+}
+
+
+def normalize_chapter_mode(value: Any) -> str:
+    rendered = str(value or "").strip().lower().replace("-", "_")
+    rendered = " ".join(rendered.split())
+    rendered = CHAPTER_MODE_ALIASES.get(rendered, rendered.replace(" ", "_"))
+    return rendered
+
+
 def _clean_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -240,6 +285,11 @@ class StructuredOutlineEntry(BaseModel):
     def validate_genre_specific_beats(cls, value: Any) -> list[str]:
         return _clean_list(value)
 
+    @field_validator("chapter_mode", mode="before")
+    @classmethod
+    def validate_chapter_mode(cls, value: Any) -> str:
+        return normalize_chapter_mode(value)
+
 
 class ContinuityLedger(BaseModel):
     current_patch_status: str
@@ -266,6 +316,7 @@ class ContinuityLedger(BaseModel):
 
 
 class ChapterPlan(BaseModel):
+    chapter_mode: str = ""
     opening_state: str
     character_goal: str
     scene_beats: list[str] = Field(default_factory=list)
@@ -288,6 +339,11 @@ class ChapterPlan(BaseModel):
     @classmethod
     def validate_plan_genre_specific_beats(cls, value: Any) -> list[str]:
         return _clean_list(value)
+
+    @field_validator("chapter_mode", mode="before")
+    @classmethod
+    def validate_chapter_mode(cls, value: Any) -> str:
+        return normalize_chapter_mode(value)
 
 
 class ChapterContinuityUpdate(BaseModel):
@@ -438,6 +494,7 @@ class ManuscriptQaReport(BaseModel):
     ideology_consistency_findings: list[str] = Field(default_factory=list)
     civilian_texture_findings: list[str] = Field(default_factory=list)
     technical_escalation_fatigue_findings: list[str] = Field(default_factory=list)
+    scene_mode_distribution_notes: list[str] = Field(default_factory=list)
     genre_contract_notes: list[str] = Field(default_factory=list)
 
     @field_validator("overall_verdict", mode="before")
@@ -462,6 +519,7 @@ class ManuscriptQaReport(BaseModel):
         "ideology_consistency_findings",
         "civilian_texture_findings",
         "technical_escalation_fatigue_findings",
+        "scene_mode_distribution_notes",
         "genre_contract_notes",
         mode="before",
     )
