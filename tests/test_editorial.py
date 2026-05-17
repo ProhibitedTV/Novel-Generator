@@ -444,6 +444,44 @@ def test_manuscript_quality_notes_tracks_repeated_emergency_mechanics() -> None:
     assert any("Manuscript repeatedly returns" in item for item in notes["technical_escalation_fatigue_findings"])
     assert any("Scene mode distribution" in item for item in notes["scene_mode_distribution_notes"])
     assert any("repeat scene mode systems_crisis" in item for item in notes["scene_mode_distribution_notes"])
+    assert any("Chapters 1, 2 repeat crisis-loop pattern" in item for item in notes["crisis_loop_findings"])
+    assert any("Severity:" in item and "Suggested fix:" in item for item in notes["crisis_loop_findings"])
+
+
+def test_manuscript_quality_notes_detects_repeated_access_warning_lockout_loop() -> None:
+    chapters = [
+        ChapterDraft(
+            chapter_number=1,
+            title="Signal",
+            outline_summary="Mara discovers the patch. Mode: systems_crisis.",
+            content=(
+                "Mara entered the access code at the console and opened the system logs. "
+                "A warning banner flashed before the lockdown sealed the hatch. "
+                "The citywide feed destabilized, and the cost was clear."
+            ),
+            status=ChapterStatus.COMPLETED,
+        ),
+        ChapterDraft(
+            chapter_number=2,
+            title="Watchdog",
+            outline_summary="Mara proves the patch is manipulating compliance. Mode: systems_crisis.",
+            content=(
+                "Nadia typed another code into the terminal and pulled the audit logs. "
+                "A red warning started a countdown before a drone sealed the corridor. "
+                "The public channel shook, and the future hung in the balance."
+            ),
+            status=ChapterStatus.COMPLETED,
+        ),
+    ]
+
+    notes = manuscript_quality_notes(chapters, _story_bible())
+
+    finding = next(item for item in notes["crisis_loop_findings"] if "Chapters 1, 2" in item)
+    assert "access/log operation -> alarm/warning activation -> lockdown/drone response -> broadcast/feed consequence" in finding
+    assert "entered the access code" in finding
+    assert "red warning" in finding
+    assert "Severity: high" in finding
+    assert "Suggested fix:" in finding
 
 
 def test_manuscript_quality_notes_flags_equivalent_story_turns() -> None:

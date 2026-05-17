@@ -7,6 +7,7 @@ from novel_generator.services.prompts import (
     build_chapter_plan_messages,
     build_chapter_revision_messages,
     build_developmental_rewrite_messages,
+    build_manuscript_qa_messages,
     build_story_bible_messages,
     parse_chapter_critique,
     parse_chapter_plan,
@@ -670,15 +671,45 @@ def test_manuscript_qa_parser_coerces_scalar_note_fields() -> None:
         {
           "overall_verdict": "The manuscript is coherent enough to export.",
           "warnings": "The middle needs one cleaner physical escalation.",
+          "crisis_loop_findings": "Chapters 1, 2 repeat access -> warning -> lockout.",
           "genre_contract_notes": "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
         }
         """
     )
 
     assert report.warnings == ["The middle needs one cleaner physical escalation."]
+    assert report.crisis_loop_findings == ["Chapters 1, 2 repeat access -> warning -> lockout."]
     assert report.genre_contract_notes == [
         "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
     ]
+
+
+def test_manuscript_qa_prompt_requests_crisis_loop_findings() -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="An archivist finds a living map under a failing city.",
+        desired_word_count=2000,
+        requested_chapters=1,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+        preferred_model="test-model",
+        story_brief={},
+    )
+    chapter = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Iris follows the map.",
+        content="Iris enters a code. A warning starts a lockdown.",
+        summary="Iris trips a warning loop.",
+        status=ChapterStatus.COMPLETED,
+    )
+
+    prompt = build_manuscript_qa_messages(project, {"logline": "A map wakes."}, ["Repeated lockout."], [chapter])[-1]["content"]
+
+    assert '"crisis_loop_findings"' in prompt
+    assert "representative phrases" in prompt
+    assert "severity" in prompt
+    assert "suggested structural fixes" in prompt
 
 
 def test_developmental_rewrite_parser_accepts_wrapped_plan() -> None:
@@ -745,7 +776,8 @@ def test_developmental_rewrite_prompt_includes_full_manuscript_and_qa() -> None:
         """
         {
           "overall_verdict": "The manuscript is coherent but repetitive.",
-          "repetition_risks": ["The first act repeats access-and-warning beats."]
+          "repetition_risks": ["The first act repeats access-and-warning beats."],
+          "crisis_loop_findings": ["Chapters 1, 2 repeat crisis-loop pattern: access/log operation -> alarm/warning activation."]
         }
         """
     )
@@ -761,6 +793,8 @@ def test_developmental_rewrite_prompt_includes_full_manuscript_and_qa() -> None:
 
     assert "Full manuscript chapters" in prompt
     assert "Iris follows the map. Tarin refuses the easy route." in prompt
+    assert "crisis_loop_findings" in prompt
+    assert "access/log operation -> alarm/warning activation" in prompt
     assert "pre_rewrite_risks" in prompt
     assert "post_rewrite_risk_targets" in prompt
 

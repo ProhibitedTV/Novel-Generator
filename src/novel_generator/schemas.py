@@ -532,6 +532,7 @@ class ManuscriptQaReport(BaseModel):
     ideology_consistency_findings: list[str] = Field(default_factory=list)
     civilian_texture_findings: list[str] = Field(default_factory=list)
     technical_escalation_fatigue_findings: list[str] = Field(default_factory=list)
+    crisis_loop_findings: list[str] = Field(default_factory=list)
     scene_mode_distribution_notes: list[str] = Field(default_factory=list)
     story_turn_quality_notes: list[str] = Field(default_factory=list)
     genre_contract_notes: list[str] = Field(default_factory=list)
@@ -558,6 +559,7 @@ class ManuscriptQaReport(BaseModel):
         "ideology_consistency_findings",
         "civilian_texture_findings",
         "technical_escalation_fatigue_findings",
+        "crisis_loop_findings",
         "scene_mode_distribution_notes",
         "story_turn_quality_notes",
         "genre_contract_notes",

@@ -839,6 +839,12 @@ def _run_manuscript_qa(
                     *deterministic_notes["technical_escalation_fatigue_findings"],
                 ]
             ),
+            "crisis_loop_findings": _dedupe(
+                [
+                    *qa_report.crisis_loop_findings,
+                    *deterministic_notes["crisis_loop_findings"],
+                ]
+            ),
             "scene_mode_distribution_notes": _dedupe(
                 [
                     *qa_report.scene_mode_distribution_notes,
@@ -871,6 +877,7 @@ def _fallback_developmental_rewrite_plan(
             *qa_report.repetition_risks,
             *qa_report.chapter_ending_quality_notes,
             *qa_report.technical_escalation_fatigue_findings,
+            *qa_report.crisis_loop_findings,
             *qa_report.scene_mode_distribution_notes,
             *qa_report.story_turn_quality_notes,
         ]
