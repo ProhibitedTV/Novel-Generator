@@ -9,6 +9,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from ..models import ChapterDraft, GenerationRun, Project
 from ..schemas import (
+    ALLOWED_CHAPTER_MODES,
     ChapterContinuityUpdate,
     ChapterCritique,
     ChapterPlan,
@@ -18,6 +19,10 @@ from ..schemas import (
     StructuredOutlineEntry,
 )
 from .genre_profiles import GenreProfile, genre_profile
+
+
+def _chapter_mode_options() -> str:
+    return "|".join(sorted(ALLOWED_CHAPTER_MODES))
 
 
 def _project_genre_profile(project: Project) -> GenreProfile:
@@ -249,6 +254,7 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
 def build_outline_messages(project: Project, run: GenerationRun, story_bible: StoryBible | dict[str, Any]) -> list[dict[str, str]]:
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
     profile = _story_bible_genre_profile(bible)
+    chapter_mode_options = _chapter_mode_options()
     minimum_setbacks = max(1, math.ceil(run.requested_chapters * 0.3))
     midpoint_start = max(2, math.ceil(run.requested_chapters * 0.4))
     midpoint_end = max(midpoint_start, math.floor(run.requested_chapters * 0.7))
@@ -294,7 +300,7 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 '        "visible_object_or_actor": "string",\n'
                 '        "next_problem": "string"\n'
                 "      },\n"
-                '      "chapter_mode": "investigation|systems_crisis|breather|aftermath|confrontation|reversal",\n'
+                f'      "chapter_mode": "{chapter_mode_options}",\n'
                 '      "civilian_life_detail": "string",\n'
                 '      "emotional_reveal": "string",\n'
                 '      "ideology_pressure": "string",\n'
@@ -312,6 +318,10 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 "- no more than 2 consecutive clean wins are allowed\n"
                 f"{midpoint_rule}"
                 "- every block of 4 chapters must contain at least 1 chapter_mode of breather or aftermath\n"
+                "- choose chapter_mode as the dominant dramatic mode, not just the location or prop used in the scene\n"
+                f"- use only these chapter_mode values: {chapter_mode_options}\n"
+                "- build an intentional distribution of chapter_mode values across the whole book\n"
+                "- no chapter may repeat the same chapter_mode used by either of the previous 2 chapters unless the story is in one continuous unavoidable sequence\n"
                 "- side_character_friction must name who pushes back on the protagonist and why\n"
                 "- independent_side_character_move must name a side character action that changes the protagonist's options through cost, reveal, betrayal, rescue, escalation, public consequence, or political constraint\n"
                 "- cost_if_success must describe the price of progress, not just the risk of failure\n"
@@ -356,6 +366,9 @@ def build_chapter_plan_messages(
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
     profile = _story_bible_genre_profile(bible)
     relevant_canon = _filter_canon_registry(bible, entry, ledger)
+    genre_state = ledger.get("genre_state") or {}
+    recent_chapter_modes = str(genre_state.get("recent_chapter_modes", "") or "").strip()
+    chapter_mode_options = _chapter_mode_options()
     return [
         {
             "role": "system",
@@ -374,9 +387,11 @@ def build_chapter_plan_messages(
                 f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Relevant canon registry for this chapter:\n{json.dumps(relevant_canon, indent=2)}\n\n"
                 f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Recent chapter modes to avoid repeating:\n{recent_chapter_modes or 'No recent chapter modes tracked yet.'}\n\n"
                 f"Current chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 "Return a JSON object with exactly these keys:\n"
                 "{\n"
+                f'  "chapter_mode": "{chapter_mode_options}",\n'
                 '  "opening_state": "string",\n'
                 '  "character_goal": "string",\n'
                 '  "scene_beats": ["beat 1", "beat 2", "beat 3", "beat 4"],\n'
@@ -396,6 +411,9 @@ def build_chapter_plan_messages(
                 '  "genre_specific_beats": ["profile-specific beat 1", "profile-specific beat 2"]\n'
                 "}\n\n"
                 "Rules:\n"
+                f"- use only these chapter_mode values: {chapter_mode_options}\n"
+                "- set chapter_mode to the current outline chapter_mode unless that would repeat a mode from the previous 2 chapters; if it would repeat, choose the closest non-repeating dramatic mode that preserves the same plot outcome\n"
+                "- chapter_mode must describe the dominant dramatic mode of the planned scene, not the presence of a console, alarm, drone, or system prop\n"
                 "- include 4 to 6 concrete scene beats\n"
                 "- at least one beat must materially worsen or transform the conflict\n"
                 "- if the protagonist uses a technical solution, the plan must include a visible cost or exposure\n"
@@ -466,6 +484,7 @@ def build_chapter_draft_messages(
                 "- if side_character_friction exists, the side character must push back from their own agenda\n"
                 "- if independent_side_character_move exists, put that side character's concrete action on the page and make it alter the protagonist's options\n"
                 "- side characters who appear must pursue their own want through action, not only warn, explain, oppose, or validate the protagonist\n"
+                "- honor chapter_plan.chapter_mode as the dominant dramatic mode; do not let a non-technical mode collapse back into console -> alarm -> drone machinery\n"
                 "- keep names, aliases, systems, projects, and locations consistent with the canon registry\n"
                 "- if chapter_mode is breather or aftermath, make face-to-face emotional conflict the primary motion instead of another terminal emergency\n"
                 "- include the civilian_life_detail and emotional_reveal explicitly on the page\n"
@@ -799,10 +818,11 @@ def build_manuscript_qa_messages(
                 '  "ideology_consistency_findings": ["string"],\n'
                 '  "civilian_texture_findings": ["string"],\n'
                 '  "technical_escalation_fatigue_findings": ["string"],\n'
+                '  "scene_mode_distribution_notes": ["string"],\n'
                 '  "genre_contract_notes": ["string"]\n'
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
-                "meta/outlining language in chapter prose, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
+                "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)
             ),
@@ -916,6 +936,14 @@ def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
     if any(not item.chapter_mode.strip() for item in outline):
         raise ValueError("Outline entries must include a chapter_mode for every chapter.")
 
+    invalid_modes = sorted({item.chapter_mode for item in outline if item.chapter_mode not in ALLOWED_CHAPTER_MODES})
+    if invalid_modes:
+        raise ValueError(
+            "Outline entries use unsupported chapter_mode values: "
+            + ", ".join(invalid_modes)
+            + "."
+        )
+
     minimum_setbacks = max(1, math.ceil(requested_chapters * 0.3))
     setback_count = sum(1 for item in outline if item.outcome_type.lower() in {"setback", "reversal"})
     if setback_count < minimum_setbacks:
@@ -967,6 +995,13 @@ def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
                 raise ValueError(
                     f"Outline must include a breather or aftermath chapter between chapters {start_number} and {end_number}."
                 )
+
+    for index, item in enumerate(outline):
+        recent_modes = {previous.chapter_mode for previous in outline[max(0, index - 2) : index]}
+        if item.chapter_mode in recent_modes:
+            raise ValueError(
+                f"Chapter {item.chapter_number} repeats chapter_mode '{item.chapter_mode}' from one of the previous 2 chapters."
+            )
 
     return [item.model_dump() for item in outline]
 

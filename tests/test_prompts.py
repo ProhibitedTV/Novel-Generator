@@ -4,6 +4,7 @@ from novel_generator.models import ChapterDraft, ChapterStatus, GenerationRun, P
 from novel_generator.services.prompts import (
     build_chapter_critique_messages,
     build_chapter_draft_messages,
+    build_chapter_plan_messages,
     build_chapter_revision_messages,
     build_story_bible_messages,
     parse_chapter_critique,
@@ -372,6 +373,99 @@ def test_outline_parser_requires_breather_or_aftermath_every_four_chapters() -> 
         raise AssertionError("Expected the outline parser to require a breather or aftermath chapter.")
 
 
+def test_outline_parser_rejects_chapter_mode_repeated_from_previous_two() -> None:
+    try:
+        parse_outline(
+            """
+            {
+              "chapters": [
+                {
+                  "chapter_number": 1,
+                  "act": "Act I",
+                  "title": "One",
+                  "objective": "One",
+                  "conflict_turn": "One",
+                  "character_turn": "One",
+                  "reveal": "One",
+                  "ending_state": "One",
+                  "outcome_type": "setback",
+                  "primary_obstacle": "One",
+                  "cost_if_success": "One",
+                  "side_character_friction": "One",
+                  "concrete_ending_hook": {"trigger": "One", "visible_object_or_actor": "One", "next_problem": "One"},
+                  "chapter_mode": "investigation",
+                  "civilian_life_detail": "One",
+                  "emotional_reveal": "One",
+                  "ideology_pressure": "One"
+                },
+                {
+                  "chapter_number": 2,
+                  "act": "Act I",
+                  "title": "Two",
+                  "objective": "Two",
+                  "conflict_turn": "Two",
+                  "character_turn": "Two",
+                  "reveal": "Two",
+                  "ending_state": "Two",
+                  "outcome_type": "reversal",
+                  "primary_obstacle": "Two",
+                  "cost_if_success": "Two",
+                  "side_character_friction": "Two",
+                  "concrete_ending_hook": {"trigger": "Two", "visible_object_or_actor": "Two", "next_problem": "Two"},
+                  "chapter_mode": "aftermath",
+                  "civilian_life_detail": "Two",
+                  "emotional_reveal": "Two",
+                  "ideology_pressure": "Two"
+                },
+                {
+                  "chapter_number": 3,
+                  "act": "Act II",
+                  "title": "Three",
+                  "objective": "Three",
+                  "conflict_turn": "Three",
+                  "character_turn": "Three",
+                  "reveal": "Three",
+                  "ending_state": "Three",
+                  "outcome_type": "setback",
+                  "primary_obstacle": "Three",
+                  "cost_if_success": "Three",
+                  "side_character_friction": "Three",
+                  "concrete_ending_hook": {"trigger": "Three", "visible_object_or_actor": "Three", "next_problem": "Three"},
+                  "chapter_mode": "investigation",
+                  "civilian_life_detail": "Three",
+                  "emotional_reveal": "Three",
+                  "ideology_pressure": "Three"
+                },
+                {
+                  "chapter_number": 4,
+                  "act": "Act II",
+                  "title": "Four",
+                  "objective": "Four",
+                  "conflict_turn": "Four",
+                  "character_turn": "Four",
+                  "reveal": "Four",
+                  "ending_state": "Four",
+                  "outcome_type": "setback",
+                  "primary_obstacle": "Four",
+                  "cost_if_success": "Four",
+                  "side_character_friction": "Four",
+                  "concrete_ending_hook": {"trigger": "Four", "visible_object_or_actor": "Four", "next_problem": "Four"},
+                  "chapter_mode": "public_debate",
+                  "civilian_life_detail": "Four",
+                  "emotional_reveal": "Four",
+                  "ideology_pressure": "Four"
+                }
+              ]
+            }
+            """,
+            requested_chapters=4,
+        )
+    except ValueError as exc:
+        assert "previous 2 chapters" in str(exc)
+    else:
+        raise AssertionError("Expected the outline parser to reject repeated recent chapter modes.")
+
+
 def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> None:
     plan = parse_chapter_plan(
         """
@@ -638,7 +732,7 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
         "civilian_pressure_points": [],
         "emotional_open_loops": {},
         "side_character_decisions": {},
-        "genre_state": {},
+        "genre_state": {"recent_chapter_modes": "Chapter 1: investigation; Chapter 2: aftermath"},
     }
     critique = parse_chapter_critique(
         """
@@ -672,12 +766,16 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     )
 
     story_prompt = build_story_bible_messages(project, run)[1]["content"]
+    plan_prompt = build_chapter_plan_messages(project, run, chapter, outline_entry, story_bible, ledger, "No previous chapters.")[1]["content"]
     draft_prompt = build_chapter_draft_messages(project, run, chapter, outline_entry, story_bible, ledger, "No previous chapters.", plan)[1]["content"]
     critique_prompt = build_chapter_critique_messages(project, chapter, outline_entry, story_bible, ledger, plan, [])[1]["content"]
     revision_prompt = build_chapter_revision_messages(project, chapter, outline_entry, story_bible, ledger, plan, critique, [])[1]["content"]
 
     assert "Style targets: taut lyric pressure" in story_prompt
     assert '"style_profile"' in story_prompt
+    assert "Recent chapter modes to avoid repeating" in plan_prompt
+    assert "previous 2 chapters" in plan_prompt
+    assert "chapter_mode" in plan_prompt
     assert "Prose style profile" in draft_prompt
     assert "character_voice_map" in draft_prompt
     assert "final paragraph must include" in draft_prompt

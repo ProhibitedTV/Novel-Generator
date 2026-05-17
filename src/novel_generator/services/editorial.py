@@ -13,6 +13,7 @@ from ..schemas import (
     ManuscriptQaReport,
     StoryBible,
     StructuredOutlineEntry,
+    normalize_chapter_mode,
 )
 
 
@@ -27,6 +28,8 @@ STOCK_PHRASES = [
 ]
 
 BREATHER_MODES = {"breather", "aftermath"}
+
+TECHNICAL_SCENE_MODES = {"systems_crisis", "technical_operation"}
 
 ABSTRACT_ENDING_PATTERNS = [
     r"\bnext problem\b",
@@ -635,6 +638,15 @@ def _technical_fatigue_labels(hits: Counter[str], limit: int = 5) -> list[str]:
     return sorted(hits, key=lambda label: (-hits[label], label))[:limit]
 
 
+def _chapter_mode_from_summary(summary: str) -> str:
+    match = re.search(
+        r"\bMode:\s*([^.;\n]+?)(?=\s+(?:Obstacle|Conflict turn|Reveal|Cost if success|Ending state|Genre state):|[.;\n]|$)",
+        summary or "",
+        flags=re.IGNORECASE,
+    )
+    return normalize_chapter_mode(match.group(1)) if match else ""
+
+
 def _adjacent_prior_chapter(chapter_number: int, prior_chapters: list[ChapterDraft]) -> ChapterDraft | None:
     candidates = [
         previous
@@ -1054,7 +1066,7 @@ def lint_chapter(
         result.needs_repair = True
         result.repair_scope = "targeted_scene_and_ending"
 
-    chapter_mode = str(entry.get("chapter_mode", "")).strip().lower()
+    chapter_mode = normalize_chapter_mode(chapter_plan.get("chapter_mode") or entry.get("chapter_mode", ""))
     if chapter_mode in BREATHER_MODES:
         civilian_terms = _meaningful_terms(str(entry.get("civilian_life_detail", "")))
         emotional_terms = _meaningful_terms(str(entry.get("emotional_reveal", "")))
@@ -1167,6 +1179,7 @@ def lint_chapter(
     adjacent_hits = _technical_fatigue_hits(adjacent_chapter.content or "") if adjacent_chapter else Counter()
     adjacent_overlap = set(fatigue_hits) & set(adjacent_hits)
     fatigue_score = _technical_fatigue_score(fatigue_hits, len(adjacent_overlap))
+    adjacent_mode = _chapter_mode_from_summary(adjacent_chapter.outline_summary or "") if adjacent_chapter else ""
     if fatigue_score >= 6:
         labels = _technical_fatigue_labels(fatigue_hits)
         message = (
@@ -1184,6 +1197,21 @@ def lint_chapter(
         result.soft_warnings.append(
             f"Chapter {chapter.chapter_number} repeats technical emergency mechanics from adjacent chapter "
             f"{adjacent_chapter.chapter_number}: {', '.join(sorted(adjacent_overlap)[:5])}."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+    if adjacent_chapter and adjacent_mode and adjacent_mode == chapter_mode and adjacent_overlap:
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} repeats the same scene mode as adjacent chapter "
+            f"{adjacent_chapter.chapter_number} ({chapter_mode}) and reuses crisis mechanics: "
+            + ", ".join(sorted(adjacent_overlap)[:5])
+            + ". Vary the dominant dramatic mode or replace the repeated mechanic."
+        )
+        result.needs_repair = True
+        result.repair_scope = "targeted_scene_and_ending"
+    if chapter_mode and chapter_mode not in TECHNICAL_SCENE_MODES and fatigue_score >= 4:
+        result.soft_warnings.append(
+            f"Chapter {chapter.chapter_number} is tagged as {chapter_mode} but the prose falls back into technical crisis mechanics."
         )
         result.needs_repair = True
         result.repair_scope = "targeted_scene_and_ending"
@@ -1309,6 +1337,7 @@ def manuscript_quality_notes(
         "ideology_consistency_findings": [],
         "civilian_texture_findings": [],
         "technical_escalation_fatigue_findings": [],
+        "scene_mode_distribution_notes": [],
         "genre_contract_notes": [],
     }
 
@@ -1388,6 +1417,37 @@ def manuscript_quality_notes(
                 + ", ".join(sorted(overlap)[:5])
                 + "."
             )
+        previous_mode = _chapter_mode_from_summary(previous.outline_summary or "")
+        current_mode = _chapter_mode_from_summary(current.outline_summary or "")
+        if previous_mode and current_mode and previous_mode == current_mode:
+            if overlap:
+                notes["scene_mode_distribution_notes"].append(
+                    f"Chapters {previous.chapter_number}-{current.chapter_number} repeat scene mode {current_mode} and crisis mechanics: "
+                    + ", ".join(sorted(overlap)[:5])
+                    + "."
+                )
+            else:
+                notes["scene_mode_distribution_notes"].append(
+                    f"Chapters {previous.chapter_number}-{current.chapter_number} repeat scene mode {current_mode}; consider varying the dominant dramatic mode."
+                )
+
+    chapter_modes = [
+        _chapter_mode_from_summary(chapter.outline_summary or "")
+        for chapter in sorted_chapters
+    ]
+    chapter_modes = [mode for mode in chapter_modes if mode]
+    if chapter_modes:
+        mode_counts = Counter(chapter_modes)
+        distribution = ", ".join(
+            f"{mode}: {count}"
+            for mode, count in sorted(mode_counts.items(), key=lambda item: (-item[1], item[0]))
+        )
+        notes["scene_mode_distribution_notes"].append(f"Scene mode distribution: {distribution}.")
+        dominant_mode, dominant_count = mode_counts.most_common(1)[0]
+        if len(chapter_modes) >= 4 and dominant_count / len(chapter_modes) > 0.5:
+            notes["scene_mode_distribution_notes"].append(
+                f"Scene mode {dominant_mode} dominates {dominant_count} of {len(chapter_modes)} chapters; broaden the chapter-mode mix."
+            )
 
     mechanic_chapter_counts: Counter[str] = Counter()
     for hits in chapter_fatigue_hits.values():
@@ -1455,6 +1515,7 @@ def manuscript_quality_notes(
     notes["ideology_consistency_findings"] = list(dict.fromkeys(notes["ideology_consistency_findings"]))
     notes["civilian_texture_findings"] = list(dict.fromkeys(notes["civilian_texture_findings"]))
     notes["technical_escalation_fatigue_findings"] = list(dict.fromkeys(notes["technical_escalation_fatigue_findings"]))
+    notes["scene_mode_distribution_notes"] = list(dict.fromkeys(notes["scene_mode_distribution_notes"]))
     notes["genre_contract_notes"] = list(dict.fromkeys(notes["genre_contract_notes"]))
     return notes
 
@@ -1520,6 +1581,10 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Technical Escalation Fatigue",
         "",
         *([f"- {item}" for item in report.technical_escalation_fatigue_findings] or ["- No technical escalation fatigue findings recorded."]),
+        "",
+        "## Scene Mode Distribution",
+        "",
+        *([f"- {item}" for item in report.scene_mode_distribution_notes] or ["- No scene-mode distribution notes recorded."]),
         "",
         "## Genre Contract",
         "",
