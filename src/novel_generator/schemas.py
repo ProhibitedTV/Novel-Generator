@@ -642,6 +642,10 @@ class ManuscriptQaReport(BaseModel):
     def validate_continuity_bible_table(cls, value: Any) -> list[Any]:
         if value is None:
             return []
+        if isinstance(value, ContinuityBibleRow):
+            return [value.model_dump()]
+        if isinstance(value, BaseModel):
+            return [value.model_dump()]
         if isinstance(value, str):
             rendered = value.strip()
             return [{"item_type": "note", "name": rendered, "notes": rendered}] if rendered else []
@@ -650,7 +654,11 @@ class ManuscriptQaReport(BaseModel):
         if isinstance(value, list):
             rows: list[Any] = []
             for item in value:
-                if isinstance(item, dict):
+                if isinstance(item, ContinuityBibleRow):
+                    rows.append(item.model_dump())
+                elif isinstance(item, BaseModel):
+                    rows.append(item.model_dump())
+                elif isinstance(item, dict):
                     rows.append(item)
                 elif str(item).strip():
                     rendered = str(item).strip()

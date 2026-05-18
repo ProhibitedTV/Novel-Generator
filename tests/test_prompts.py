@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from novel_generator.models import ChapterDraft, ChapterStatus, GenerationRun, Project
+from novel_generator.schemas import ContinuityBibleRow, ManuscriptQaReport
 from novel_generator.services.prompts import (
     build_chapter_critique_messages,
     build_chapter_draft_messages,
@@ -706,6 +707,24 @@ def test_manuscript_qa_parser_coerces_scalar_note_fields() -> None:
     assert report.genre_contract_notes == [
         "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
     ]
+
+
+def test_manuscript_qa_report_preserves_continuity_bible_row_instances() -> None:
+    row = ContinuityBibleRow(
+        item_type="system",
+        name="Living Map",
+        canon_status="Dormant guide lattice",
+        observed_status="Actively responding to Iris",
+        notes="1 structured transition recorded.",
+    )
+
+    report = ManuscriptQaReport.model_validate({"continuity_bible_table": [row]})
+
+    assert report.continuity_bible_table[0].item_type == "system"
+    assert report.continuity_bible_table[0].name == "Living Map"
+    assert report.continuity_bible_table[0].canon_status == "Dormant guide lattice"
+    assert report.continuity_bible_table[0].observed_status == "Actively responding to Iris"
+    assert report.continuity_bible_table[0].notes == "1 structured transition recorded."
 
 
 def test_manuscript_qa_prompt_requests_crisis_loop_findings() -> None:
