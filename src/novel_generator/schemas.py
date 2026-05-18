@@ -291,6 +291,46 @@ class StructuredOutlineEntry(BaseModel):
         return normalize_chapter_mode(value)
 
 
+class SystemStateTransition(BaseModel):
+    system_name: str = ""
+    previous_state: str = ""
+    new_state: str = ""
+    cause: str = ""
+    chapter_number: int = 0
+
+    @field_validator("system_name", "previous_state", "new_state", "cause", mode="before")
+    @classmethod
+    def validate_transition_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @field_validator("chapter_number", mode="before")
+    @classmethod
+    def validate_chapter_number(cls, value: Any) -> int:
+        if value in (None, ""):
+            return 0
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+
+class ContinuityBibleRow(BaseModel):
+    item_type: str = ""
+    name: str = ""
+    canon_status: str = ""
+    observed_status: str = ""
+    notes: str = ""
+
+    @field_validator("item_type", "name", "canon_status", "observed_status", "notes", mode="before")
+    @classmethod
+    def validate_row_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+
 class ContinuityLedger(BaseModel):
     current_patch_status: str
     character_states: dict[str, str] = Field(default_factory=dict)
@@ -308,11 +348,24 @@ class ContinuityLedger(BaseModel):
     emotional_open_loops: dict[str, str] = Field(default_factory=dict)
     side_character_decisions: dict[str, list[str]] = Field(default_factory=dict)
     genre_state: dict[str, str] = Field(default_factory=dict)
+    system_state_by_name: dict[str, str] = Field(default_factory=dict)
+    system_state_transitions: list[SystemStateTransition] = Field(default_factory=list)
 
     @field_validator("side_character_decisions", mode="before")
     @classmethod
     def validate_side_character_decisions(cls, value: Any) -> dict[str, list[str]]:
         return _clean_list_map(value)
+
+    @field_validator("system_state_transitions", mode="before")
+    @classmethod
+    def validate_system_state_transitions(cls, value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value]
+        return []
 
 
 class ChapterStoryTurn(BaseModel):
@@ -398,6 +451,7 @@ class ChapterContinuityUpdate(BaseModel):
     side_character_decisions: dict[str, list[str]] = Field(default_factory=dict)
     story_turn: "ChapterStoryTurn" = Field(default_factory=lambda: ChapterStoryTurn())
     genre_state: dict[str, str] = Field(default_factory=dict)
+    system_state_transitions: list[SystemStateTransition] = Field(default_factory=list)
 
     @field_validator(
         "open_threads",
@@ -414,6 +468,17 @@ class ChapterContinuityUpdate(BaseModel):
     @classmethod
     def validate_side_character_decisions(cls, value: Any) -> dict[str, list[str]]:
         return _clean_list_map(value)
+
+    @field_validator("system_state_transitions", mode="before")
+    @classmethod
+    def validate_system_state_transitions(cls, value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value]
+        return []
 
 
 class ChapterCritique(BaseModel):
@@ -536,6 +601,8 @@ class ManuscriptQaReport(BaseModel):
     scene_mode_distribution_notes: list[str] = Field(default_factory=list)
     story_turn_quality_notes: list[str] = Field(default_factory=list)
     genre_contract_notes: list[str] = Field(default_factory=list)
+    continuity_bible_findings: list[str] = Field(default_factory=list)
+    continuity_bible_table: list[ContinuityBibleRow] = Field(default_factory=list)
 
     @field_validator("overall_verdict", mode="before")
     @classmethod
@@ -563,11 +630,41 @@ class ManuscriptQaReport(BaseModel):
         "scene_mode_distribution_notes",
         "story_turn_quality_notes",
         "genre_contract_notes",
+        "continuity_bible_findings",
         mode="before",
     )
     @classmethod
     def validate_report_lists(cls, value: Any) -> list[str]:
         return _clean_list(value)
+
+    @field_validator("continuity_bible_table", mode="before")
+    @classmethod
+    def validate_continuity_bible_table(cls, value: Any) -> list[Any]:
+        if value is None:
+            return []
+        if isinstance(value, ContinuityBibleRow):
+            return [value.model_dump()]
+        if isinstance(value, BaseModel):
+            return [value.model_dump()]
+        if isinstance(value, str):
+            rendered = value.strip()
+            return [{"item_type": "note", "name": rendered, "notes": rendered}] if rendered else []
+        if isinstance(value, dict):
+            return [value]
+        if isinstance(value, list):
+            rows: list[Any] = []
+            for item in value:
+                if isinstance(item, ContinuityBibleRow):
+                    rows.append(item.model_dump())
+                elif isinstance(item, BaseModel):
+                    rows.append(item.model_dump())
+                elif isinstance(item, dict):
+                    rows.append(item)
+                elif str(item).strip():
+                    rendered = str(item).strip()
+                    rows.append({"item_type": "note", "name": rendered, "notes": rendered})
+            return rows
+        return []
 
 
 class DevelopmentalChapterAction(BaseModel):

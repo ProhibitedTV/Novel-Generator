@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from novel_generator.models import ChapterDraft, ChapterStatus, GenerationRun, Project
+from novel_generator.schemas import ContinuityBibleRow, ManuscriptQaReport
 from novel_generator.services.prompts import (
     build_chapter_critique_messages,
     build_chapter_draft_messages,
     build_chapter_plan_messages,
     build_chapter_revision_messages,
+    build_continuity_update_messages,
     build_developmental_rewrite_messages,
     build_manuscript_qa_messages,
     build_story_bible_messages,
@@ -577,6 +579,15 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
           "civilian_pressure_points": ["Families in the shelter lose archive access and heating."],
           "emotional_open_loops": {"Iris": "She fears she is choosing freedom with a damaged self."},
           "side_character_decisions": {"Tarin": ["Tarin blocks the elevator route until Iris gives him the source shard."]},
+          "system_state_transitions": [
+            {
+              "system_name": "Living Map",
+              "previous_state": "Hidden but active.",
+              "new_state": "Actively responding to Iris.",
+              "cause": "Iris burns her badge and speaks the map's buried name.",
+              "chapter_number": 1
+            }
+          ],
           "story_turn": {
             "irreversible_change": "Iris burns her badge and loses archive access.",
             "protagonist_choice": "Iris chooses to protect Tarin instead of preserving her credentials.",
@@ -612,6 +623,8 @@ def test_chapter_plan_critique_and_continuity_parsers_accept_richer_shapes() -> 
     assert continuity.genre_state["clue_chain"].startswith("The first planted clue")
     assert continuity.story_turn.permanent_consequence.startswith("Archive Security")
     assert continuity.side_character_decisions["Tarin"][0].startswith("Tarin blocks")
+    assert continuity.system_state_transitions[0].system_name == "Living Map"
+    assert continuity.system_state_transitions[0].new_state.startswith("Actively responding")
 
 
 def test_chapter_critique_parser_normalizes_percentage_style_scores() -> None:
@@ -672,6 +685,16 @@ def test_manuscript_qa_parser_coerces_scalar_note_fields() -> None:
           "overall_verdict": "The manuscript is coherent enough to export.",
           "warnings": "The middle needs one cleaner physical escalation.",
           "crisis_loop_findings": "Chapters 1, 2 repeat access -> warning -> lockout.",
+          "continuity_bible_findings": "Mara changes pronouns without a logged canon fix.",
+          "continuity_bible_table": [
+            {
+              "item_type": "character",
+              "name": "Mara",
+              "canon_status": "Engineer",
+              "observed_status": "Pronouns shift from she/her to he/him.",
+              "notes": "Needs canon decision."
+            }
+          ],
           "genre_contract_notes": "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
         }
         """
@@ -679,9 +702,29 @@ def test_manuscript_qa_parser_coerces_scalar_note_fields() -> None:
 
     assert report.warnings == ["The middle needs one cleaner physical escalation."]
     assert report.crisis_loop_findings == ["Chapters 1, 2 repeat access -> warning -> lockout."]
+    assert report.continuity_bible_findings == ["Mara changes pronouns without a logged canon fix."]
+    assert report.continuity_bible_table[0].name == "Mara"
     assert report.genre_contract_notes == [
         "The selected sci-fi thriller contract is present, but the ending promise needs sharper pressure."
     ]
+
+
+def test_manuscript_qa_report_preserves_continuity_bible_row_instances() -> None:
+    row = ContinuityBibleRow(
+        item_type="system",
+        name="Living Map",
+        canon_status="Dormant guide lattice",
+        observed_status="Actively responding to Iris",
+        notes="1 structured transition recorded.",
+    )
+
+    report = ManuscriptQaReport.model_validate({"continuity_bible_table": [row]})
+
+    assert report.continuity_bible_table[0].item_type == "system"
+    assert report.continuity_bible_table[0].name == "Living Map"
+    assert report.continuity_bible_table[0].canon_status == "Dormant guide lattice"
+    assert report.continuity_bible_table[0].observed_status == "Actively responding to Iris"
+    assert report.continuity_bible_table[0].notes == "1 structured transition recorded."
 
 
 def test_manuscript_qa_prompt_requests_crisis_loop_findings() -> None:
@@ -701,15 +744,59 @@ def test_manuscript_qa_prompt_requests_crisis_loop_findings() -> None:
         outline_summary="Iris follows the map.",
         content="Iris enters a code. A warning starts a lockdown.",
         summary="Iris trips a warning loop.",
+        continuity_update={"system_state_transitions": []},
         status=ChapterStatus.COMPLETED,
     )
 
     prompt = build_manuscript_qa_messages(project, {"logline": "A map wakes."}, ["Repeated lockout."], [chapter])[-1]["content"]
 
     assert '"crisis_loop_findings"' in prompt
+    assert '"continuity_bible_findings"' in prompt
+    assert '"continuity_bible_table"' in prompt
+    assert '"system_state_transitions"' in prompt
     assert "representative phrases" in prompt
     assert "severity" in prompt
     assert "suggested structural fixes" in prompt
+    assert "suggested renames" in prompt
+    assert "unexplained core-system state transitions" in prompt
+
+
+def test_continuity_update_prompt_requests_system_state_transitions() -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="An archivist finds a living map under a failing city.",
+        desired_word_count=2000,
+        requested_chapters=1,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+        preferred_model="test-model",
+        story_brief={},
+    )
+    chapter = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Iris follows the map.",
+        summary="Iris wakes the Living Map.",
+        status=ChapterStatus.COMPLETED,
+    )
+    story_bible = {
+        "logline": "A map wakes.",
+        "genre_profile": "sci_fi_thriller",
+        "canon_registry": [
+            {"name": "Living Map", "kind": "system", "role": "Dormant guide lattice", "aliases": ["the map"]}
+        ],
+    }
+    ledger = {
+        "open_threads": ["Who built the map?"],
+        "active_entities": story_bible["canon_registry"],
+        "system_state_by_name": {"Living Map": "Dormant guide lattice"},
+    }
+
+    prompt = build_continuity_update_messages(project, chapter, ledger, story_bible)[-1]["content"]
+
+    assert '"system_state_transitions"' in prompt
+    assert '"previous_state"' in prompt
+    assert "previous_state matching the current ledger" in prompt
 
 
 def test_developmental_rewrite_parser_accepts_wrapped_plan() -> None:

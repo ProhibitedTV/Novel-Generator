@@ -42,6 +42,29 @@ STORY_TURN_REQUIRED_FIELDS = (
     "state_after",
 )
 
+PRONOUN_GROUPS = {
+    "she/her": {"she", "her", "hers"},
+    "he/him": {"he", "him", "his"},
+    "they/them": {"they", "them", "their", "theirs"},
+}
+
+ROLE_DRIFT_MARKERS = {
+    "ally",
+    "antagonist",
+    "archivist",
+    "captain",
+    "doctor",
+    "enemy",
+    "engineer",
+    "guardian",
+    "leader",
+    "mentor",
+    "pilot",
+    "scientist",
+    "traitor",
+    "villain",
+}
+
 ABSTRACT_STORY_TURN_PATTERNS = [
     r"\bstakes? (?:rise|increase|escalate)\b",
     r"\bthe story (?:moves|pushes|continues|goes) forward\b",
@@ -985,6 +1008,312 @@ def _sentences_with_name(text: str, name: str) -> list[str]:
     return [sentence for sentence in _sentences(text) if _mentions_name(sentence, name)]
 
 
+def _payload_role(item: Any) -> str:
+    if isinstance(item, dict):
+        return str(item.get("role", "")).strip()
+    return str(getattr(item, "role", "")).strip()
+
+
+def _chapter_continuity_update(chapter: ChapterDraft) -> dict[str, Any]:
+    update = chapter.continuity_update or {}
+    if isinstance(update, dict):
+        return update
+    return getattr(update, "model_dump", lambda: {})()
+
+
+def _canon_character_roles(story_bible: StoryBible | dict[str, Any]) -> dict[str, str]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    roles: dict[str, str] = {}
+    for member in bible.get("cast") or []:
+        name = _payload_name(member)
+        role = _payload_role(member)
+        if name:
+            roles[name] = role
+    for entity in bible.get("canon_registry") or []:
+        if str(entity.get("kind", "")).strip().lower() != "person":
+            continue
+        name = _payload_name(entity)
+        role = _payload_role(entity)
+        if name and role:
+            roles.setdefault(name, role)
+    return roles
+
+
+def _canon_system_roles(story_bible: StoryBible | dict[str, Any]) -> dict[str, str]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    systems: dict[str, str] = {}
+    for entity in bible.get("canon_registry") or []:
+        if str(entity.get("kind", "")).strip().lower() not in {"system", "project"}:
+            continue
+        name = _payload_name(entity)
+        role = _payload_role(entity)
+        if name:
+            systems[name] = role or "Core system or project in canon registry."
+    return systems
+
+
+def _name_similarity_key(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+def _levenshtein_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        for right_index, right_char in enumerate(right, start=1):
+            insertion = current[right_index - 1] + 1
+            deletion = previous[right_index] + 1
+            substitution = previous[right_index - 1] + (left_char != right_char)
+            current.append(min(insertion, deletion, substitution))
+        previous = current
+    return previous[-1]
+
+
+def _names_are_confusable(left: str, right: str) -> bool:
+    left_key = _name_similarity_key(left)
+    right_key = _name_similarity_key(right)
+    if not left_key or not right_key or left_key == right_key:
+        return False
+    shorter = min(len(left_key), len(right_key))
+    if shorter < 4:
+        return _levenshtein_distance(left_key, right_key) <= 1
+    distance = _levenshtein_distance(left_key, right_key)
+    if distance <= (2 if shorter <= 6 else 3):
+        return True
+    return left_key[:4] == right_key[:4] and abs(len(left_key) - len(right_key)) <= 3
+
+
+def _pronoun_group_from_text(text: str) -> str:
+    lowered = text.lower()
+    for group in PRONOUN_GROUPS:
+        if group in lowered:
+            return group
+    words = _normalized_words(text)
+    counts = Counter(
+        group
+        for group, pronouns in PRONOUN_GROUPS.items()
+        for word in words
+        if word in pronouns
+    )
+    if not counts:
+        return ""
+    dominant, count = counts.most_common(1)[0]
+    if len(counts) > 1 and counts.most_common(2)[1][1] == count:
+        return ""
+    return dominant
+
+
+def _pronoun_group_near_name(chapter: ChapterDraft, name: str) -> str:
+    sentences = _sentences(chapter.content or "")
+    snippets: list[str] = []
+    for index, sentence in enumerate(sentences):
+        if not _mentions_name(sentence, name):
+            continue
+        snippets.append(sentence)
+        if index + 1 < len(sentences):
+            snippets.append(sentences[index + 1])
+    return _pronoun_group_from_text(" ".join(snippets))
+
+
+def _role_terms(text: str) -> set[str]:
+    return {word for word in _normalized_words(text) if word in ROLE_DRIFT_MARKERS}
+
+
+def _role_has_drift(canon_role: str, observed_role: str) -> bool:
+    observed_terms = _role_terms(observed_role)
+    if not observed_terms:
+        return False
+    canon_terms = _role_terms(canon_role)
+    return not bool(canon_terms & observed_terms)
+
+
+def _transition_payload(transition: Any) -> dict[str, Any]:
+    if isinstance(transition, dict):
+        return transition
+    return getattr(transition, "model_dump", lambda: {})()
+
+
+def _transition_system_name(transition: Any) -> str:
+    return str(_transition_payload(transition).get("system_name", "")).strip()
+
+
+def _continuity_bible_notes(
+    chapters: list[ChapterDraft],
+    story_bible: StoryBible | dict[str, Any],
+) -> tuple[list[str], list[dict[str, str]]]:
+    character_roles = _canon_character_roles(story_bible)
+    system_roles = _canon_system_roles(story_bible)
+    findings: list[str] = []
+    rows: list[dict[str, str]] = []
+
+    names = list(dict.fromkeys([*character_roles.keys(), *system_roles.keys()]))
+    for index, left in enumerate(names):
+        for right in names[index + 1 :]:
+            if _names_are_confusable(left, right):
+                findings.append(
+                    f"Continuity bible name collision: '{left}' and '{right}' are visually or phonetically similar; suggested rename one with a distinct first syllable before export."
+                )
+
+    pronouns_by_character: dict[str, dict[str, list[int]]] = {
+        name: {}
+        for name in character_roles
+    }
+    latest_character_state: dict[str, str] = {}
+    system_state_by_name: dict[str, str] = dict(system_roles)
+    transition_counts: Counter[str] = Counter()
+    sorted_chapters = sorted(chapters, key=lambda item: item.chapter_number)
+
+    for chapter in sorted_chapters:
+        update = _chapter_continuity_update(chapter)
+        character_states = update.get("character_states", {}) if isinstance(update.get("character_states", {}), dict) else {}
+        for name, canon_role in character_roles.items():
+            prose_group = _pronoun_group_near_name(chapter, name)
+            state_text = str(character_states.get(name, "")).strip()
+            state_group = _pronoun_group_from_text(state_text)
+            group = state_group or prose_group
+            if group:
+                pronouns_by_character.setdefault(name, {}).setdefault(group, []).append(chapter.chapter_number)
+            if state_text:
+                latest_character_state[name] = state_text
+                if _role_has_drift(canon_role, state_text):
+                    findings.append(
+                        f"Continuity bible role drift: {name} is canonically '{canon_role}' but chapter {chapter.chapter_number} records '{state_text}' without a canon-fix note."
+                    )
+
+        for entity in update.get("new_entities_introduced", []) or []:
+            if str(entity.get("kind", "")).strip().lower() != "person":
+                continue
+            name = _payload_name(entity)
+            if name in character_roles and _role_has_drift(character_roles[name], _payload_role(entity)):
+                findings.append(
+                    f"Continuity bible role drift: {name} is canonically '{character_roles[name]}' but chapter {chapter.chapter_number} reintroduces them as '{_payload_role(entity)}'."
+                )
+
+        transitions = [_transition_payload(item) for item in update.get("system_state_transitions", []) or []]
+        transition_names = {_transition_system_name(item) for item in transitions if _transition_system_name(item)}
+        for transition in transitions:
+            system_name = str(transition.get("system_name", "")).strip()
+            previous_state = str(transition.get("previous_state", "")).strip()
+            new_state = str(transition.get("new_state", "")).strip()
+            cause = str(transition.get("cause", "")).strip()
+            if not (system_name and previous_state and new_state and cause):
+                findings.append(
+                    f"Continuity bible system-state warning: chapter {chapter.chapter_number} has an incomplete system_state_transition for '{system_name or 'unnamed system'}'."
+                )
+                continue
+            prior_state = system_state_by_name.get(system_name, "")
+            if prior_state and previous_state.lower() != prior_state.lower():
+                findings.append(
+                    f"Continuity bible system-state mismatch: chapter {chapter.chapter_number} moves '{system_name}' from '{previous_state}', but the prior tracked state is '{prior_state}'."
+                )
+            system_state_by_name[system_name] = new_state
+            transition_counts[system_name] += 1
+
+        entity_state_changes = update.get("entity_state_changes", {})
+        if isinstance(entity_state_changes, dict):
+            for system_name in system_roles:
+                if system_name in entity_state_changes and system_name not in transition_names:
+                    findings.append(
+                        f"Continuity bible system-state warning: chapter {chapter.chapter_number} changes core system '{system_name}' without a structured system_state_transition."
+                    )
+
+    for name, groups in pronouns_by_character.items():
+        if len(groups) <= 1:
+            continue
+        rendered = ", ".join(
+            f"{group} in chapter(s) {', '.join(str(number) for number in numbers)}"
+            for group, numbers in groups.items()
+        )
+        findings.append(
+            f"Continuity bible pronoun drift: {name} uses inconsistent pronouns across the manuscript: {rendered}."
+        )
+
+    for name, role in character_roles.items():
+        groups = pronouns_by_character.get(name, {})
+        pronoun_note = ", ".join(groups) if groups else "No pronoun evidence captured."
+        rows.append(
+            {
+                "item_type": "character",
+                "name": name,
+                "canon_status": role or "No canon role recorded.",
+                "observed_status": latest_character_state.get(name, "No stored character state recorded."),
+                "notes": pronoun_note,
+            }
+        )
+
+    for name, canon_state in system_roles.items():
+        transition_count = transition_counts.get(name, 0)
+        rows.append(
+            {
+                "item_type": "system",
+                "name": name,
+                "canon_status": canon_state,
+                "observed_status": system_state_by_name.get(name, "No structured system state recorded."),
+                "notes": f"{transition_count} structured transition(s) recorded.",
+            }
+        )
+
+    return findings, rows
+
+
+def _dedupe_continuity_bible_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for row in rows:
+        key = (
+            row.get("item_type", ""),
+            row.get("name", ""),
+            row.get("canon_status", ""),
+            row.get("observed_status", ""),
+            row.get("notes", ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(row)
+    return unique
+
+
+def _qa_row_value(row: Any, field_name: str) -> str:
+    if isinstance(row, dict):
+        return str(row.get(field_name, "")).strip()
+    return str(getattr(row, field_name, "")).strip()
+
+
+def _markdown_cell(value: str) -> str:
+    return value.replace("|", "\\|") or " "
+
+
+def _render_continuity_bible_table(rows: list[Any]) -> list[str]:
+    if not rows:
+        return ["- No continuity bible table recorded."]
+    rendered = [
+        "| Type | Name | Canon Status | Observed Status | Notes |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        rendered.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(_qa_row_value(row, "item_type")),
+                    _markdown_cell(_qa_row_value(row, "name")),
+                    _markdown_cell(_qa_row_value(row, "canon_status")),
+                    _markdown_cell(_qa_row_value(row, "observed_status")),
+                    _markdown_cell(_qa_row_value(row, "notes")),
+                ]
+            )
+            + " |"
+        )
+    return rendered
+
+
 def _has_side_character_action(sentences: list[str]) -> bool:
     for sentence in sentences:
         terms = set(_normalized_words(sentence))
@@ -1738,6 +2067,8 @@ def manuscript_quality_notes(
         "scene_mode_distribution_notes": [],
         "story_turn_quality_notes": [],
         "genre_contract_notes": [],
+        "continuity_bible_findings": [],
+        "continuity_bible_table": [],
     }
 
     manuscript_text = "\n\n".join(chapter.content or "" for chapter in chapters).lower()
@@ -1937,6 +2268,9 @@ def manuscript_quality_notes(
                 notes["proper_noun_continuity_findings"].append(
                     f"Alias drift risk: aliases for '{name}' appear without the canonical name."
                 )
+        continuity_bible_findings, continuity_bible_rows = _continuity_bible_notes(chapters, bible)
+        notes["continuity_bible_findings"].extend(continuity_bible_findings)
+        notes["continuity_bible_table"].extend(continuity_bible_rows)
 
     notes["chapter_ending_quality_notes"] = list(dict.fromkeys(notes["chapter_ending_quality_notes"]))
     notes["easy_win_warnings"] = list(dict.fromkeys(notes["easy_win_warnings"]))
@@ -1951,6 +2285,8 @@ def manuscript_quality_notes(
     notes["scene_mode_distribution_notes"] = list(dict.fromkeys(notes["scene_mode_distribution_notes"]))
     notes["story_turn_quality_notes"] = list(dict.fromkeys(notes["story_turn_quality_notes"]))
     notes["genre_contract_notes"] = list(dict.fromkeys(notes["genre_contract_notes"]))
+    notes["continuity_bible_findings"] = list(dict.fromkeys(notes["continuity_bible_findings"]))
+    notes["continuity_bible_table"] = _dedupe_continuity_bible_rows(notes["continuity_bible_table"])
     return notes
 
 
@@ -1971,6 +2307,14 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Continuity Risks",
         "",
         *([f"- {item}" for item in report.continuity_risks] or ["- No continuity risks recorded."]),
+        "",
+        "## Continuity Bible Findings",
+        "",
+        *([f"- {item}" for item in report.continuity_bible_findings] or ["- No continuity bible findings recorded."]),
+        "",
+        "## Continuity Bible Table",
+        "",
+        *_render_continuity_bible_table(report.continuity_bible_table),
         "",
         "## Repetition Risks",
         "",
@@ -2101,6 +2445,7 @@ def render_developmental_rewrite_report_markdown(
                     *qa_report.warnings,
                     *qa_report.repetition_risks,
                     *qa_report.continuity_risks,
+                    *qa_report.continuity_bible_findings,
                     *qa_report.crisis_loop_findings,
                 ]
             ]
@@ -2128,6 +2473,7 @@ def render_developmental_qa_comparison_markdown(
             *qa_report.chapter_ending_quality_notes,
             *qa_report.technical_escalation_fatigue_findings,
             *qa_report.crisis_loop_findings,
+            *qa_report.continuity_bible_findings,
             *qa_report.story_turn_quality_notes,
         ]
     )

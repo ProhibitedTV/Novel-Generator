@@ -560,6 +560,49 @@ def test_manuscript_quality_notes_tracks_side_character_decision_coverage() -> N
     assert any("Major side character Nadia has only 1 tracked independent decision" in item for item in notes["side_character_agency_notes"])
 
 
+def test_manuscript_quality_notes_builds_continuity_bible_findings() -> None:
+    bible = {
+        **_story_bible(),
+        "cast": [
+            *_story_bible()["cast"],
+            {"name": "Lila", "role": "Courier", "desire": "Carry proof", "risk": "Being erased"},
+            {"name": "Lina", "role": "Medic", "desire": "Keep civilians alive", "risk": "Losing triage access"},
+        ],
+    }
+    first = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Mara discovers the patch.",
+        content="Mara sealed the hatch. She refused the watchdog's quiet bargain.",
+        status=ChapterStatus.COMPLETED,
+    )
+    first.continuity_update = {
+        "character_states": {"Mara": "Pronouns: she/her. Engineer still chasing the forged patch."},
+        "entity_state_changes": {"Harmony Watchdog": "It shifts from passive monitor to active blocker."},
+    }
+    second = ChapterDraft(
+        chapter_number=2,
+        title="Watchdog",
+        outline_summary="Mara proves the patch is manipulating compliance.",
+        content="Mara opened the vault. He ordered Nadia to purge the records.",
+        status=ChapterStatus.COMPLETED,
+    )
+    second.continuity_update = {
+        "character_states": {"Mara": "Pronouns: he/him. Now acting as antagonist to the archive."},
+    }
+
+    notes = manuscript_quality_notes([first, second], bible)
+
+    findings = " ".join(notes["continuity_bible_findings"])
+    assert "pronoun drift" in findings
+    assert "role drift" in findings
+    assert "name collision" in findings
+    assert "Lila" in findings and "Lina" in findings
+    assert "without a structured system_state_transition" in findings
+    assert any(row["item_type"] == "character" and row["name"] == "Mara" for row in notes["continuity_bible_table"])
+    assert any(row["item_type"] == "system" and row["name"] == "Harmony Watchdog" for row in notes["continuity_bible_table"])
+
+
 def test_lint_flags_prose_voice_and_style_avoid_problems() -> None:
     systems_outline = {**_outline_entry(), "chapter_mode": "systems_crisis"}
     style_plan = {
