@@ -789,7 +789,16 @@ def build_continuity_update_messages(
                 '    "state_before": "concrete state before the chapter",\n'
                 '    "state_after": "concrete state after the chapter"\n'
                 "  },\n"
-                '  "genre_state": {"profile state key": "current state after this chapter"}\n'
+                '  "genre_state": {"profile state key": "current state after this chapter"},\n'
+                '  "system_state_transitions": [\n'
+                "    {\n"
+                '      "system_name": "core system or project name",\n'
+                '      "previous_state": "state before this chapter",\n'
+                '      "new_state": "state after this chapter",\n'
+                '      "cause": "on-page cause of the state change",\n'
+                '      "chapter_number": 1\n'
+                "    }\n"
+                "  ]\n"
                 "}\n\n"
                 "Rules:\n"
                 "- keep unresolved threads alive unless the chapter truly resolves them\n"
@@ -802,6 +811,8 @@ def build_continuity_update_messages(
                 "- track major side-character decisions when a non-protagonist takes an independent action that changes the protagonist's options\n"
                 "- story_turn must summarize the actual irreversible change, protagonist choice, rejected alternatives, permanent consequence, and before/after manuscript state created by this chapter\n"
                 "- update genre_state using the selected profile's continuity focus and default_genre_state\n"
+                "- for every major system or project state change, add one system_state_transitions item with previous_state matching the current ledger when known, a new_state, and an on-page cause\n"
+                "- do not hide system removals, dormancy, reactivation, compromise, or governance changes in prose-only summaries\n"
                 "- include profile-specific continuity focus: "
                 + "; ".join(profile.continuity_focus)
             ),
@@ -823,6 +834,7 @@ def build_manuscript_qa_messages(
             "title": chapter.title,
             "summary": chapter.summary or "",
             "word_count": chapter.word_count,
+            "continuity_update": _chapter_continuity_payload(chapter),
             "story_turn": _chapter_continuity_payload(chapter).get("story_turn", {}),
             "qa_notes": chapter.qa_notes or {},
         }
@@ -864,10 +876,20 @@ def build_manuscript_qa_messages(
                 '  "crisis_loop_findings": ["string"],\n'
                 '  "scene_mode_distribution_notes": ["string"],\n'
                 '  "story_turn_quality_notes": ["string"],\n'
-                '  "genre_contract_notes": ["string"]\n'
+                '  "genre_contract_notes": ["string"],\n'
+                '  "continuity_bible_findings": ["inconsistent character facts, similar names, missing system transitions, or canon fixes"],\n'
+                '  "continuity_bible_table": [\n'
+                "    {\n"
+                '      "item_type": "character|system",\n'
+                '      "name": "canon name",\n'
+                '      "canon_status": "role or starting state from the bible",\n'
+                '      "observed_status": "latest manuscript state",\n'
+                '      "notes": "pronoun, role, name, or state-machine note"\n'
+                "    }\n"
+                "  ]\n"
                 "}\n\n"
                 "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
-                "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, story_turn quality, cuttable chapters, duplicated irreversible turns, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated crisis loops with chapter numbers, exact beat patterns, representative phrases, severity, and suggested structural fixes, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, and whether the manuscript delivers on the ending promise. "
+                "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, story_turn quality, cuttable chapters, duplicated irreversible turns, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated crisis loops with chapter numbers, exact beat patterns, representative phrases, severity, and suggested structural fixes, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, continuity-bible risks such as character pronoun or role drift, confusingly similar names with suggested renames, and unexplained core-system state transitions, and whether the manuscript delivers on the ending promise. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)
             ),

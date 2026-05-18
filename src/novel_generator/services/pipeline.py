@@ -14,6 +14,7 @@ from ..schemas import (
     ChapterCritique,
     ChapterPlan,
     CanonicalEntity,
+    ContinuityBibleRow,
     ContinuityLedger,
     DevelopmentalRewritePlan,
     ManuscriptQaReport,
@@ -69,6 +70,25 @@ class RunCanceled(Exception):
 
 def _dedupe(items: list[str]) -> list[str]:
     return list(dict.fromkeys(item for item in items if item))
+
+
+def _dedupe_continuity_bible_table(rows: list[Any]) -> list[ContinuityBibleRow]:
+    unique: list[ContinuityBibleRow] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for row in rows:
+        payload = row if isinstance(row, ContinuityBibleRow) else ContinuityBibleRow.model_validate(row)
+        key = (
+            payload.item_type,
+            payload.name,
+            payload.canon_status,
+            payload.observed_status,
+            payload.notes,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(payload)
+    return unique
 
 
 def _project_approved_canon(project: Any) -> list[dict[str, Any]]:
@@ -228,6 +248,11 @@ def _resolve_stage_route(
 
 def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
     profile = genre_profile(story_bible.genre_profile)
+    system_state_by_name = {
+        entity.name: entity.role or "Defined in canon registry; initial state not yet changed on page."
+        for entity in story_bible.canon_registry
+        if entity.name and entity.kind.lower() in {"system", "project"}
+    }
     return ContinuityLedger(
         current_patch_status="No irreversible patch decision has been made yet.",
         character_states={
@@ -258,6 +283,8 @@ def _build_initial_ledger(story_bible: StoryBible) -> ContinuityLedger:
         },
         side_character_decisions={},
         genre_state=dict(profile.default_genre_state),
+        system_state_by_name=system_state_by_name,
+        system_state_transitions=[],
     )
 
 
@@ -299,6 +326,16 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
         existing = side_character_decisions.get(name, [])
         side_character_decisions[name] = _dedupe([*existing, *moves])
 
+    system_state_by_name = dict(current_ledger.system_state_by_name)
+    system_state_transitions = list(current_ledger.system_state_transitions)
+    for transition in update.system_state_transitions:
+        if transition.system_name:
+            system_state_by_name[transition.system_name] = transition.new_state or system_state_by_name.get(
+                transition.system_name,
+                "",
+            )
+        system_state_transitions.append(transition)
+
     return ContinuityLedger(
         current_patch_status=update.current_patch_status or current_ledger.current_patch_status,
         character_states={**current_ledger.character_states, **update.character_states},
@@ -316,6 +353,8 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
         emotional_open_loops={**current_ledger.emotional_open_loops, **update.emotional_open_loops},
         side_character_decisions=side_character_decisions,
         genre_state={**current_ledger.genre_state, **update.genre_state},
+        system_state_by_name=system_state_by_name,
+        system_state_transitions=system_state_transitions,
     )
 
 
@@ -860,6 +899,12 @@ def _run_manuscript_qa(
             "genre_contract_notes": _dedupe(
                 [*qa_report.genre_contract_notes, *deterministic_notes["genre_contract_notes"]]
             ),
+            "continuity_bible_findings": _dedupe(
+                [*qa_report.continuity_bible_findings, *deterministic_notes["continuity_bible_findings"]]
+            ),
+            "continuity_bible_table": _dedupe_continuity_bible_table(
+                [*qa_report.continuity_bible_table, *deterministic_notes["continuity_bible_table"]]
+            ),
         }
     )
     qa_markdown = render_qa_report_markdown(qa_report)
@@ -880,6 +925,7 @@ def _fallback_developmental_rewrite_plan(
             *qa_report.crisis_loop_findings,
             *qa_report.scene_mode_distribution_notes,
             *qa_report.story_turn_quality_notes,
+            *qa_report.continuity_bible_findings,
         ]
     )
     chapter_actions = []

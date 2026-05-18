@@ -257,6 +257,15 @@ def _continuity_json(index: int) -> str:
             "civilian_pressure_points": [f"Civilian pressure {index}"],
             "emotional_open_loops": {"Iris": f"Emotional loop {index}"},
             "side_character_decisions": {"Tarin": [f"Tarin resists in chapter {index}"]},
+            "system_state_transitions": [
+                {
+                    "system_name": "Living Map",
+                    "previous_state": "Sentient guide lattice" if index == 1 else f"Map state {index - 1}",
+                    "new_state": f"Map state {index}",
+                    "cause": f"Chapter {index} forces the map to reveal a new route.",
+                    "chapter_number": index,
+                }
+            ],
             "story_turn": _story_turn_payload(index),
         }
     )
@@ -901,6 +910,8 @@ def test_continuity_ledger_carries_entities_forward_across_completed_chapters(co
         assert refreshed.continuity_ledger["trust_fractures"]["Iris/Tarin"] == "Trust fracture 2"
         assert refreshed.continuity_ledger["civilian_pressure_points"][-1] == "Civilian pressure 2"
         assert refreshed.continuity_ledger["side_character_decisions"]["Tarin"][-1].startswith("Tarin resists in chapter 2")
+        assert refreshed.continuity_ledger["system_state_by_name"]["Living Map"] == "Map state 2"
+        assert len(refreshed.continuity_ledger["system_state_transitions"]) == 2
 
 
 def test_v1_regeneration_creates_fresh_v2_structure(configured_environment) -> None:
