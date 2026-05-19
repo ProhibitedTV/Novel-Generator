@@ -132,6 +132,64 @@ def _outline_json(chapters: int) -> str:
     return json.dumps(payload)
 
 
+def _valid_outline_entry(index: int, total_chapters: int) -> dict[str, object]:
+    chapter_modes = [
+        "systems_crisis",
+        "investigation",
+        "aftermath",
+        "interpersonal_confrontation",
+        "physical_escape",
+        "moral_negotiation",
+        "breather",
+        "reversal",
+    ]
+    outcome_type = "reversal" if index == total_chapters or index % 5 == 0 else ("setback" if index % 2 == 0 else "compromise")
+    return {
+        "chapter_number": index,
+        "act": "Act I" if index <= total_chapters // 4 else ("Act II" if index < total_chapters else "Act III"),
+        "title": f"Pressure Point {index}",
+        "objective": f"Iris pursues step {index} without repeating the inciting incident.",
+        "conflict_turn": f"The living map forces a new cost in chapter {index}.",
+        "character_turn": f"Iris changes tactics after Tarin challenges the price of progress in chapter {index}.",
+        "reveal": f"A hidden limit of the living map becomes visible in chapter {index}.",
+        "ending_state": f"Chapter {index} leaves the route altered in a way Iris cannot undo.",
+        "outcome_type": outcome_type,
+        "primary_obstacle": f"A civic barrier blocks route {index}.",
+        "cost_if_success": f"Progress in chapter {index} costs access, trust, or safety.",
+        "side_character_friction": f"Tarin resists because chapter {index} endangers frightened civilians.",
+        "independent_side_character_move": f"Tarin redirects the route token in chapter {index}.",
+        "concrete_ending_hook": {
+            "trigger": f"A visible consequence of chapter {index} arrives.",
+            "visible_object_or_actor": f"Visible actor {index}",
+            "next_problem": f"The next chapter must answer cost {index}.",
+        },
+        "chapter_mode": chapter_modes[(index - 1) % len(chapter_modes)],
+        "civilian_life_detail": f"Families adapt around the fallout from chapter {index}.",
+        "emotional_reveal": f"Iris admits a private fear that complicates choice {index}.",
+        "ideology_pressure": "Consent matters even when delay is dangerous.",
+        "genre_specific_beats": [f"The clue chain advances through chapter {index}."],
+        "genre_state_change": f"The living map pressure advances in chapter {index}.",
+    }
+
+
+def _valid_outline_chunk_json(start_chapter: int, end_chapter: int, total_chapters: int = 64) -> str:
+    return json.dumps(
+        {
+            "chapters": [
+                _valid_outline_entry(index, total_chapters)
+                for index in range(start_chapter, end_chapter + 1)
+            ]
+        }
+    )
+
+
+def _valid_outline_chunk_responses(total_chapters: int = 64) -> list[str]:
+    return [
+        _valid_outline_chunk_json(start_chapter, min(total_chapters, start_chapter + 7), total_chapters)
+        for start_chapter in range(1, total_chapters + 1, 8)
+    ]
+
+
 def _story_turn_payload(index: int) -> dict[str, object]:
     turns: dict[int, dict[str, object]] = {
         1: {
@@ -386,6 +444,88 @@ def test_process_run_safe_pauses_after_outline_when_requested(configured_environ
         assert refreshed.outline is not None
         assert len(refreshed.chapters) == 2
         assert len(refreshed.artifacts) == 0
+
+
+def test_large_run_generates_outline_in_chunks_and_pauses(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=64)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient([_story_bible_json(), *_valid_outline_chunk_responses()]),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.AWAITING_APPROVAL
+        assert refreshed.current_step == "outline_review"
+        assert refreshed.outline is not None
+        assert len(refreshed.outline) == 64
+        assert [entry["chapter_number"] for entry in refreshed.outline] == list(range(1, 65))
+        assert len(refreshed.chapters) == 64
+        assert sum(event.event_type == "outline_chunk_completed" for event in refreshed.events) == 8
+
+
+def test_large_outline_chunk_fallback_prevents_short_outline_failure(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=64)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    json.dumps({"chapters": []}),
+                    json.dumps({"chapters": []}),
+                    *_valid_outline_chunk_responses()[1:],
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.AWAITING_APPROVAL
+        assert refreshed.outline is not None
+        assert len(refreshed.outline) == 64
+        assert [entry["chapter_number"] for entry in refreshed.outline] == list(range(1, 65))
+        assert any(event.event_type == "outline_chunk_fallback" for event in refreshed.events)
+
+
+def test_story_bible_fallback_prevents_shape_failure(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=2)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(["[]", "[]", _outline_json(2)]),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.AWAITING_APPROVAL
+        assert refreshed.story_bible["logline"] == project.premise
+        assert any(event.event_type == "story_bible_fallback" for event in refreshed.events)
 
 
 def test_process_run_merges_approved_project_canon_into_story_bible(configured_environment) -> None:
