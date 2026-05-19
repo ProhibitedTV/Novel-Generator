@@ -349,6 +349,94 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
     ]
 
 
+def build_outline_chunk_messages(
+    project: Project,
+    run: GenerationRun,
+    story_bible: StoryBible | dict[str, Any],
+    *,
+    start_chapter: int,
+    end_chapter: int,
+    prior_outline: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    profile = _story_bible_genre_profile(bible)
+    chapter_mode_options = _chapter_mode_options()
+    chapter_count = end_chapter - start_chapter + 1
+    midpoint_start = max(2, math.ceil(run.requested_chapters * 0.4))
+    midpoint_end = max(midpoint_start, math.floor(run.requested_chapters * 0.7))
+    midpoint_rule = (
+        f"- this chunk intersects the midpoint window; include at least one outcome_type reversal between chapters {midpoint_start} and {midpoint_end}\n"
+        if start_chapter <= midpoint_end and end_chapter >= midpoint_start
+        else ""
+    )
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a meticulous fiction outliner. Return valid JSON only. "
+                "Generate only the requested contiguous chapter slice, not the whole book."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Create chapters {start_chapter} through {end_chapter} for a {run.requested_chapters}-chapter outline of '{project.title}'.\n"
+                f"Return exactly {chapter_count} chapters, numbered {start_chapter} through {end_chapter}; do not restart at chapter 1.\n"
+                f"{_story_brief_lines(project)}\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prior outline chapters already accepted:\n{json.dumps(prior_outline[-12:], indent=2)}\n\n"
+                "Return a JSON object in this shape:\n"
+                "{\n"
+                '  "chapters": [\n'
+                "    {\n"
+                f'      "chapter_number": {start_chapter},\n'
+                '      "act": "Act I|Act II|Act III",\n'
+                '      "title": "string",\n'
+                '      "objective": "string",\n'
+                '      "conflict_turn": "string",\n'
+                '      "character_turn": "string",\n'
+                '      "reveal": "string",\n'
+                '      "ending_state": "string",\n'
+                '      "outcome_type": "win|setback|reversal|compromise",\n'
+                '      "primary_obstacle": "string",\n'
+                '      "cost_if_success": "string",\n'
+                '      "side_character_friction": "string",\n'
+                '      "independent_side_character_move": "string",\n'
+                '      "concrete_ending_hook": {\n'
+                '        "trigger": "string",\n'
+                '        "visible_object_or_actor": "string",\n'
+                '        "next_problem": "string"\n'
+                "      },\n"
+                f'      "chapter_mode": "{chapter_mode_options}",\n'
+                '      "civilian_life_detail": "string",\n'
+                '      "emotional_reveal": "string",\n'
+                '      "ideology_pressure": "string",\n'
+                '      "genre_specific_beats": ["profile-specific beat 1", "profile-specific beat 2"],\n'
+                '      "genre_state_change": "string"\n'
+                "    }\n"
+                "  ]\n"
+                "}\n\n"
+                "Rules:\n"
+                f"- return exactly chapters {start_chapter} through {end_chapter}, no missing chapters and no extra chapters\n"
+                "- continue the prior outline instead of repeating its inciting incident, discovery, midpoint, or climax\n"
+                "- each chapter must change the external situation and at least one character state\n"
+                "- use setback or reversal often enough that the full book does not become a clean-win chain\n"
+                f"{midpoint_rule}"
+                "- every local block of 4 chapters should include at least 1 chapter_mode of breather or aftermath when possible\n"
+                "- do not repeat any chapter_mode used by either of the previous 2 accepted chapters\n"
+                f"- use only these chapter_mode values: {chapter_mode_options}\n"
+                "- side_character_friction must name who pushes back on the protagonist and why\n"
+                "- independent_side_character_move must name a side character action that changes the protagonist's options\n"
+                "- cost_if_success must describe the price of progress, not just the risk of failure\n"
+                "- concrete_ending_hook must end on a specific actor, object, interruption, arrival, discovery, or reversal\n"
+                "- civilian_life_detail, emotional_reveal, ideology_pressure, genre_specific_beats, and genre_state_change must be filled for every chapter\n"
+                "- preserve one clean climax and one primary ending in the final chapter only"
+            ),
+        },
+    ]
+
+
 def rolling_context(chapters: list[ChapterDraft], window: int) -> str:
     completed = [chapter for chapter in chapters if chapter.summary]
     recent = completed[-window:]
@@ -1050,6 +1138,51 @@ def _normalize_outline_payload(payload: Any) -> Any:
             return [payload[key] for key in sorted(payload.keys(), key=lambda item: int(str(item).strip()))]
 
     return payload
+
+
+def parse_outline_chunk(text: str, start_chapter: int, end_chapter: int) -> list[dict[str, Any]]:
+    payload = _normalize_outline_payload(extract_json_payload(text))
+    try:
+        outline = TypeAdapter(list[StructuredOutlineEntry]).validate_python(payload)
+    except ValidationError as exc:
+        raise ValueError(f"Outline chunk JSON was invalid: {exc}") from exc
+
+    expected_numbers = list(range(start_chapter, end_chapter + 1))
+    actual_numbers = [item.chapter_number for item in outline]
+    if actual_numbers != expected_numbers:
+        raise ValueError(
+            "Outline chunk returned chapter numbers "
+            + ", ".join(str(number) for number in actual_numbers)
+            + f", but expected {start_chapter} through {end_chapter}."
+        )
+
+    if any(not item.chapter_mode.strip() for item in outline):
+        raise ValueError("Outline chunk entries must include a chapter_mode for every chapter.")
+
+    invalid_modes = sorted({item.chapter_mode for item in outline if item.chapter_mode not in ALLOWED_CHAPTER_MODES})
+    if invalid_modes:
+        raise ValueError(
+            "Outline chunk entries use unsupported chapter_mode values: "
+            + ", ".join(invalid_modes)
+            + "."
+        )
+
+    for item in outline:
+        if item.chapter_mode.lower() in {"breather", "aftermath"}:
+            if not item.civilian_life_detail.strip():
+                raise ValueError(
+                    f"Breather or aftermath chapter {item.chapter_number} is missing civilian_life_detail."
+                )
+            if not item.emotional_reveal.strip():
+                raise ValueError(
+                    f"Breather or aftermath chapter {item.chapter_number} is missing emotional_reveal."
+                )
+            if not item.ideology_pressure.strip():
+                raise ValueError(
+                    f"Breather or aftermath chapter {item.chapter_number} is missing ideology_pressure."
+                )
+
+    return [item.model_dump() for item in outline]
 
 
 def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:

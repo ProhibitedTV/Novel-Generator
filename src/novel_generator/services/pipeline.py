@@ -44,6 +44,7 @@ from .prompts import (
     build_chapter_draft_messages,
     build_chapter_plan_messages,
     build_chapter_revision_messages,
+    build_outline_chunk_messages,
     build_continuity_update_messages,
     build_developmental_rewrite_messages,
     build_json_repair_messages,
@@ -57,6 +58,7 @@ from .prompts import (
     parse_developmental_rewrite_plan,
     parse_manuscript_qa_report,
     parse_outline,
+    parse_outline_chunk,
     parse_story_bible,
     rolling_context,
     sanitize_chapter_content,
@@ -66,6 +68,10 @@ from .providers import ProviderManager
 
 class RunCanceled(Exception):
     pass
+
+
+OUTLINE_CHUNK_THRESHOLD = 32
+OUTLINE_CHUNK_SIZE = 8
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -517,6 +523,231 @@ def _chapter_prior_context(run: GenerationRun, chapter_number: int) -> list:
     ]
 
 
+def _fallback_story_bible(project: Any, run: GenerationRun) -> StoryBible:
+    brief = project.story_brief or {}
+    profile = genre_profile(brief.get("genre_profile"))
+    protagonist = str(brief.get("protagonist") or "The protagonist").strip()
+    antagonist = str(brief.get("antagonist") or "the central opposition").strip()
+    supporting_cast = [
+        str(name).strip()
+        for name in brief.get("supporting_cast", [])
+        if str(name).strip()
+    ]
+    cast = [
+        {
+            "name": protagonist,
+            "role": "Protagonist",
+            "desire": brief.get("ending_target") or brief.get("core_conflict") or "Resolve the central conflict.",
+            "risk": "Losing agency, trust, or the chance to change the outcome.",
+        }
+    ]
+    for name in supporting_cast[:6]:
+        cast.append(
+            {
+                "name": name,
+                "role": "Supporting character",
+                "desire": "Push the protagonist toward a harder choice.",
+                "risk": "Paying a personal cost for the protagonist's progress.",
+            }
+        )
+
+    agendas = [
+        {
+            "name": member["name"],
+            "want": member["desire"],
+            "fear": member["risk"],
+            "line_in_sand": "They will not accept an easy solution that violates the story's moral boundary.",
+            "stance_on_core_conflict": brief.get("core_conflict") or "The central conflict must cost something real.",
+            "relationship_to_protagonist": "Self" if index == 0 else "Pressure-bearing ally or foil",
+            "public_belief": brief.get("core_conflict") or "The stated conflict must be confronted directly.",
+            "private_pressure": "They fear the final choice will cost more than they can admit.",
+            "stress_response": "They narrow into their strongest habit when pressure rises.",
+        }
+        for index, member in enumerate(cast)
+    ]
+    canon_registry = [
+        {
+            "name": protagonist,
+            "kind": "person",
+            "role": "Protagonist",
+            "aliases": [],
+            "approved": True,
+        }
+    ]
+    for name in supporting_cast[:6]:
+        canon_registry.append(
+            {
+                "name": name,
+                "kind": "person",
+                "role": "Supporting character",
+                "aliases": [],
+                "approved": True,
+            }
+        )
+    if antagonist:
+        canon_registry.append(
+            {
+                "name": antagonist,
+                "kind": "faction",
+                "role": "Primary opposition force",
+                "aliases": [],
+                "approved": True,
+            }
+        )
+
+    return StoryBible.model_validate(
+        {
+            "genre_profile": profile.id,
+            "logline": project.premise,
+            "theme": brief.get("core_conflict") or "Every victory should preserve a visible moral cost.",
+            "act_plan": [
+                "Act I establishes the inciting incident, central cast, and first irreversible commitment.",
+                "Act II escalates costs, reversals, and relationship pressure without repeating the premise.",
+                "Act III resolves the core conflict through one primary climax and a paid-for ending.",
+            ],
+            "cast": cast,
+            "character_agendas": agendas,
+            "canon_registry": canon_registry,
+            "conflict_ladder": [
+                "The protagonist discovers the central pressure.",
+                "The opposition turns progress into a personal or public cost.",
+                "The final choice resolves the ending promise at irreversible cost.",
+            ],
+            "world_rules": list(brief.get("world_rules", [])) or ["Progress must create a visible consequence."],
+            "core_system_rules": ["Major systems and factions change state only through on-page causes."],
+            "prose_guardrails": [
+                "Avoid abstract thesis-statement endings.",
+                "Do not let technical wins arrive without cost.",
+                "Vary chapter modes and include breathers after intense escalation.",
+            ],
+            "genre_contract": list(profile.genre_contract),
+            "style_profile": {
+                "narrative_voice": brief.get("tone") or "Clear close narration with concrete sensory pressure.",
+                "sentence_rhythm": "Vary sentence length and avoid repetitive summary cadence.",
+                "imagery_palette": list(brief.get("style_targets", [])) or ["concrete objects", "visible consequences"],
+                "dialogue_rules": list(brief.get("dialogue_targets", [])) or ["Use pressure and subtext over exposition."],
+                "character_voice_map": {
+                    member["name"]: "Distinct under pressure; avoid interchangeable dialogue."
+                    for member in cast
+                },
+                "avoid": list(brief.get("style_avoid", [])) or ["generic stakes language"],
+            },
+            "ending_promise": brief.get("ending_target") or f"{protagonist} must resolve the central conflict at a visible cost.",
+        }
+    )
+
+
+def _fallback_chapter_mode(chapter_number: int) -> str:
+    pattern = [
+        "systems_crisis",
+        "investigation",
+        "aftermath",
+        "interpersonal_confrontation",
+        "physical_escape",
+        "moral_negotiation",
+        "breather",
+        "reversal",
+    ]
+    return pattern[(chapter_number - 1) % len(pattern)]
+
+
+def _fallback_outcome_type(chapter_number: int, total_chapters: int) -> str:
+    if chapter_number == total_chapters:
+        return "reversal"
+    if chapter_number % 5 == 0:
+        return "reversal"
+    if chapter_number % 2 == 0:
+        return "setback"
+    return "compromise"
+
+
+def _fallback_act(chapter_number: int, total_chapters: int) -> str:
+    if chapter_number <= max(1, total_chapters // 4):
+        return "Act I"
+    if chapter_number < total_chapters:
+        return "Act II"
+    return "Act III"
+
+
+def _fallback_outline_entries(
+    project: Any,
+    story_bible: StoryBible,
+    start_chapter: int,
+    end_chapter: int,
+    total_chapters: int,
+) -> list[dict[str, Any]]:
+    protagonist = story_bible.cast[0].name if story_bible.cast else "The protagonist"
+    support = story_bible.cast[1].name if len(story_bible.cast) > 1 else "a trusted ally"
+    canon_name = story_bible.canon_registry[0].name if story_bible.canon_registry else "the central pressure"
+    entries: list[dict[str, Any]] = []
+    for chapter_number in range(start_chapter, end_chapter + 1):
+        mode = _fallback_chapter_mode(chapter_number)
+        entries.append(
+            {
+                "chapter_number": chapter_number,
+                "act": _fallback_act(chapter_number, total_chapters),
+                "title": f"Pressure Point {chapter_number}",
+                "objective": f"{protagonist} pursues step {chapter_number} toward the ending promise without repeating the inciting incident.",
+                "conflict_turn": f"{canon_name} forces a new cost in chapter {chapter_number}.",
+                "character_turn": f"{protagonist} changes tactics after {support} challenges the price of progress.",
+                "reveal": f"A concrete limit or hidden cost of {canon_name} becomes visible.",
+                "ending_state": f"The story state after chapter {chapter_number} cannot return to its prior balance.",
+                "outcome_type": _fallback_outcome_type(chapter_number, total_chapters),
+                "primary_obstacle": f"A specific obstacle blocks the next route to {story_bible.ending_promise}.",
+                "cost_if_success": f"Progress in chapter {chapter_number} costs access, trust, safety, or public standing.",
+                "side_character_friction": f"{support} resists because the plan endangers something they need.",
+                "independent_side_character_move": f"{support} takes an action that changes {protagonist}'s options.",
+                "concrete_ending_hook": {
+                    "trigger": f"A visible consequence of chapter {chapter_number} arrives.",
+                    "visible_object_or_actor": f"{canon_name}",
+                    "next_problem": f"The next chapter must answer the cost exposed by chapter {chapter_number}.",
+                },
+                "chapter_mode": mode,
+                "civilian_life_detail": f"Ordinary people adapt around the fallout from chapter {chapter_number}.",
+                "emotional_reveal": f"{protagonist} admits a private fear that complicates the next choice.",
+                "ideology_pressure": story_bible.theme,
+                "genre_specific_beats": [f"Escalate the selected genre contract through chapter {chapter_number}."],
+                "genre_state_change": f"The genre pressure advances one irreversible notch in chapter {chapter_number}.",
+            }
+        )
+    return entries
+
+
+def _validated_outline_or_fallback(
+    session: Session,
+    project: Any,
+    run: GenerationRun,
+    story_bible: StoryBible,
+    outline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    try:
+        return parse_outline(json.dumps({"chapters": outline}), run.requested_chapters)
+    except Exception as exc:
+        record_event(
+            session,
+            run,
+            "outline_validation_fallback",
+            {
+                "message": "Combined outline failed full-book validation; generated a deterministic outline.",
+                "error": str(exc),
+            },
+        )
+        return parse_outline(
+            json.dumps(
+                {
+                    "chapters": _fallback_outline_entries(
+                        project,
+                        story_bible,
+                        1,
+                        run.requested_chapters,
+                        run.requested_chapters,
+                    )
+                }
+            ),
+            run.requested_chapters,
+        )
+
+
 def _generate_story_bible(session: Session, run: GenerationRun, settings: Settings, client: ProviderManager | OllamaClient) -> StoryBible:
     project = run.project
     provider_name, model_name = _resolve_stage_route(client, run, "story_bible")
@@ -528,14 +759,26 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
         {"message": "Generating story bible.", "provider_name": provider_name, "model_name": model_name},
     )
     session.commit()
-    story_bible = _generate_structured_output(
-        client,
-        provider_name,
-        model_name,
-        lambda: build_story_bible_messages(project, run),
-        parse_story_bible,
-        "story bible",
-    )
+    try:
+        story_bible = _generate_structured_output(
+            client,
+            provider_name,
+            model_name,
+            lambda: build_story_bible_messages(project, run),
+            parse_story_bible,
+            "story bible",
+        )
+    except Exception as exc:
+        story_bible = _fallback_story_bible(project, run)
+        record_event(
+            session,
+            run,
+            "story_bible_fallback",
+            {
+                "message": "Story bible model output was unusable after repair; generated a deterministic story bible.",
+                "error": str(exc),
+            },
+        )
     selected_profile = genre_profile((project.story_brief or {}).get("genre_profile"))
     story_bible = story_bible.model_copy(
         update={
@@ -558,6 +801,82 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
     return story_bible
 
 
+def _generate_outline_chunks(
+    session: Session,
+    run: GenerationRun,
+    story_bible: StoryBible,
+    client: ProviderManager | OllamaClient,
+    provider_name: str,
+    model_name: str,
+) -> list[dict[str, Any]]:
+    project = run.project
+    outline: list[dict[str, Any]] = []
+    for start_chapter in range(1, run.requested_chapters + 1, OUTLINE_CHUNK_SIZE):
+        end_chapter = min(run.requested_chapters, start_chapter + OUTLINE_CHUNK_SIZE - 1)
+        record_event(
+            session,
+            run,
+            "outline_chunk_started",
+            {
+                "message": f"Generating outline chapters {start_chapter}-{end_chapter}.",
+                "start_chapter": start_chapter,
+                "end_chapter": end_chapter,
+                "provider_name": provider_name,
+                "model_name": model_name,
+            },
+        )
+        session.commit()
+        try:
+            chunk = _generate_structured_output(
+                client,
+                provider_name,
+                model_name,
+                lambda start=start_chapter, end=end_chapter, prior=list(outline): build_outline_chunk_messages(
+                    project,
+                    run,
+                    story_bible,
+                    start_chapter=start,
+                    end_chapter=end,
+                    prior_outline=prior,
+                ),
+                lambda raw, start=start_chapter, end=end_chapter: parse_outline_chunk(raw, start, end),
+                f"structured outline chapters {start_chapter}-{end_chapter}",
+            )
+        except Exception as exc:
+            chunk = _fallback_outline_entries(
+                project,
+                story_bible,
+                start_chapter,
+                end_chapter,
+                run.requested_chapters,
+            )
+            record_event(
+                session,
+                run,
+                "outline_chunk_fallback",
+                {
+                    "message": f"Outline chunk {start_chapter}-{end_chapter} was unusable after repair; generated deterministic entries.",
+                    "error": str(exc),
+                    "start_chapter": start_chapter,
+                    "end_chapter": end_chapter,
+                },
+            )
+        outline.extend(chunk)
+        record_event(
+            session,
+            run,
+            "outline_chunk_completed",
+            {
+                "message": f"Accepted outline chapters {start_chapter}-{end_chapter}.",
+                "start_chapter": start_chapter,
+                "end_chapter": end_chapter,
+                "chapters": len(chunk),
+            },
+        )
+        session.commit()
+    return outline
+
+
 def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBible, client: ProviderManager | OllamaClient) -> None:
     project = run.project
     provider_name, model_name = _resolve_stage_route(client, run, "outline")
@@ -569,14 +888,30 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
         {"message": "Generating structured outline.", "provider_name": provider_name, "model_name": model_name},
     )
     session.commit()
-    run.outline = _generate_structured_output(
-        client,
-        provider_name,
-        model_name,
-        lambda: build_outline_messages(project, run, story_bible),
-        lambda raw: parse_outline(raw, run.requested_chapters),
-        "structured outline",
-    )
+    try:
+        if run.requested_chapters > OUTLINE_CHUNK_THRESHOLD:
+            outline = _generate_outline_chunks(session, run, story_bible, client, provider_name, model_name)
+        else:
+            outline = _generate_structured_output(
+                client,
+                provider_name,
+                model_name,
+                lambda: build_outline_messages(project, run, story_bible),
+                lambda raw: parse_outline(raw, run.requested_chapters),
+                "structured outline",
+            )
+        run.outline = _validated_outline_or_fallback(session, project, run, story_bible, outline)
+    except Exception as exc:
+        run.outline = _fallback_outline_entries(project, story_bible, 1, run.requested_chapters, run.requested_chapters)
+        record_event(
+            session,
+            run,
+            "outline_fallback",
+            {
+                "message": "Outline model output was unusable after repair; generated a deterministic outline.",
+                "error": str(exc),
+            },
+        )
     create_chapters_from_outline(session, run)
     record_event(session, run, "outline_completed", {"chapters": len(run.outline or [])})
     session.commit()

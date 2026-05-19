@@ -8,6 +8,7 @@ from novel_generator.services.prompts import (
     build_chapter_plan_messages,
     build_chapter_revision_messages,
     build_continuity_update_messages,
+    build_outline_chunk_messages,
     build_developmental_rewrite_messages,
     build_manuscript_qa_messages,
     build_story_bible_messages,
@@ -17,6 +18,7 @@ from novel_generator.services.prompts import (
     parse_developmental_rewrite_plan,
     parse_manuscript_qa_report,
     parse_outline,
+    parse_outline_chunk,
     parse_story_bible,
     rolling_context,
     sanitize_chapter_content,
@@ -797,6 +799,108 @@ def test_continuity_update_prompt_requests_system_state_transitions() -> None:
     assert '"system_state_transitions"' in prompt
     assert '"previous_state"' in prompt
     assert "previous_state matching the current ledger" in prompt
+
+
+def test_outline_chunk_prompt_and_parser_use_absolute_chapter_numbers() -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="An archivist finds a living map under a failing city.",
+        desired_word_count=64000,
+        requested_chapters=64,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+        preferred_model="test-model",
+        story_brief={},
+    )
+    run = GenerationRun(
+        project=project,
+        model_name="test-model",
+        target_word_count=64000,
+        requested_chapters=64,
+        min_words_per_chapter=900,
+        max_words_per_chapter=1200,
+    )
+    story_bible = {
+        "logline": "A map wakes.",
+        "theme": "Freedom costs more than obedience.",
+        "act_plan": ["Discovery", "Descent", "Choice"],
+        "cast": [{"name": "Iris", "role": "Archivist", "desire": "Find the map", "risk": "Becoming its tool"}],
+        "character_agendas": [],
+        "canon_registry": [],
+        "conflict_ladder": [],
+        "world_rules": [],
+        "core_system_rules": [],
+        "prose_guardrails": [],
+        "ending_promise": "Iris chooses whether to free the city.",
+    }
+
+    prompt = build_outline_chunk_messages(
+        project,
+        run,
+        story_bible,
+        start_chapter=9,
+        end_chapter=10,
+        prior_outline=[{"chapter_number": 8, "title": "Prior"}],
+    )[-1]["content"]
+    parsed = parse_outline_chunk(
+        """
+        {
+          "chapters": [
+            {
+              "chapter_number": 9,
+              "act": "Act II",
+              "title": "Ninth Pressure",
+              "objective": "Iris follows the map into a flooded civic exchange.",
+              "conflict_turn": "The map opens a route only after Tarin refuses her shortcut.",
+              "character_turn": "Iris accepts that speed without consent repeats the city's old harm.",
+              "reveal": "The exchange still stores living witness names.",
+              "ending_state": "Iris carries the witness names and cannot pretend the route is empty.",
+              "outcome_type": "setback",
+              "primary_obstacle": "The exchange rejects unauthorized memories.",
+              "cost_if_success": "Progress exposes civilians who wanted to stay hidden.",
+              "side_character_friction": "Tarin refuses to trade names for speed.",
+              "independent_side_character_move": "Tarin seals the shortcut until Iris agrees to warn the witnesses.",
+              "concrete_ending_hook": {"trigger": "A hidden witness lantern ignites.", "visible_object_or_actor": "the witness lantern", "next_problem": "The lantern names Iris aloud."},
+              "chapter_mode": "investigation",
+              "civilian_life_detail": "Families dry laundry on broken exchange rails.",
+              "emotional_reveal": "Iris admits she has started thinking like the map.",
+              "ideology_pressure": "Consent matters even when delay is dangerous.",
+              "genre_specific_beats": ["The clue chain reveals a hidden witness system."],
+              "genre_state_change": "The witness clue becomes active."
+            },
+            {
+              "chapter_number": 10,
+              "act": "Act II",
+              "title": "Tenth Pressure",
+              "objective": "Iris escorts the witnesses out before the map reroutes them.",
+              "conflict_turn": "The route collapses after one witness lies about their name.",
+              "character_turn": "Tarin chooses to protect the liar instead of the fastest exit.",
+              "reveal": "The map cannot read chosen names.",
+              "ending_state": "The party learns a way to blind the map at personal cost.",
+              "outcome_type": "reversal",
+              "primary_obstacle": "The map punishes false identities.",
+              "cost_if_success": "The witnesses lose their safest route.",
+              "side_character_friction": "Tarin argues that survival without privacy is still captivity.",
+              "independent_side_character_move": "Tarin gives the witness his own route token.",
+              "concrete_ending_hook": {"trigger": "The token turns black.", "visible_object_or_actor": "Tarin's route token", "next_problem": "Tarin is locked out of the safe stair."},
+              "chapter_mode": "aftermath",
+              "civilian_life_detail": "Witness children count ration beads beside the drained fountain.",
+              "emotional_reveal": "Tarin admits the map once sold his family's route.",
+              "ideology_pressure": "Privacy becomes the price of safety.",
+              "genre_specific_beats": ["The system rule creates a new tactical cost."],
+              "genre_state_change": "The map's identity rule is exposed."
+            }
+          ]
+        }
+        """,
+        9,
+        10,
+    )
+
+    assert "numbered 9 through 10" in prompt
+    assert "do not restart at chapter 1" in prompt
+    assert '"chapter_number": 9' in prompt
+    assert [item["chapter_number"] for item in parsed] == [9, 10]
 
 
 def test_developmental_rewrite_parser_accepts_wrapped_plan() -> None:
