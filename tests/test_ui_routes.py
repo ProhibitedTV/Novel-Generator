@@ -5,7 +5,7 @@ import json
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import Artifact, ChapterStatus, RunStatus
-from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, get_project, get_run
+from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, get_project, get_run, record_event
 from novel_generator.schemas import ProjectCreate, ProviderCapabilities, RunCreate
 from novel_generator.services.ollama import OllamaClient
 from novel_generator.settings import get_settings
@@ -204,6 +204,8 @@ def test_home_connected_state_with_existing_projects_and_runs(client, monkeypatc
     assert response.status_code == 200
     assert "Recent projects" in response.text
     assert "Recent runs" in response.text
+    assert "Latest: No worker events yet." in response.text
+    assert "Open run" in response.text
     assert "Get ready in four steps" not in response.text
 
 
@@ -372,9 +374,60 @@ def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> 
     assert 'data-run-stages-json' in response.text
     assert 'data-run-elapsed' in response.text
     assert "What The Worker Is Doing" in response.text
+    assert "Run confidence" in response.text
+    assert "Running: Draft chapter" in response.text
+    assert "Next milestone" in response.text
     assert "Current Chapter Contract" in response.text
     assert "Quality Signals" in response.text
     assert "Continuity Highlights" in response.text
+
+
+def test_run_detail_surfaces_fallback_recovery_guidance(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.RUNNING
+        run.current_step = "outline"
+        record_event(
+            session,
+            run,
+            "outline_chunk_fallback",
+            {"message": "Outline chunk 1-8 was unusable after repair; generated deterministic entries."},
+        )
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "Run confidence" in response.text
+    assert "Running: Outline" in response.text
+    assert "Outline chunk 1-8 was unusable after repair" in response.text
+    assert "outline chunk fallback" in response.text
+
+
+def test_failed_run_detail_surfaces_recovery_guidance(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.FAILED
+        run.current_step = "outline"
+        run.error_message = "Outline returned 29 chapters, but 64 were required."
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "Stopped during Outline" in response.text
+    assert "Outline returned 29 chapters, but 64 were required." in response.text
+    assert "Review outputs and recovery actions" in response.text
 
 
 def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> None:

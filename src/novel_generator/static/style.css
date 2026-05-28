@@ -1501,6 +1501,37 @@ code {
   gap: 0.75rem;
 }
 
+.run-health-card {
+  align-items: stretch;
+}
+
+.run-health-card h2 {
+  margin: 0;
+}
+
+.run-health-meta {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.8fr) minmax(14rem, 1.2fr);
+  gap: 0.75rem;
+  min-width: min(100%, 28rem);
+}
+
+.run-row-event {
+  margin-top: 0.1rem;
+}
+
+.run-row-action {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.46rem 0.72rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(23, 99, 90, 0.2);
+  background: rgba(23, 99, 90, 0.08);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
 .run-status-strip {
   display: grid;
   grid-template-columns: minmax(10rem, 1.25fr) repeat(5, minmax(7.2rem, 1fr));
@@ -1636,6 +1667,11 @@ code {
 
   .compact-details {
     margin-top: 0.5rem;
+  }
+
+  .run-health-meta {
+    grid-template-columns: 1fr;
+    min-width: 0;
   }
 }
 

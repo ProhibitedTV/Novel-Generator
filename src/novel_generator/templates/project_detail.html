@@ -627,7 +627,8 @@
   </div>
   {% if project_runs %}
     <div class="run-table">
-      {% for run in project_runs %}
+      {% for row in project_run_rows %}
+        {% set run = row.run %}
         <article class="run-row">
           <a class="run-row-link" href="/runs/{{ run.id }}">
             <div class="run-row-main">
@@ -636,11 +637,14 @@
                 <span class="run-row-title long-value">{{ run.model_name }}</span>
               </div>
               <div class="meta-chip-row">
-                <span class="meta-chip">{{ run.provider_name }}</span>
-                <span class="meta-chip">{{ run.requested_chapters }} chapters requested</span>
-                <span class="meta-chip">{{ run.current_step.replace("_", " ") }}</span>
+                <span class="meta-chip long-value">{{ row.route.provider_name }} / {{ row.route.model_name }}</span>
+                <span class="meta-chip">{{ row.progress.label }}</span>
+                <span class="meta-chip">{{ row.stage_label }}</span>
                 <span class="meta-chip">v{{ run.pipeline_version or 1 }}</span>
               </div>
+              <p class="field-note run-row-event">
+                Latest: {{ row.latest_event.summary if row.latest_event else "No worker events yet." }}
+              </p>
             </div>
             <div class="run-row-meta">
               <div class="meta-cluster">
@@ -648,8 +652,12 @@
                 <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
               </div>
               <div class="meta-cluster">
+                <span class="run-meta-label">Words</span>
+                <span class="detail-value">{{ row.progress.word_count }} / {{ run.target_word_count }}</span>
+              </div>
+              <div class="meta-cluster">
                 <span class="run-meta-label">Artifacts</span>
-                <span class="detail-value">{{ run.artifacts|length }}</span>
+                <span class="detail-value">{{ row.progress.artifact_count }}</span>
               </div>
             </div>
           </a>
