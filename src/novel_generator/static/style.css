@@ -584,6 +584,113 @@ dd {
   background: rgba(255, 255, 255, 0.5);
 }
 
+.outline-review-workspace {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.outline-summary-strip,
+.outline-distribution-grid,
+.outline-filter-bar {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.outline-summary-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 0.85rem;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.outline-summary-strip strong {
+  font-size: 1.15rem;
+  line-height: 1.2;
+}
+
+.outline-distribution-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.outline-checklist {
+  box-shadow: none;
+}
+
+.outline-warning-panel strong {
+  display: block;
+  margin-bottom: 0.45rem;
+}
+
+.outline-event-shell {
+  margin: 0;
+}
+
+.compact-event-log {
+  margin-top: 0.85rem;
+}
+
+.outline-filter-bar {
+  grid-template-columns: minmax(7rem, 1fr) minmax(10rem, 1fr) repeat(3, minmax(5.5rem, 0.7fr)) auto;
+  align-items: end;
+  padding: 0.85rem;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.outline-filter-actions {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.outline-anchor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.outline-anchor-list a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.25rem;
+  min-height: 2.25rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.68);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.outline-anchor-list a:hover,
+.outline-anchor-list a:focus-visible {
+  border-color: rgba(23, 106, 90, 0.38);
+  background: rgba(23, 106, 90, 0.1);
+}
+
+.outline-anchor-list a.is-muted {
+  opacity: 0.45;
+}
+
+.outline-card {
+  scroll-margin-top: 1rem;
+}
+
+.outline-card-warning {
+  border-color: rgba(166, 66, 51, 0.3);
+  background: rgba(255, 248, 247, 0.74);
+}
+
+.outline-card.is-focused-outline {
+  box-shadow: 0 0 0 3px rgba(23, 106, 90, 0.2), var(--shadow);
+}
+
+.outline-warning-reasons {
+  margin-top: -0.15rem;
+}
+
 .model-picker-title {
   margin: 0;
   font-size: 0.96rem;
@@ -1672,6 +1779,16 @@ code {
   .run-health-meta {
     grid-template-columns: 1fr;
     min-width: 0;
+  }
+
+  .outline-summary-strip,
+  .outline-distribution-grid,
+  .outline-filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .outline-filter-actions {
+    align-items: stretch;
   }
 }
 
