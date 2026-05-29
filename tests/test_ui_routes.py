@@ -465,6 +465,8 @@ def test_failed_run_detail_surfaces_recovery_guidance(client, monkeypatch) -> No
     assert "Stopped during Outline" in response.text
     assert "Outline returned 29 chapters, but 64 were required." in response.text
     assert "Review outputs and recovery actions" in response.text
+    assert "Recovery next step" in response.text
+    assert "Run again" in response.text
 
 
 def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> None:
@@ -640,6 +642,21 @@ def test_run_detail_surfaces_qa_report_artifact(client, monkeypatch) -> None:
     assert response.status_code == 200
     assert "editorial feedback" in response.text
     assert "qa-report.md" in response.text
+    assert "Editorial next step" in response.text
+    assert "Download QA report" in response.text
+    assert "Publication export" in response.text
+
+
+def test_completed_run_next_step_links_compare_when_available(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_ids = seed_project_with_completed_compare_runs()
+
+    response = client.get(f"/runs/{run_ids[0]}")
+
+    assert response.status_code == 200
+    assert "Editorial next step" in response.text
+    assert "Compare completed drafts" in response.text
+    assert "2 completed drafts" in response.text
 
 
 def test_completed_run_can_create_publication_export(client, monkeypatch) -> None:
@@ -777,6 +794,14 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
     response = client.get(f"/runs/{run_id}")
 
     assert response.status_code == 200
+    assert "QA risk" in response.text
+    assert "Revision required" in response.text
+    assert "Weak ending" in response.text
+    assert "Technical fatigue" in response.text
+    assert "Continuity" in response.text
+    assert "Outcome logged" in response.text
+    assert "Trust fracture" in response.text
+    assert "data-review-section" in response.text
     assert "Blocking issues" in response.text
     assert "Repair scope" in response.text
     assert "Ending concreteness: 4/10" in response.text
