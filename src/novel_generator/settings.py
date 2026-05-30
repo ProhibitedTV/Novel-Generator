@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     worker_poll_interval_seconds: float = Field(default=2.0, ge=0.5, le=30.0)
     ollama_timeout_seconds: float = Field(default=120.0, ge=10.0, le=1800.0)
     ollama_max_retries: int = Field(default=2, ge=0, le=5)
+    provider_chat_timeout_seconds: float = Field(default=1800.0, ge=30.0, le=7200.0)
+    provider_retry_backoff_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+    run_stale_after_seconds: int = Field(default=3600, ge=60, le=86400)
     chapter_summary_window: int = Field(default=4, ge=1, le=12)
     secret_key: str = "change-me-for-public-deployments"
 

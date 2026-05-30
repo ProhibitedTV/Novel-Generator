@@ -4,7 +4,7 @@ import json
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import ChapterStatus, RunStatus
-from novel_generator.repositories import create_project, create_run, get_run, recover_running_runs
+from novel_generator.repositories import create_project, create_run, get_run, list_stage_attempts, recover_running_runs
 from novel_generator.schemas import ProjectCreate, RunCreate
 from novel_generator.services.pipeline import process_run_safe
 from novel_generator.services.state import approve_outline_review
@@ -393,11 +393,14 @@ def _developmental_rewrite_json() -> str:
 
 
 class FakeOllamaClient:
-    def __init__(self, responses: list[str]):
+    def __init__(self, responses: list[str | Exception]):
         self._responses = iter(responses)
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        return next(self._responses)
+        response = next(self._responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 def _create_project(session, *, requested_chapters: int = 2, approved_canon: list[dict] | None = None):
@@ -444,6 +447,54 @@ def test_process_run_safe_pauses_after_outline_when_requested(configured_environ
         assert refreshed.outline is not None
         assert len(refreshed.chapters) == 2
         assert len(refreshed.artifacts) == 0
+
+
+def test_stage_attempts_are_recorded_for_successful_model_calls(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=2)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(session, run, settings, FakeOllamaClient([_story_bible_json(), _outline_json(2)]))
+
+        attempts = list_stage_attempts(session, run.id)
+        assert [(attempt.stage, attempt.status) for attempt in attempts] == [
+            ("story_bible", "success"),
+            ("outline", "success"),
+        ]
+        assert all(attempt.output_chars > 0 for attempt in attempts)
+        assert attempts[0].attempt_metadata["label"] == "story bible"
+
+
+def test_stage_attempts_are_recorded_for_failed_provider_calls(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=2)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient([RuntimeError("provider unavailable"), _outline_json(2)]),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed is not None
+        assert refreshed.status == RunStatus.AWAITING_APPROVAL
+        attempts = list_stage_attempts(session, run.id)
+        assert attempts[0].stage == "story_bible"
+        assert attempts[0].status == "failed"
+        assert attempts[0].error_type == "RuntimeError"
+        assert "provider unavailable" in (attempts[0].error_message or "")
 
 
 def test_large_run_generates_outline_in_chunks_and_pauses(configured_environment) -> None:

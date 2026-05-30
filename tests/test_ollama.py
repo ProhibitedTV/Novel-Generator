@@ -59,13 +59,14 @@ def test_ollama_client_raises_on_malformed_chat_payload() -> None:
         client.chat("test-model", [{"role": "user", "content": "Hello"}])
 
 
-def test_ollama_chat_client_disables_read_timeout() -> None:
+def test_ollama_chat_client_uses_long_read_timeout() -> None:
     client = OllamaClient(
         base_url="http://ollama.test",
         timeout_seconds=120,
         max_retries=0,
+        chat_timeout_seconds=1800,
     )
 
     with client._make_client(for_chat=True) as http_client:
         assert http_client.timeout.connect == 120
-        assert http_client.timeout.read is None
+        assert http_client.timeout.read == 1800

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 
 import httpx
@@ -54,11 +55,15 @@ class OllamaClient:
         base_url: str,
         timeout_seconds: float,
         max_retries: int,
+        chat_timeout_seconds: float | None = None,
+        retry_backoff_seconds: float = 0.0,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
+        self.retry_backoff_seconds = retry_backoff_seconds
         self._client_factory = client_factory
 
     def _default_timeout(self) -> httpx.Timeout:
@@ -67,10 +72,14 @@ class OllamaClient:
     def _chat_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(
             connect=self.timeout_seconds,
-            read=None,
+            read=self.chat_timeout_seconds,
             write=self.timeout_seconds,
             pool=self.timeout_seconds,
         )
+
+    def _sleep_before_retry(self, attempt: int) -> None:
+        if self.retry_backoff_seconds > 0:
+            time.sleep(self.retry_backoff_seconds * (attempt + 1))
 
     def _make_client(self, *, for_chat: bool = False) -> httpx.Client:
         if self._client_factory is not None:
@@ -90,6 +99,7 @@ class OllamaClient:
                 last_error = exc
                 if attempt >= self.max_retries:
                     break
+                self._sleep_before_retry(attempt)
         raise OllamaTransportError(str(last_error) if last_error else "Unknown Ollama transport error.")
 
     def list_models(self) -> list[str]:
@@ -139,4 +149,5 @@ class OllamaClient:
                 last_error = exc
                 if attempt >= self.max_retries:
                     break
+                self._sleep_before_retry(attempt)
         raise OllamaTransportError(str(last_error) if last_error else "Unable to complete Ollama chat request.")

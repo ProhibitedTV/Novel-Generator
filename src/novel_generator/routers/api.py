@@ -24,6 +24,7 @@ from ..repositories import (
     get_run,
     get_run_minimal,
     list_events_after,
+    list_stage_attempts,
     record_event,
     update_project,
 )
@@ -36,6 +37,7 @@ from ..schemas import (
     ProviderConfigRead,
     ProviderConfigUpdate,
     RunCreate,
+    RunStageAttemptRead,
 )
 from ..services.provider_errors import ProviderError, ProviderTransportError
 from ..services.providers import ProviderManager, provider_definition
@@ -335,6 +337,14 @@ def api_get_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunRead
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return GenerationRunRead.model_validate(run)
+
+
+@router.get("/runs/{run_id}/attempts", response_model=list[RunStageAttemptRead])
+def api_get_run_stage_attempts(run_id: str, db: Session = Depends(get_db)) -> list[RunStageAttemptRead]:
+    run = get_run_minimal(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return [RunStageAttemptRead.model_validate(attempt) for attempt in list_stage_attempts(db, run_id)]
 
 
 @router.post("/runs/{run_id}/cancel", response_model=GenerationRunRead)
