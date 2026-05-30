@@ -479,6 +479,74 @@
   </details>
 </section>
 
+{% if editorial_next_step.show %}
+  <section class="panel editorial-next-panel">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <p class="eyebrow">Post-run review</p>
+        <h2>{{ editorial_next_step.title }}</h2>
+        <p>{{ editorial_next_step.body }}</p>
+      </div>
+      <div class="hero-actions">
+        {% if editorial_next_step.qa_artifact %}
+          <a class="button secondary" href="/api/artifacts/{{ editorial_next_step.qa_artifact.id }}/download">Download QA report</a>
+        {% endif %}
+        {% if editorial_next_step.compare_available %}
+          <a class="button secondary" href="/projects/{{ project.id }}/runs/compare">Compare completed drafts</a>
+        {% endif %}
+        {% if editorial_next_step.publication_available %}
+          <a class="button secondary" href="#publication-export">Publication export</a>
+        {% endif %}
+        <form method="post" action="/runs/{{ run.id }}/rerun">
+          <button type="submit">Run again</button>
+        </form>
+      </div>
+    </div>
+    <div class="editorial-next-grid">
+      <div class="detail-item">
+        <span class="detail-label">Top risks</span>
+        <ul class="bullet-list">
+          {% for risk in editorial_next_step.top_risks %}
+            <li>{{ risk }}</li>
+          {% else %}
+            <li>No elevated QA risks are recorded for this run.</li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Regenerate suggestions</span>
+        {% if editorial_next_step.regenerate_suggestions %}
+          <div class="regenerate-suggestion-list">
+            {% for suggestion in editorial_next_step.regenerate_suggestions %}
+              <form method="post" action="/runs/{{ run.id }}/chapters/{{ suggestion.chapter_number }}/regenerate" class="regenerate-suggestion">
+                <div>
+                  <strong>Chapter {{ suggestion.chapter_number }}</strong>
+                  <p class="field-note">{{ suggestion.reason }}</p>
+                </div>
+                <button class="secondary" type="submit">Regenerate</button>
+              </form>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty-state">No targeted regeneration point stands out from chapter QA.</p>
+        {% endif %}
+      </div>
+      <div class="detail-item">
+        <span class="detail-label">Outputs</span>
+        <div class="meta-chip-row">
+          <span class="meta-chip">{{ run.artifacts|length }} artifacts</span>
+          <span class="meta-chip">{{ completed_chapter_count }}/{{ run.requested_chapters }} chapters complete</span>
+          {% if editorial_next_step.comparison_run_count > 1 %}
+            <span class="meta-chip">{{ editorial_next_step.comparison_run_count }} completed drafts</span>
+          {% else %}
+            <span class="meta-chip">Comparison after another completed draft</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+{% endif %}
+
 {% if run.task_routing %}
   <section class="panel">
     <div class="section-header">
@@ -994,7 +1062,7 @@
     {% endif %}
   </article>
 
-  <article class="panel">
+  <article class="panel" id="publication-export">
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Export For Publication</h2>
@@ -1035,9 +1103,10 @@
     </div>
     <p>{{ run.chapters|length }} tracked</p>
   </div>
-  {% if run.chapters %}
+  {% if chapter_review_cards %}
     <div class="chapter-list">
-      {% for chapter in run.chapters %}
+      {% for card in chapter_review_cards %}
+        {% set chapter = card.chapter %}
         <article class="chapter-card{% if run.current_chapter == chapter.chapter_number %} active-chapter{% endif %}">
           <div class="chapter-topline">
             <div class="chapter-heading">
@@ -1047,22 +1116,37 @@
             <span class="badge status-{{ chapter.status.value }}">{{ chapter.status.value }}</span>
           </div>
           <div class="chapter-body">
-            <div class="chapter-meta-row">
-              {% if chapter.word_count %}
-                <span class="meta-chip">{{ chapter.word_count }} words</span>
-              {% endif %}
-              {% if chapter.summary %}
-                <span class="meta-chip">Summary saved</span>
-              {% endif %}
-              {% if chapter.continuity_update %}
-                <span class="meta-chip">Continuity updated</span>
-              {% endif %}
-              {% if chapter.qa_notes %}
-                <span class="meta-chip">Critique stored</span>
-              {% endif %}
-              {% if chapter.content %}
-                <span class="meta-chip">Preview ready</span>
-              {% endif %}
+            <div class="chapter-scan-grid">
+              <div class="chapter-scan-row">
+                <span class="detail-label">Status</span>
+                <div class="meta-chip-row">
+                  {% for chip in card.status_chips %}
+                    <span class="review-chip review-chip-{{ chip.tone }}">{{ chip.label }}</span>
+                  {% else %}
+                    <span class="review-chip">Awaiting output</span>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="chapter-scan-row">
+                <span class="detail-label">QA risk</span>
+                <div class="meta-chip-row">
+                  {% for chip in card.risk_chips %}
+                    <span class="review-chip review-chip-{{ chip.tone }}">{{ chip.label }}</span>
+                  {% else %}
+                    <span class="review-chip">No QA yet</span>
+                  {% endfor %}
+                </div>
+              </div>
+              <div class="chapter-scan-row">
+                <span class="detail-label">Continuity</span>
+                <div class="meta-chip-row">
+                  {% for chip in card.continuity_chips %}
+                    <span class="review-chip review-chip-{{ chip.tone }}">{{ chip.label }}</span>
+                  {% else %}
+                    <span class="review-chip">No continuity update</span>
+                  {% endfor %}
+                </div>
+              </div>
             </div>
             <p class="muted chapter-copy">{{ chapter.outline_summary }}</p>
             {% if chapter.summary %}
@@ -1073,8 +1157,11 @@
             {% endif %}
 
             {% if chapter.qa_notes %}
-              <details class="chapter-preview-shell">
-                <summary>Editorial notes</summary>
+              <details class="chapter-preview-shell chapter-review-section" data-review-section>
+                <summary>
+                  <span>Editorial notes</span>
+                  <span class="summary-meta">{{ card.risk_chips|length }} signals</span>
+                </summary>
                 <div class="story-bible-grid">
                   <div class="detail-item">
                     <span class="detail-label">Scores</span>
@@ -1160,8 +1247,11 @@
             {% endif %}
 
             {% if chapter.content %}
-              <details class="chapter-preview-shell">
-                <summary>Preview chapter text</summary>
+              <details class="chapter-preview-shell chapter-review-section" data-review-section>
+                <summary>
+                  <span>Preview chapter text</span>
+                  <span class="summary-meta">{{ chapter.word_count or "Draft" }}{% if chapter.word_count %} words{% endif %}</span>
+                </summary>
                 <pre class="chapter-preview">{{ chapter.content }}</pre>
               </details>
             {% endif %}

@@ -1653,6 +1653,155 @@ def _run_comparison_card(run: GenerationRun) -> dict[str, Any]:
     }
 
 
+def _review_chip(label: str, tone: str = "neutral") -> dict[str, str]:
+    return {"label": label, "tone": tone}
+
+
+def _chapter_status_chips(chapter: Any) -> list[dict[str, str]]:
+    chips: list[dict[str, str]] = []
+    if chapter.word_count:
+        chips.append(_review_chip(f"{chapter.word_count} words", "neutral"))
+    if chapter.summary:
+        chips.append(_review_chip("Summary saved", "success"))
+    if chapter.continuity_update:
+        chips.append(_review_chip("Continuity updated", "success"))
+    if chapter.qa_notes:
+        chips.append(_review_chip("QA stored", "success"))
+    if chapter.content:
+        chips.append(_review_chip("Preview ready", "success"))
+    if chapter.error_message:
+        chips.append(_review_chip("Chapter error", "risk"))
+    return chips
+
+
+def _chapter_risk_chips(chapter: Any) -> list[dict[str, str]]:
+    notes = chapter.qa_notes or {}
+    if not notes:
+        return []
+    chips: list[dict[str, str]] = []
+    blocking_count = len(notes.get("blocking_issues", []) or [])
+    warning_count = len(notes.get("warnings", []) or []) + len(notes.get("soft_warnings", []) or [])
+    if notes.get("revision_required"):
+        chips.append(_review_chip("Revision required", "risk"))
+    if blocking_count:
+        chips.append(_review_chip(f"{blocking_count} blocking", "risk"))
+    if warning_count:
+        chips.append(_review_chip(f"{warning_count} warnings", "warning"))
+    if int(notes.get("ending_concreteness_score", 10) or 10) <= 5:
+        chips.append(_review_chip("Weak ending", "risk"))
+    if int(notes.get("scene_turn_resolution_score", 10) or 10) <= 5:
+        chips.append(_review_chip("Scene turn risk", "warning"))
+    if int(notes.get("repetition_risk_score", 0) or 0) >= 7:
+        chips.append(_review_chip("Repetition risk", "warning"))
+    if int(notes.get("technical_escalation_fatigue_score", 0) or 0) >= 7:
+        chips.append(_review_chip("Technical fatigue", "warning"))
+    if not chips:
+        chips.append(_review_chip("QA steady", "success"))
+    return chips
+
+
+def _chapter_continuity_chips(chapter: Any) -> list[dict[str, str]]:
+    update = chapter.continuity_update or {}
+    chips: list[dict[str, str]] = []
+    if update.get("chapter_outcome"):
+        chips.append(_review_chip("Outcome logged", "success"))
+    if update.get("open_threads"):
+        chips.append(_review_chip(f"{len(update.get('open_threads') or [])} open threads", "warning"))
+    if update.get("new_entities_introduced"):
+        chips.append(_review_chip(f"{len(update.get('new_entities_introduced') or [])} new entities", "neutral"))
+    if update.get("entity_state_changes"):
+        chips.append(_review_chip("Entity changes", "neutral"))
+    if update.get("trust_fractures"):
+        chips.append(_review_chip("Trust fracture", "warning"))
+    return chips
+
+
+def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
+    return [
+        {
+            "chapter": chapter,
+            "status_chips": _chapter_status_chips(chapter),
+            "risk_chips": _chapter_risk_chips(chapter),
+            "continuity_chips": _chapter_continuity_chips(chapter),
+        }
+        for chapter in _sorted_run_chapters(run)
+    ]
+
+
+def _run_editorial_next_step_context(run: GenerationRun, chapter_cards: list[dict[str, Any]]) -> dict[str, Any]:
+    show = run.status in TERMINAL_STATUSES
+    comparison_card = _run_comparison_card(run)
+    qa_artifact = comparison_card["qa_artifact"]
+    completed_runs = [candidate for candidate in _sort_runs(run.project) if candidate.status == RunStatus.COMPLETED]
+    top_risks = list(comparison_card["top_risks"])
+    if not top_risks:
+        top_risks = [
+            str(item)
+            for note in _run_qa_notes(run)
+            for item in [
+                *(note.get("blocking_issues", []) or []),
+                *(note.get("warnings", []) or []),
+                *(note.get("soft_warnings", []) or []),
+            ]
+        ][:3]
+
+    suggestions: list[dict[str, Any]] = []
+    for card in chapter_cards:
+        chapter = card["chapter"]
+        risk_labels = [chip["label"] for chip in card["risk_chips"] if chip["tone"] in {"risk", "warning"}]
+        if risk_labels:
+            suggestions.append(
+                {
+                    "chapter_number": chapter.chapter_number,
+                    "title": chapter.title,
+                    "reason": ", ".join(risk_labels[:2]),
+                }
+            )
+        if len(suggestions) >= 3:
+            break
+
+    if run.status == RunStatus.FAILED and not suggestions:
+        failed_chapter = next((card["chapter"] for card in chapter_cards if card["chapter"].status == ChapterStatus.FAILED), None)
+        chapter_number = (
+            failed_chapter.chapter_number
+            if failed_chapter
+            else run.current_chapter
+            or min(run.requested_chapters, _chapter_completion_count(run) + 1)
+        )
+        suggestions.append(
+            {
+                "chapter_number": chapter_number,
+                "title": f"Chapter {chapter_number}",
+                "reason": "Failure stopped the run before a clean handoff.",
+            }
+        )
+
+    if run.status == RunStatus.COMPLETED:
+        title = "Editorial next step"
+        body = "Use QA, chapter risks, comparison, and export options to decide whether this draft is ready or needs a targeted rerun."
+    elif run.status == RunStatus.FAILED:
+        title = "Recovery next step"
+        body = run.error_message or "The run stopped before completion. Start with the failure stage, then rerun or regenerate from the safest chapter boundary."
+    elif run.status == RunStatus.CANCELED:
+        title = "Recovery next step"
+        body = "This run was canceled before completion. Review the preserved outline, events, and completed chapters before trying again."
+    else:
+        title = "Next step"
+        body = ""
+
+    return {
+        "show": show,
+        "title": title,
+        "body": body,
+        "qa_artifact": qa_artifact,
+        "top_risks": top_risks[:3],
+        "regenerate_suggestions": suggestions[:3],
+        "compare_available": run.status == RunStatus.COMPLETED and len(completed_runs) >= 2,
+        "comparison_run_count": len(completed_runs),
+        "publication_available": run.status == RunStatus.COMPLETED,
+    }
+
+
 def _project_comparison_context(project: Project) -> dict[str, Any]:
     completed_runs = [
         run
@@ -2623,6 +2772,7 @@ def run_detail(
     completed_chapter_count = _chapter_completion_count(run)
     run_profile = genre_profile((run.story_bible or {}).get("genre_profile") or (run.project.story_brief or {}).get("genre_profile"))
     outline_review = _outline_review_context(run)
+    chapter_review_cards = _chapter_review_cards(run)
     return _render(
         request,
         "run_detail.html",
@@ -2639,6 +2789,8 @@ def run_detail(
             "awaiting_outline_approval": run.status == RunStatus.AWAITING_APPROVAL,
             "outline_entries": outline_review["entries"],
             "outline_review": outline_review,
+            "chapter_review_cards": chapter_review_cards,
+            "editorial_next_step": _run_editorial_next_step_context(run, chapter_review_cards),
             "story_bible": run.story_bible or {},
             "continuity_ledger": run.continuity_ledger or {},
             **_artifact_context(run),

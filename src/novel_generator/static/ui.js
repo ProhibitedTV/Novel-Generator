@@ -3,6 +3,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupModelPickers(document);
   setupRunModeNotes(document);
   setupOutlineReview(document);
+  setupReviewSections(document);
   setupProviderConsole();
   setupRunDetail();
 });
@@ -202,6 +203,30 @@ function setupOutlineReview(root) {
       syncFilters();
     });
     syncFilters();
+  });
+}
+
+function setupReviewSections(root) {
+  const sections = Array.from(root.querySelectorAll("[data-review-section]"));
+  sections.forEach((section) => {
+    if (section.dataset.reviewBound === "true") {
+      return;
+    }
+    section.dataset.reviewBound = "true";
+    section.addEventListener("toggle", () => {
+      if (!section.open) {
+        return;
+      }
+      const chapter = section.closest(".chapter-card");
+      if (!chapter) {
+        return;
+      }
+      Array.from(chapter.querySelectorAll("[data-review-section]")).forEach((peer) => {
+        if (peer !== section) {
+          peer.open = false;
+        }
+      });
+    });
   });
 }
 
