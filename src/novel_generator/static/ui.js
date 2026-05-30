@@ -2,6 +2,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupConfirmActions(document);
   setupModelPickers(document);
   setupRunModeNotes(document);
+  setupOutlineReview(document);
   setupProviderConsole();
   setupRunDetail();
 });
@@ -86,6 +87,121 @@ function setupRunModeNotes(root) {
     };
     checkbox.addEventListener("change", sync);
     sync();
+  });
+}
+
+function setupOutlineReview(root) {
+  const workspaces = Array.from(root.querySelectorAll("[data-outline-workspace]"));
+  workspaces.forEach((workspace) => {
+    if (workspace.dataset.outlineBound === "true") {
+      return;
+    }
+    workspace.dataset.outlineBound = "true";
+
+    const cards = Array.from(workspace.querySelectorAll("[data-outline-card]"));
+    const anchors = Array.from(workspace.querySelectorAll("[data-outline-anchor]"));
+    const actFilter = workspace.querySelector("[data-outline-act-filter]");
+    const statusFilter = workspace.querySelector("[data-outline-status-filter]");
+    const minInput = workspace.querySelector("[data-outline-min]");
+    const maxInput = workspace.querySelector("[data-outline-max]");
+    const jumpInput = workspace.querySelector("[data-outline-jump-input]");
+    const jumpButton = workspace.querySelector("[data-outline-jump]");
+    const clearButton = workspace.querySelector("[data-outline-clear]");
+    const visibleCount = workspace.querySelector("[data-outline-visible-count]");
+    const emptyState = workspace.querySelector("[data-outline-empty]");
+
+    const setHidden = (node, hidden) => {
+      if (node) {
+        node.classList.toggle("is-hidden", hidden);
+      }
+    };
+    const numberValue = (node, fallback) => {
+      const value = Number(node?.value);
+      return Number.isFinite(value) ? value : fallback;
+    };
+    const minChapter = Math.min(...cards.map((card) => Number(card.dataset.outlineChapter || 0)).filter(Boolean));
+    const maxChapter = Math.max(...cards.map((card) => Number(card.dataset.outlineChapter || 0)).filter(Boolean));
+
+    const syncFilters = () => {
+      const actValue = actFilter?.value || "";
+      const statusValue = statusFilter?.value || "";
+      const from = numberValue(minInput, minChapter || 1);
+      const to = numberValue(maxInput, maxChapter || from);
+      const lowerBound = Math.min(from, to);
+      const upperBound = Math.max(from, to);
+      let shown = 0;
+
+      cards.forEach((card) => {
+        const chapter = Number(card.dataset.outlineChapter || 0);
+        const hasWarning = card.dataset.outlineWarning === "true";
+        let visible = chapter >= lowerBound && chapter <= upperBound;
+        if (actValue && card.dataset.outlineAct !== actValue) {
+          visible = false;
+        }
+        if (statusValue === "warning" && !hasWarning) {
+          visible = false;
+        }
+        if (statusValue === "clean" && hasWarning) {
+          visible = false;
+        }
+        setHidden(card, !visible);
+        if (visible) {
+          shown += 1;
+        }
+      });
+
+      anchors.forEach((anchor) => {
+        const chapter = Number(anchor.dataset.outlineAnchor || 0);
+        const matchingCard = cards.find((card) => Number(card.dataset.outlineChapter || 0) === chapter);
+        anchor.classList.toggle("is-muted", Boolean(matchingCard?.classList.contains("is-hidden")));
+      });
+
+      if (visibleCount) {
+        visibleCount.textContent = `${shown} chapter${shown === 1 ? "" : "s"} visible`;
+      }
+      setHidden(emptyState, shown > 0);
+    };
+
+    const jumpToChapter = () => {
+      const chapter = numberValue(jumpInput, minChapter || 1);
+      const target = cards.find((card) => Number(card.dataset.outlineChapter || 0) === chapter);
+      if (!target) {
+        return;
+      }
+      target.classList.remove("is-hidden");
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.classList.add("is-focused-outline");
+      window.history.replaceState(null, "", `#${target.id}`);
+      window.setTimeout(() => target.classList.remove("is-focused-outline"), 1600);
+    };
+
+    [actFilter, statusFilter, minInput, maxInput].forEach((node) => {
+      node?.addEventListener("input", syncFilters);
+      node?.addEventListener("change", syncFilters);
+    });
+    jumpButton?.addEventListener("click", jumpToChapter);
+    jumpInput?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        jumpToChapter();
+      }
+    });
+    clearButton?.addEventListener("click", () => {
+      if (actFilter) {
+        actFilter.value = "";
+      }
+      if (statusFilter) {
+        statusFilter.value = "";
+      }
+      if (minInput) {
+        minInput.value = String(minChapter || 1);
+      }
+      if (maxInput) {
+        maxInput.value = String(maxChapter || minChapter || 1);
+      }
+      syncFilters();
+    });
+    syncFilters();
   });
 }
 

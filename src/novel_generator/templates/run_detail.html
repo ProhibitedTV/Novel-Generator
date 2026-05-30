@@ -698,16 +698,168 @@
         </div>
       </div>
       {% if outline_entries %}
-        <div class="outline-review-list">
-          {% for entry in outline_entries %}
-            <article class="outline-card">
+        <div class="outline-review-workspace" data-outline-workspace>
+          <div class="outline-summary-strip">
+            <div class="detail-item">
+              <span class="detail-label">Chapters</span>
+              <strong>{{ outline_review.chapter_count }} / {{ outline_review.requested_chapters }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Acts</span>
+              <strong>{{ outline_review.act_rows|length }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Modes</span>
+              <strong>{{ outline_review.chapter_mode_rows|length }}</strong>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Warnings</span>
+              <strong>{{ outline_review.warning_count + outline_review.review_warnings|length + outline_review.fallback_events|length }}</strong>
+            </div>
+          </div>
+
+          <div class="outline-distribution-grid">
+            <div class="detail-item">
+              <span class="detail-label">Act distribution</span>
+              <div class="meta-chip-row">
+                {% for row in outline_review.act_rows %}
+                  <span class="meta-chip">{{ row.label }}: {{ row.count }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Chapter-mode distribution</span>
+              <div class="meta-chip-row">
+                {% for row in outline_review.chapter_mode_rows %}
+                  <span class="meta-chip">{{ row.label }}: {{ row.count }}</span>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+
+          {% if awaiting_outline_approval %}
+            <div class="callout callout-warning outline-checklist">
+              <div class="callout-copy">
+                <h3>Approval checklist</h3>
+                <ul class="bullet-list">
+                  <li>Confirm the act balance, chapter modes, reversals, and breather chapters match the requested length.</li>
+                  <li>Inspect fallback or warning chapters before approval; they are the likeliest places to edit the project and rerun.</li>
+                  <li>Cancel and edit returns to the project setup before drafting starts. After approval, this run's story brief, chapter count, and routing snapshot are fixed.</li>
+                </ul>
+              </div>
+            </div>
+          {% endif %}
+
+          {% if outline_review.review_warnings or outline_review.fallback_events %}
+            <div class="notice notice-warning outline-warning-panel">
+              <strong>Outline warnings</strong>
+              <ul class="bullet-list">
+                {% for warning in outline_review.review_warnings %}
+                  <li>{{ warning }}</li>
+                {% endfor %}
+                {% for event in outline_review.fallback_events %}
+                  <li>{{ event.range_label }} {{ event.summary }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+
+          {% if outline_review.generation_events %}
+            <details class="editor-shell outline-event-shell">
+              <summary>Outline generation events</summary>
+              <ul class="event-log compact-event-log">
+                {% for event in outline_review.generation_events %}
+                  <li class="event-item">
+                    <div class="event-topline">
+                      <span class="event-kind">{{ event.label }}</span>
+                      {% if event.range_label %}
+                        <span class="event-sequence">{{ event.range_label }}</span>
+                      {% endif %}
+                    </div>
+                    <p class="event-copy">{{ event.summary }}</p>
+                  </li>
+                {% endfor %}
+              </ul>
+            </details>
+          {% endif %}
+
+          <div class="outline-filter-bar">
+            <label>
+              Act
+              <select data-outline-act-filter>
+                <option value="">All acts</option>
+                {% for row in outline_review.act_rows %}
+                  <option value="{{ row.key }}">{{ row.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              Status
+              <select data-outline-status-filter>
+                <option value="">All chapters</option>
+                <option value="warning">Warnings and fallbacks</option>
+                <option value="clean">Clean chapters</option>
+              </select>
+            </label>
+            <label>
+              From
+              <input type="number" min="{{ outline_review.min_chapter }}" max="{{ outline_review.max_chapter }}" value="{{ outline_review.min_chapter }}" data-outline-min>
+            </label>
+            <label>
+              To
+              <input type="number" min="{{ outline_review.min_chapter }}" max="{{ outline_review.max_chapter }}" value="{{ outline_review.max_chapter }}" data-outline-max>
+            </label>
+            <label>
+              Jump
+              <input type="number" min="{{ outline_review.min_chapter }}" max="{{ outline_review.max_chapter }}" value="{{ outline_review.min_chapter }}" data-outline-jump-input>
+            </label>
+            <div class="outline-filter-actions">
+              <button class="secondary" type="button" data-outline-jump>Jump</button>
+              <button class="secondary" type="button" data-outline-clear>Reset</button>
+            </div>
+          </div>
+          <p class="field-note" data-outline-visible-count>{{ outline_review.chapter_count }} chapters visible</p>
+
+          <nav class="outline-anchor-list" aria-label="Outline chapters">
+            {% for chapter_number in outline_review.chapter_numbers %}
+              <a href="#outline-chapter-{{ chapter_number }}" data-outline-anchor="{{ chapter_number }}">{{ chapter_number }}</a>
+            {% endfor %}
+          </nav>
+
+          <p class="empty-state is-hidden" data-outline-empty>No outline chapters match the current filters.</p>
+
+          <div class="outline-review-list" data-outline-list>
+          {% for card in outline_review.cards %}
+            {% set entry = card.entry %}
+            <article
+              id="outline-chapter-{{ card.chapter_number }}"
+              class="outline-card{% if card.has_warning %} outline-card-warning{% endif %}"
+              data-outline-card
+              data-outline-chapter="{{ card.chapter_number }}"
+              data-outline-act="{{ card.act_key }}"
+              data-outline-mode="{{ card.chapter_mode_key }}"
+              data-outline-warning="{{ 'true' if card.has_warning else 'false' }}"
+            >
               <div class="chapter-topline">
                 <div class="chapter-heading">
-                  <p class="eyebrow">Chapter {{ entry.chapter_number }}</p>
+                  <p class="eyebrow">Chapter {{ card.chapter_number }}</p>
                   <h3>{{ entry.title }}</h3>
                 </div>
-                <span class="meta-chip">{{ entry.act }}</span>
+                <div class="meta-chip-row">
+                  <span class="meta-chip">{{ card.act }}</span>
+                  <span class="meta-chip">{{ card.chapter_mode }}</span>
+                  {% if card.has_warning %}
+                    <span class="badge status-failed">Review</span>
+                  {% endif %}
+                </div>
               </div>
+              {% if card.warning_reasons %}
+                <div class="meta-chip-row outline-warning-reasons">
+                  {% for reason in card.warning_reasons %}
+                    <span class="meta-chip">{{ reason }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
               <div class="story-bible-grid">
                 <div class="detail-item">
                   <span class="detail-label">Objective</span>
@@ -772,6 +924,7 @@
               </div>
             </article>
           {% endfor %}
+          </div>
         </div>
       {% else %}
         <p class="empty-state">The structured outline will appear here once the run reaches that stage.</p>
