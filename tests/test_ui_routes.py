@@ -39,7 +39,7 @@ def unreachable_status(default_model: str = "test-model") -> ProviderCapabilitie
     )
 
 
-def seed_project(title: str = "Seed Project") -> str:
+def seed_project(title: str = "Seed Project", *, requested_chapters: int = 4, desired_word_count: int = 4000) -> str:
     session_factory = get_session_factory()
     with session_factory() as session:
         project = create_project(
@@ -47,8 +47,8 @@ def seed_project(title: str = "Seed Project") -> str:
             ProjectCreate(
                 title=title,
                 premise="A seeded premise for route rendering.",
-                desired_word_count=4000,
-                requested_chapters=4,
+                desired_word_count=desired_word_count,
+                requested_chapters=requested_chapters,
                 min_words_per_chapter=800,
                 max_words_per_chapter=1200,
                 preferred_model="test-model",
@@ -63,7 +63,7 @@ def seed_project(title: str = "Seed Project") -> str:
         return project.id
 
 
-def seed_project_and_run() -> tuple[str, str]:
+def seed_project_and_run(*, quality_profile: str = "balanced") -> tuple[str, str]:
     session_factory = get_session_factory()
     with session_factory() as session:
         project = create_project(
@@ -89,6 +89,7 @@ def seed_project_and_run() -> tuple[str, str]:
                 requested_chapters=4,
                 min_words_per_chapter=800,
                 max_words_per_chapter=1200,
+                quality_profile=quality_profile,
             ),
         )
         session.commit()
@@ -273,6 +274,36 @@ def test_project_new_page_renders_story_brief_and_model_picker_hooks(client, mon
     assert "Setup progress" in response.text
     assert "Runs locally on your configured Ollama host." in response.text
     assert "Ollama - Local/private" in response.text
+
+
+def test_project_detail_renders_quality_profile_controls_and_preflight(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id = seed_project()
+
+    response = client.get(f"/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert 'data-quality-profile-control' in response.text
+    assert 'name="quality_profile"' in response.text
+    assert 'value="balanced"' in response.text
+    assert "Run preflight" in response.text
+    assert 'data-run-preflight' in response.text
+    assert "Estimated model calls" in response.text
+    assert "23 minimum" in response.text
+    assert "Stage attempt ledger" in response.text
+    assert "Checkpoint resume" in response.text
+
+
+def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id = seed_project(requested_chapters=64, desired_word_count=64000)
+
+    response = client.get(f"/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert "64 chapters will use 8 outline chunks" in response.text
+    assert "High chapter counts make checkpoint resume" in response.text
+    assert "330 minimum" in response.text
 
 
 def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:
@@ -488,6 +519,17 @@ def test_failed_run_detail_surfaces_recovery_guidance(client, monkeypatch) -> No
     assert "Resume from checkpoint" in response.text
     assert "Attempt diagnostics" in response.text
     assert "Run again" in response.text
+
+
+def test_run_detail_shows_quality_profile(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run(quality_profile="strict")
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert "Quality profile" in response.text
+    assert "Strict - Most editorial scrutiny" in response.text
 
 
 def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> None:

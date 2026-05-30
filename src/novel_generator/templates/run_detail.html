@@ -63,6 +63,11 @@
         <span class="field-note">Pipeline v{{ run.pipeline_version or 1 }}</span>
       </div>
       <div class="run-status-item">
+        <span class="detail-label">Profile</span>
+        <strong>{{ quality_profile.label }}</strong>
+        <span class="field-note">{{ quality_profile.summary }}</span>
+      </div>
+      <div class="run-status-item">
         <span class="detail-label">Words</span>
         <strong data-run-word-progress>{{ total_run_words }}</strong>
         <span class="field-note"><span data-run-word-progress-label>{{ word_progress_percent }}%</span> of {{ run.target_word_count }}</span>
@@ -123,6 +128,10 @@
         <div class="detail-item">
           <span class="detail-label">Genre profile</span>
           <span class="detail-value">{{ run_genre_profile.label }}</span>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Quality profile</span>
+          <span class="detail-value">{{ quality_profile.label }} - {{ quality_profile.summary }}</span>
         </div>
         <div class="detail-item">
           <span class="detail-label">Queued</span>
@@ -466,6 +475,10 @@
       <div class="detail-item inline-detail">
         <span class="detail-label">Pause after outline</span>
         <span class="detail-value">{{ "Enabled" if run.pause_after_outline else "Consumed or disabled" }}</span>
+      </div>
+      <div class="detail-item inline-detail">
+        <span class="detail-label">Quality profile</span>
+        <span class="detail-value">{{ quality_profile.label }}</span>
       </div>
       <div class="detail-item inline-detail">
         <span class="detail-label">Per-task overrides</span>

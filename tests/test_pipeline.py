@@ -286,6 +286,21 @@ def _critique_json(
     )
 
 
+def _nonblocking_revision_critique_json() -> str:
+    payload = json.loads(_critique_json(revision_required=False, side_character_independence_score=8))
+    payload.update(
+        {
+            "warnings": ["The chapter could use more sensory specificity."],
+            "revision_required": True,
+            "focus": ["Sharpen the sensory texture."],
+            "blocking_issues": [],
+            "soft_warnings": ["Sensory texture can be improved."],
+            "repair_scope": "voice_and_texture",
+        }
+    )
+    return json.dumps(payload)
+
+
 def _continuity_json(index: int) -> str:
     return json.dumps(
         {
@@ -1146,6 +1161,135 @@ def test_side_character_score_triggers_targeted_revision(configured_environment)
             and event.payload.get("repair_scope") == "targeted_scene_and_ending"
             for event in refreshed.events
         )
+
+
+def test_strict_quality_profile_triggers_revision_where_balanced_does_not(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    draft = (
+        "Iris slips out of the archive while Tarin resists following her. "
+        "Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them."
+    )
+    revision = (
+        "Iris stopped at the rail while Tarin blocked the route with his shoulder. "
+        "The visible actor 1 sealed the corridor behind them, and Iris handed Tarin the burned key."
+    )
+
+    with session_factory() as session:
+        balanced_project = _create_project(session, requested_chapters=1)
+        balanced_run = create_run(
+            session,
+            balanced_project,
+            RunCreate(project_id=balanced_project.id, model_name="test-model", pause_after_outline=False),
+        )
+        strict_project = _create_project(session, requested_chapters=1)
+        strict_run = create_run(
+            session,
+            strict_project,
+            RunCreate(
+                project_id=strict_project.id,
+                model_name="test-model",
+                pause_after_outline=False,
+                quality_profile="strict",
+            ),
+        )
+        session.commit()
+
+        process_run_safe(
+            session,
+            balanced_run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    draft,
+                    _critique_json(revision_required=False, side_character_independence_score=6),
+                    "Iris accepts the lower route and carries the map underground.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+        process_run_safe(
+            session,
+            strict_run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    draft,
+                    _critique_json(revision_required=False, side_character_independence_score=6),
+                    revision,
+                    _critique_json(revision_required=False, side_character_independence_score=8),
+                    "Iris accepts the lower route and carries the map underground.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                    _developmental_rewrite_json(),
+                ]
+            ),
+        )
+
+        refreshed_balanced = get_run(session, balanced_run.id)
+        refreshed_strict = get_run(session, strict_run.id)
+        assert refreshed_balanced.status == RunStatus.COMPLETED
+        assert refreshed_strict.status == RunStatus.COMPLETED
+        assert refreshed_strict.quality_profile == "strict"
+        assert refreshed_strict.developmental_rewrite_enabled is True
+        assert not any(event.event_type == "chapter_revision_started" for event in refreshed_balanced.events)
+        assert any(
+            event.event_type == "chapter_revision_started"
+            and event.payload.get("repair_scope") == "targeted_scene_and_ending"
+            for event in refreshed_strict.events
+        )
+        assert any(event.event_type == "developmental_rewrite_completed" for event in refreshed_strict.events)
+
+
+def test_draft_quality_profile_defers_non_blocking_revision(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(
+                project_id=project.id,
+                model_name="test-model",
+                pause_after_outline=False,
+                quality_profile="draft",
+            ),
+        )
+        session.commit()
+
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them.",
+                    _nonblocking_revision_critique_json(),
+                    "Iris accepts the lower route and carries the map underground.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.COMPLETED
+        assert refreshed.quality_profile == "draft"
+        assert not any(event.event_type == "chapter_revision_started" for event in refreshed.events)
+        qa_notes = refreshed.chapters[0].qa_notes
+        assert qa_notes["revision_required"] is False
+        assert "Draft profile deferred non-blocking revision work" in " ".join(qa_notes["soft_warnings"])
 
 
 def test_canonical_entity_collision_hard_fails_run(configured_environment) -> None:

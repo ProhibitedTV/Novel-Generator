@@ -499,6 +499,36 @@
         </div>
       </div>
 
+      <div class="form-section run-cardlet quality-profile-section" data-quality-profile-control>
+        <div class="section-header-copy">
+          <h3>Quality profile</h3>
+          <p>Choose how aggressively this run should spend time on editorial repair passes.</p>
+        </div>
+        <div class="quality-profile-grid">
+          {% for option in quality_profile_options %}
+            <label class="quality-profile-option{% if option.selected %} is-selected{% endif %}">
+              <span class="toggle-input">
+                <input
+                  type="radio"
+                  name="quality_profile"
+                  value="{{ option.value }}"
+                  data-quality-profile-option
+                  data-profile-note="{{ option.description }}"
+                  {% if option.selected %}checked{% endif %}
+                >
+                <strong>{{ option.label }}</strong>
+              </span>
+              <span class="meta-chip">{{ option.summary }}</span>
+              <span class="field-note">{{ option.description }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        {% if run_errors.quality_profile %}<p class="field-error">{{ run_errors.quality_profile }}</p>{% endif %}
+        <div class="inline-note inline-note-success" data-quality-profile-note>
+          {% for option in quality_profile_options %}{% if option.selected %}{{ option.description }}{% endif %}{% endfor %}
+        </div>
+      </div>
+
       <label class="toggle-card run-mode-card">
         <span class="toggle-input">
           <input type="checkbox" name="pause_after_outline" value="1" {% if run_values.pause_after_outline %}checked{% endif %}>
@@ -509,7 +539,7 @@
 
       <label class="toggle-card run-mode-card">
         <span class="toggle-input">
-          <input type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled %}checked{% endif %}>
+          <input data-developmental-rewrite-toggle type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled or run_values.quality_profile == "strict" %}checked{% endif %}>
           <strong>Run developmental rewrite planning</strong>
         </span>
         <span class="field-note">After manuscript QA, produce a structural rewrite report, revised outline, and QA comparison for merge, cut, bridge, reorder, or rewrite decisions.</span>
@@ -544,6 +574,35 @@
         {{ "Connected" if provider_status.reachable else "Unavailable" }}
       </span>
     </div>
+    <section class="preflight-card preflight-{{ run_preflight.tone }}" data-run-preflight>
+      <div class="section-header">
+        <div class="section-header-copy">
+          <h3>Run preflight</h3>
+          <p>{{ run_preflight.summary }}</p>
+        </div>
+        <span class="badge status-{{ 'failed' if run_preflight.tone == 'error' else ('running' if run_preflight.tone == 'success' else 'queued') }}">{{ run_preflight.status_label }}</span>
+      </div>
+      <div class="preflight-grid">
+        {% for row in run_preflight.rows %}
+          <div class="detail-item">
+            <span class="detail-label">{{ row.label }}</span>
+            <span class="detail-value long-value">{{ row.value }}</span>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="meta-chip-row">
+        {% for feature in run_preflight.recovery_features %}
+          <span class="meta-chip">{{ feature }}</span>
+        {% endfor %}
+      </div>
+      {% if run_preflight.warnings %}
+        <ul class="preflight-warning-list">
+          {% for warning in run_preflight.warnings %}
+            <li class="alert-{{ warning.tone }}">{{ warning.message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </section>
     <div class="run-flow">
       <div class="section-header-copy">
         <h3>What a v2 run produces</h3>

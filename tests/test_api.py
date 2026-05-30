@@ -40,6 +40,7 @@ def create_project_and_run(
     *,
     pause_after_outline: bool = True,
     developmental_rewrite_enabled: bool = False,
+    quality_profile: str = "balanced",
 ) -> tuple[str, str]:
     project_response = client.post("/api/projects", json=create_project_payload())
     assert project_response.status_code == 201
@@ -52,6 +53,7 @@ def create_project_and_run(
             "model_name": "test-model",
             "pause_after_outline": pause_after_outline,
             "developmental_rewrite_enabled": developmental_rewrite_enabled,
+            "quality_profile": quality_profile,
         },
     )
     assert run_response.status_code == 201
@@ -68,6 +70,7 @@ def test_project_and_run_api_flow(client, monkeypatch) -> None:
     assert detail_response.json()["project_id"] == project_id
     assert detail_response.json()["pause_after_outline"] is True
     assert detail_response.json()["developmental_rewrite_enabled"] is False
+    assert detail_response.json()["quality_profile"] == "balanced"
 
     cancel_response = client.post(f"/api/runs/{run_id}/cancel")
     assert cancel_response.status_code == 200
@@ -172,6 +175,35 @@ def test_invalid_model_is_rejected_when_queueing_run(client, monkeypatch) -> Non
     assert "not available" in run_response.json()["detail"]
 
 
+def test_strict_quality_profile_enables_developmental_rewrite_by_default(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+
+    _, run_id = create_project_and_run(client, quality_profile="strict")
+
+    response = client.get(f"/api/runs/{run_id}")
+    assert response.status_code == 200
+    assert response.json()["quality_profile"] == "strict"
+    assert response.json()["developmental_rewrite_enabled"] is True
+
+
+def test_invalid_quality_profile_is_rejected_when_queueing_run(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+
+    project_response = client.post("/api/projects", json=create_project_payload())
+    project_id = project_response.json()["id"]
+
+    run_response = client.post(
+        "/api/runs",
+        json={
+            "project_id": project_id,
+            "model_name": "test-model",
+            "quality_profile": "maximum",
+        },
+    )
+
+    assert run_response.status_code == 422
+
+
 def test_rerun_api_requeues_same_settings_as_v2_run(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
 
@@ -179,6 +211,7 @@ def test_rerun_api_requeues_same_settings_as_v2_run(client, monkeypatch) -> None
         client,
         pause_after_outline=False,
         developmental_rewrite_enabled=True,
+        quality_profile="strict",
     )
     session_factory = get_session_factory()
     with session_factory() as session:
@@ -197,6 +230,7 @@ def test_rerun_api_requeues_same_settings_as_v2_run(client, monkeypatch) -> None
     assert rerun_response.json()["pipeline_version"] == 2
     assert rerun_response.json()["pause_after_outline"] is True
     assert rerun_response.json()["developmental_rewrite_enabled"] is True
+    assert rerun_response.json()["quality_profile"] == "strict"
     assert rerun_response.json()["id"] != run_id
 
 

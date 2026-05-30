@@ -475,6 +475,7 @@ STYLE_SCORE_LABELS = {
     "dialogue_tension_score": "dialogue tension",
 }
 STYLE_REPAIR_THRESHOLD = 5
+STRICT_STYLE_REPAIR_THRESHOLD = 6
 
 
 def _style_score_warnings(critique: ChapterCritique) -> list[str]:
@@ -494,6 +495,9 @@ TECHNICAL_FATIGUE_REPAIR_THRESHOLD = 6
 SIDE_CHARACTER_REPAIR_THRESHOLD = 5
 STORY_TURN_REPAIR_THRESHOLD = 5
 CUTTABLE_CHAPTER_REPAIR_THRESHOLD = 6
+STRICT_LOW_SCORE_THRESHOLD = 6
+STRICT_TECHNICAL_FATIGUE_THRESHOLD = 5
+STRICT_CUTTABLE_CHAPTER_THRESHOLD = 5
 
 
 def _ending_score_warnings(critique: ChapterCritique) -> list[str]:
@@ -596,6 +600,86 @@ def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLin
             "blocking_issues": blocking_issues,
             "soft_warnings": soft_warnings,
             "repair_scope": repair_scope,
+        }
+    )
+
+
+def _strict_quality_warnings(critique: ChapterCritique) -> tuple[list[str], list[str]]:
+    warnings: list[str] = []
+    scopes: list[str] = []
+
+    weak_style_scores = [
+        f"{label} {getattr(critique, field)}/10"
+        for field, label in STYLE_SCORE_LABELS.items()
+        if getattr(critique, field) <= STRICT_STYLE_REPAIR_THRESHOLD
+    ]
+    if weak_style_scores:
+        warnings.append("Strict profile wants stronger prose delivery: " + ", ".join(weak_style_scores) + ".")
+        scopes.append("voice_and_texture")
+
+    low_score_checks = [
+        ("ending_concreteness_score", "ending concreteness"),
+        ("scene_turn_resolution_score", "scene turn resolution"),
+        ("cost_consequence_realism_score", "cost/consequence realism"),
+        ("side_character_independence_score", "side-character independence"),
+        ("irreversibility_score", "irreversibility"),
+        ("choice_clarity_score", "choice clarity"),
+    ]
+    for field, label in low_score_checks:
+        score = int(getattr(critique, field) or 0)
+        if score <= STRICT_LOW_SCORE_THRESHOLD:
+            warnings.append(f"Strict profile requires a repair for {label} at {score}/10.")
+            scopes.append("targeted_scene_and_ending")
+
+    if critique.technical_escalation_fatigue_score >= STRICT_TECHNICAL_FATIGUE_THRESHOLD:
+        warnings.append(
+            "Strict profile wants technical escalation pressure reduced: "
+            f"fatigue score {critique.technical_escalation_fatigue_score}/10."
+        )
+        scopes.append("targeted_scene_and_ending")
+
+    if critique.cuttable_chapter_risk_score >= STRICT_CUTTABLE_CHAPTER_THRESHOLD:
+        warnings.append(
+            "Strict profile wants a more load-bearing chapter turn: "
+            f"cuttable risk {critique.cuttable_chapter_risk_score}/10."
+        )
+        scopes.append("targeted_scene_and_ending")
+
+    return warnings, scopes
+
+
+def _apply_quality_profile_to_critique(run: GenerationRun, critique: ChapterCritique) -> ChapterCritique:
+    profile = str(getattr(run, "quality_profile", "balanced") or "balanced").strip().lower()
+    if profile == "draft":
+        if critique.blocking_issues or critique.repair_scope == "full_chapter":
+            return critique
+        draft_note = "Draft profile deferred non-blocking revision work to keep the long run moving."
+        return critique.model_copy(
+            update={
+                "warnings": _dedupe([*critique.warnings, draft_note]),
+                "soft_warnings": _dedupe([*critique.soft_warnings, draft_note]),
+                "revision_required": False,
+                "repair_scope": "none",
+            }
+        )
+
+    if profile != "strict":
+        return critique
+
+    strict_warnings, scopes = _strict_quality_warnings(critique)
+    if not strict_warnings:
+        return critique
+
+    soft_warnings = _dedupe([*critique.soft_warnings, *strict_warnings])
+    warnings = _dedupe([*critique.warnings, *strict_warnings])
+    focus = _dedupe([*critique.focus, *strict_warnings[:3]])
+    return critique.model_copy(
+        update={
+            "warnings": warnings,
+            "soft_warnings": soft_warnings,
+            "focus": focus,
+            "revision_required": True,
+            "repair_scope": _resolve_repair_scope(critique.repair_scope, *scopes),
         }
     )
 
@@ -1304,7 +1388,10 @@ def _draft_chapter(
                     "error": str(exc),
                 },
             )
-        combined_critique = _combine_chapter_feedback(critique, lint_result)
+        combined_critique = _apply_quality_profile_to_critique(
+            run,
+            _combine_chapter_feedback(critique, lint_result),
+        )
         _persist_structured_qa(chapter, combined_critique)
         session.commit()
     else:
@@ -1398,7 +1485,10 @@ def _draft_chapter(
                     "error": str(exc),
                 },
             )
-        combined_critique = _combine_chapter_feedback(final_critique, final_lint)
+        combined_critique = _apply_quality_profile_to_critique(
+            run,
+            _combine_chapter_feedback(final_critique, final_lint),
+        )
         _persist_structured_qa(chapter, combined_critique)
         session.commit()
 
