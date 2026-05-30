@@ -5,7 +5,16 @@ import json
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import Artifact, ChapterStatus, RunStatus
-from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, get_project, get_run, record_event
+from novel_generator.repositories import (
+    begin_stage_attempt,
+    create_chapters_from_outline,
+    create_project,
+    create_run,
+    fail_stage_attempt,
+    get_project,
+    get_run,
+    record_event,
+)
 from novel_generator.schemas import ProjectCreate, ProviderCapabilities, RunCreate
 from novel_generator.services.ollama import OllamaClient
 from novel_generator.settings import get_settings
@@ -457,6 +466,16 @@ def test_failed_run_detail_surfaces_recovery_guidance(client, monkeypatch) -> No
         run.status = RunStatus.FAILED
         run.current_step = "outline"
         run.error_message = "Outline returned 29 chapters, but 64 were required."
+        attempt = begin_stage_attempt(
+            session,
+            run,
+            stage="outline",
+            chapter_number=None,
+            provider_name="ollama",
+            model_name="test-model",
+            metadata={"label": "structured outline"},
+        )
+        fail_stage_attempt(session, attempt, RuntimeError("Outline returned 29 chapters, but 64 were required."))
         session.commit()
 
     response = client.get(f"/runs/{run_id}")
@@ -466,6 +485,8 @@ def test_failed_run_detail_surfaces_recovery_guidance(client, monkeypatch) -> No
     assert "Outline returned 29 chapters, but 64 were required." in response.text
     assert "Review outputs and recovery actions" in response.text
     assert "Recovery next step" in response.text
+    assert "Resume from checkpoint" in response.text
+    assert "Attempt diagnostics" in response.text
     assert "Run again" in response.text
 
 

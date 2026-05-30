@@ -29,3 +29,26 @@ def approve_outline_review(session: Session, run: GenerationRun) -> GenerationRu
     run.cancel_requested = False
     record_event(session, run, "outline_approved", {"message": "Outline approved. Run re-queued for drafting."})
     return run
+
+
+def resume_failed_run(session: Session, run: GenerationRun) -> GenerationRun:
+    if run.status != RunStatus.FAILED:
+        raise ValueError("Only failed runs can be resumed from checkpoint.")
+    run.status = RunStatus.QUEUED
+    run.current_step = "queued"
+    run.error_message = None
+    run.completed_at = None
+    run.cancel_requested = False
+    run.worker_id = None
+    run.last_heartbeat_at = None
+    run.recovery_count += 1
+    record_event(
+        session,
+        run,
+        "run_resume_queued",
+        {
+            "message": "Run queued to resume from the latest saved checkpoint.",
+            "recovery_count": run.recovery_count,
+        },
+    )
+    return run

@@ -15,11 +15,13 @@ from ..repositories import (
     fail_stage_attempt,
     record_event,
     replace_artifacts,
+    touch_run_heartbeat,
 )
 from ..schemas import (
     ChapterContinuityUpdate,
     ChapterCritique,
     ChapterPlan,
+    ChapterStoryTurn,
     CanonicalEntity,
     ContinuityBibleRow,
     ContinuityLedger,
@@ -204,9 +206,11 @@ def _ledger_with_chapter_mode(
 
 def _ensure_not_canceled(session: Session, run: GenerationRun) -> None:
     session.refresh(run)
+    touch_run_heartbeat(session, run)
     if run.cancel_requested:
         run.status = RunStatus.CANCELED
         run.current_step = "canceled"
+        run.worker_id = None
         run.completed_at = datetime.utcnow()
         record_event(session, run, "run_canceled", {"message": "Cancellation was requested."})
         session.commit()
@@ -275,14 +279,17 @@ def _supervised_provider_chat(
         model_name=model_name,
         metadata=metadata,
     )
+    touch_run_heartbeat(session, run)
     session.commit()
     try:
         output = _provider_chat(client, provider_name, model_name, messages, stream=stream)
     except Exception as exc:
         fail_stage_attempt(session, attempt, exc)
+        touch_run_heartbeat(session, run)
         session.commit()
         raise
     complete_stage_attempt(session, attempt, output)
+    touch_run_heartbeat(session, run)
     session.commit()
     return output
 
@@ -430,6 +437,24 @@ def _persist_structured_plan(chapter: Any, plan: ChapterPlan) -> None:
 
 def _persist_structured_qa(chapter: Any, critique: ChapterCritique) -> None:
     chapter.qa_notes = critique.model_dump()
+
+
+def _checkpointed_plan(chapter: Any) -> ChapterPlan | None:
+    if not chapter.plan:
+        return None
+    try:
+        return ChapterPlan.model_validate(json.loads(chapter.plan))
+    except Exception:
+        return None
+
+
+def _checkpointed_critique(chapter: Any) -> ChapterCritique | None:
+    if not chapter.qa_notes:
+        return None
+    try:
+        return ChapterCritique.model_validate(chapter.qa_notes)
+    except Exception:
+        return None
 
 
 def _resolve_repair_scope(*scopes: str) -> str:
@@ -773,6 +798,122 @@ def _fallback_outline_entries(
     return entries
 
 
+def _fallback_chapter_plan(
+    chapter: Any,
+    outline_entry: StructuredOutlineEntry,
+    story_bible: StoryBible,
+) -> ChapterPlan:
+    protagonist = story_bible.cast[0].name if story_bible.cast else "The protagonist"
+    support = story_bible.cast[1].name if len(story_bible.cast) > 1 else "a supporting character"
+    return ChapterPlan(
+        chapter_mode=outline_entry.chapter_mode,
+        opening_state=outline_entry.objective,
+        character_goal=f"{protagonist} pursues the chapter objective without losing agency.",
+        scene_beats=[
+            outline_entry.objective,
+            outline_entry.conflict_turn,
+            outline_entry.character_turn,
+            outline_entry.reveal,
+            outline_entry.ending_state,
+        ],
+        conflict_turn=outline_entry.conflict_turn,
+        ending_hook=outline_entry.concrete_ending_hook.trigger,
+        attempt=outline_entry.objective,
+        complication=outline_entry.primary_obstacle,
+        price_paid=outline_entry.cost_if_success,
+        partial_failure_mode=outline_entry.outcome_type,
+        ending_hook_delivery=outline_entry.concrete_ending_hook.next_problem,
+        emotional_anchor=outline_entry.emotional_reveal,
+        civilian_texture=outline_entry.civilian_life_detail,
+        ideology_clash=outline_entry.ideology_pressure,
+        primary_interpersonal_conflict=outline_entry.side_character_friction,
+        independent_side_character_move=outline_entry.independent_side_character_move
+        or f"{support} makes an independent pressure move.",
+        genre_specific_focus=outline_entry.chapter_mode,
+        genre_specific_beats=[outline_entry.civilian_life_detail, outline_entry.ideology_pressure],
+        story_turn=ChapterStoryTurn(
+            irreversible_change=outline_entry.ending_state,
+            protagonist_choice=outline_entry.character_turn,
+            choice_alternatives=[outline_entry.primary_obstacle, outline_entry.cost_if_success],
+            permanent_consequence=outline_entry.cost_if_success,
+            why_this_chapter_cannot_be_cut=outline_entry.reveal,
+            state_before=outline_entry.objective,
+            state_after=outline_entry.ending_state,
+        ),
+    )
+
+
+def _fallback_chapter_critique(chapter: Any, lint_result: ChapterLintResult) -> ChapterCritique:
+    findings = lint_result.combined_findings()
+    return ChapterCritique(
+        strengths=["Checkpoint fallback critique used local lint signals."],
+        warnings=findings,
+        revision_required=bool(findings),
+        focus=findings[:3],
+        ending_hook_type="unknown",
+        forward_motion_score=7 if not findings else 5,
+        ending_concreteness_score=7 if not findings else 5,
+        scene_turn_resolution_score=7 if not findings else 5,
+        cost_consequence_realism_score=7 if not findings else 5,
+        side_character_independence_score=7,
+        proper_noun_continuity_score=8,
+        repetition_risk_score=0 if not findings else 5,
+        emotional_depth_score=7,
+        ideology_clarity_score=7,
+        civilian_texture_score=7,
+        blocking_issues=findings[:3],
+        soft_warnings=findings[3:],
+        repair_scope="targeted_scene_and_ending" if findings else "none",
+    )
+
+
+def _fallback_chapter_summary(chapter: Any, outline_entry: StructuredOutlineEntry, plan: ChapterPlan) -> str:
+    prose_words = (chapter.content or "").split()
+    excerpt = " ".join(prose_words[:80]).strip()
+    if excerpt:
+        return (
+            f"Chapter {chapter.chapter_number} follows {outline_entry.objective}. "
+            f"The planned turn is {plan.story_turn.irreversible_change or outline_entry.ending_state}. "
+            f"Draft excerpt: {excerpt}"
+        )
+    return (
+        f"Chapter {chapter.chapter_number} follows {outline_entry.objective} and ends with "
+        f"{outline_entry.ending_state}."
+    )
+
+
+def _fallback_continuity_update(
+    chapter: Any,
+    ledger: ContinuityLedger,
+    outline_entry: StructuredOutlineEntry,
+    plan: ChapterPlan,
+) -> ChapterContinuityUpdate:
+    timeline_entry = f"Chapter {chapter.chapter_number}: {chapter.summary or outline_entry.ending_state}"
+    return ChapterContinuityUpdate(
+        chapter_outcome=outline_entry.ending_state,
+        current_patch_status=ledger.current_patch_status,
+        character_states=dict(ledger.character_states),
+        world_state=ledger.world_state or outline_entry.ending_state,
+        open_threads=_dedupe([*ledger.open_threads, outline_entry.concrete_ending_hook.next_problem]),
+        resolved_threads=list(ledger.resolved_threads),
+        timeline_entry=timeline_entry,
+        timeline=_dedupe([*ledger.timeline, timeline_entry]),
+        new_entities_introduced=[],
+        entity_state_changes={},
+        open_promises_by_name=dict(ledger.open_promises_by_name),
+        ideology_state_by_character=dict(ledger.ideology_state_by_character),
+        ideology_shift_notes={},
+        memory_damage=dict(ledger.memory_damage),
+        trust_fractures=dict(ledger.trust_fractures),
+        civilian_pressure_points=_dedupe([*ledger.civilian_pressure_points, outline_entry.civilian_life_detail]),
+        emotional_open_loops=dict(ledger.emotional_open_loops),
+        side_character_decisions=dict(ledger.side_character_decisions),
+        story_turn=plan.story_turn,
+        genre_state=dict(ledger.genre_state),
+        system_state_transitions=[],
+    )
+
+
 def _validated_outline_or_fallback(
     session: Session,
     project: Any,
@@ -1008,115 +1149,175 @@ def _draft_chapter(
     ledger = _continuity_ledger_from_run(run)
     prior_chapters = _chapter_prior_context(run, chapter.chapter_number)
     _sync_summary_context(run, settings.chapter_summary_window)
-    plan_provider_name, plan_model_name = _resolve_stage_route(client, run, "chapter_plan")
     run.current_chapter = chapter.chapter_number
-    run.current_step = "chapter_plan"
-    record_event(
-        session,
-        run,
-        "chapter_planning",
-        {
-            "chapter_number": chapter.chapter_number,
-            "title": chapter.title,
-            "provider_name": plan_provider_name,
-            "model_name": plan_model_name,
-        },
-    )
-    session.commit()
 
-    plan = _generate_structured_output(
-        session,
-        run,
-        client,
-        plan_provider_name,
-        plan_model_name,
-        lambda: build_chapter_plan_messages(
-            project,
-            run,
-            chapter,
-            outline_entry,
-            story_bible,
-            ledger,
-            run.summary_context or "",
-        ),
-        parse_chapter_plan,
-        f"chapter {chapter.chapter_number} plan",
-        "chapter_plan",
-        chapter.chapter_number,
-    )
-    _persist_structured_plan(chapter, plan)
-    session.commit()
-
-    _ensure_not_canceled(session, run)
-    draft_provider_name, draft_model_name = _resolve_stage_route(client, run, "chapter_draft")
-    run.current_step = "chapter_draft"
-    record_event(
-        session,
-        run,
-        "chapter_drafting",
-        {
-            "chapter_number": chapter.chapter_number,
-            "title": chapter.title,
-            "provider_name": draft_provider_name,
-            "model_name": draft_model_name,
-        },
-    )
-    session.commit()
-
-    chapter.content = sanitize_chapter_content(
-        _supervised_provider_chat(
+    plan = _checkpointed_plan(chapter)
+    if plan is None:
+        plan_provider_name, plan_model_name = _resolve_stage_route(client, run, "chapter_plan")
+        run.current_step = "chapter_plan"
+        record_event(
             session,
             run,
-            client,
-            draft_provider_name,
-            draft_model_name,
-            build_chapter_draft_messages(
-                project,
-                run,
-                chapter,
-                outline_entry,
-                story_bible,
-                ledger,
-                run.summary_context or "",
-                plan,
-            ),
-            stage="chapter_draft",
-            chapter_number=chapter.chapter_number,
-            metadata={"label": f"chapter {chapter.chapter_number} draft"},
+            "chapter_planning",
+            {
+                "chapter_number": chapter.chapter_number,
+                "title": chapter.title,
+                "provider_name": plan_provider_name,
+                "model_name": plan_model_name,
+            },
         )
-    )
-    if not chapter.content.strip():
-        raise RuntimeError(f"Chapter {chapter.chapter_number} draft was empty.")
-    chapter.word_count = len((chapter.content or "").split())
-    session.commit()
+        session.commit()
+
+        try:
+            plan = _generate_structured_output(
+                session,
+                run,
+                client,
+                plan_provider_name,
+                plan_model_name,
+                lambda: build_chapter_plan_messages(
+                    project,
+                    run,
+                    chapter,
+                    outline_entry,
+                    story_bible,
+                    ledger,
+                    run.summary_context or "",
+                ),
+                parse_chapter_plan,
+                f"chapter {chapter.chapter_number} plan",
+                "chapter_plan",
+                chapter.chapter_number,
+            )
+        except Exception as exc:
+            plan = _fallback_chapter_plan(chapter, outline_entry, story_bible)
+            record_event(
+                session,
+                run,
+                "chapter_plan_fallback",
+                {
+                    "message": f"Chapter {chapter.chapter_number} plan used deterministic fallback.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
+        _persist_structured_plan(chapter, plan)
+        session.commit()
+    else:
+        record_event(
+            session,
+            run,
+            "chapter_plan_checkpoint_reused",
+            {"message": f"Reused saved plan for chapter {chapter.chapter_number}.", "chapter_number": chapter.chapter_number},
+        )
+        session.commit()
 
     _ensure_not_canceled(session, run)
-    critique_provider_name, critique_model_name = _resolve_stage_route(client, run, "chapter_critique")
+    if not (chapter.content or "").strip():
+        draft_provider_name, draft_model_name = _resolve_stage_route(client, run, "chapter_draft")
+        run.current_step = "chapter_draft"
+        record_event(
+            session,
+            run,
+            "chapter_drafting",
+            {
+                "chapter_number": chapter.chapter_number,
+                "title": chapter.title,
+                "provider_name": draft_provider_name,
+                "model_name": draft_model_name,
+            },
+        )
+        session.commit()
+
+        chapter.content = sanitize_chapter_content(
+            _supervised_provider_chat(
+                session,
+                run,
+                client,
+                draft_provider_name,
+                draft_model_name,
+                build_chapter_draft_messages(
+                    project,
+                    run,
+                    chapter,
+                    outline_entry,
+                    story_bible,
+                    ledger,
+                    run.summary_context or "",
+                    plan,
+                ),
+                stage="chapter_draft",
+                chapter_number=chapter.chapter_number,
+                metadata={"label": f"chapter {chapter.chapter_number} draft"},
+            )
+        )
+        if not chapter.content.strip():
+            raise RuntimeError(f"Chapter {chapter.chapter_number} draft was empty.")
+        chapter.word_count = len((chapter.content or "").split())
+        session.commit()
+    else:
+        chapter.word_count = len((chapter.content or "").split())
+        record_event(
+            session,
+            run,
+            "chapter_draft_checkpoint_reused",
+            {"message": f"Reused saved draft for chapter {chapter.chapter_number}.", "chapter_number": chapter.chapter_number},
+        )
+        session.commit()
+
+    _ensure_not_canceled(session, run)
     run.current_step = "chapter_revision"
     lint_result = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
-    critique = _generate_structured_output(
-        session,
-        run,
-        client,
-        critique_provider_name,
-        critique_model_name,
-        lambda: build_chapter_critique_messages(
-            project,
-            chapter,
-            outline_entry,
-            story_bible,
-            ledger,
-            plan,
-            lint_result.combined_findings(),
-        ),
-        parse_chapter_critique,
-        f"chapter {chapter.chapter_number} critique",
-        "chapter_critique",
-        chapter.chapter_number,
-    )
-    combined_critique = _combine_chapter_feedback(critique, lint_result)
-    _persist_structured_qa(chapter, combined_critique)
-    session.commit()
+    combined_critique = _checkpointed_critique(chapter)
+    critique_provider_name, critique_model_name = _resolve_stage_route(client, run, "chapter_critique")
+    if combined_critique is None:
+        try:
+            critique = _generate_structured_output(
+                session,
+                run,
+                client,
+                critique_provider_name,
+                critique_model_name,
+                lambda: build_chapter_critique_messages(
+                    project,
+                    chapter,
+                    outline_entry,
+                    story_bible,
+                    ledger,
+                    plan,
+                    lint_result.combined_findings(),
+                ),
+                parse_chapter_critique,
+                f"chapter {chapter.chapter_number} critique",
+                "chapter_critique",
+                chapter.chapter_number,
+            )
+        except Exception as exc:
+            critique = _fallback_chapter_critique(chapter, lint_result)
+            record_event(
+                session,
+                run,
+                "chapter_critique_fallback",
+                {
+                    "message": f"Chapter {chapter.chapter_number} critique used local lint fallback.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
+        combined_critique = _combine_chapter_feedback(critique, lint_result)
+        _persist_structured_qa(chapter, combined_critique)
+        session.commit()
+    else:
+        record_event(
+            session,
+            run,
+            "chapter_critique_checkpoint_reused",
+            {
+                "message": f"Reused saved critique for chapter {chapter.chapter_number}.",
+                "chapter_number": chapter.chapter_number,
+            },
+        )
+        session.commit()
 
     if combined_critique.revision_required:
         record_event(
@@ -1164,60 +1365,114 @@ def _draft_chapter(
         session.commit()
 
         final_lint = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
-        final_critique = _generate_structured_output(
-            session,
-            run,
-            client,
-            critique_provider_name,
-            critique_model_name,
-            lambda: build_chapter_critique_messages(
-                project,
-                chapter,
-                outline_entry,
-                story_bible,
-                ledger,
-                plan,
-                final_lint.combined_findings(),
-            ),
-            parse_chapter_critique,
-            f"chapter {chapter.chapter_number} post-repair critique",
-            "chapter_critique",
-            chapter.chapter_number,
-        )
+        try:
+            final_critique = _generate_structured_output(
+                session,
+                run,
+                client,
+                critique_provider_name,
+                critique_model_name,
+                lambda: build_chapter_critique_messages(
+                    project,
+                    chapter,
+                    outline_entry,
+                    story_bible,
+                    ledger,
+                    plan,
+                    final_lint.combined_findings(),
+                ),
+                parse_chapter_critique,
+                f"chapter {chapter.chapter_number} post-repair critique",
+                "chapter_critique",
+                chapter.chapter_number,
+            )
+        except Exception as exc:
+            final_critique = _fallback_chapter_critique(chapter, final_lint)
+            record_event(
+                session,
+                run,
+                "chapter_critique_fallback",
+                {
+                    "message": f"Chapter {chapter.chapter_number} post-repair critique used local lint fallback.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
         combined_critique = _combine_chapter_feedback(final_critique, final_lint)
         _persist_structured_qa(chapter, combined_critique)
         session.commit()
 
     _ensure_not_canceled(session, run)
-    summary_provider_name, summary_model_name = _resolve_stage_route(client, run, "chapter_summary")
-    run.current_step = "chapter_summary"
-    chapter.summary = _supervised_provider_chat(
-        session,
-        run,
-        client,
-        summary_provider_name,
-        summary_model_name,
-        build_summary_messages(chapter, outline_entry),
-        stage="chapter_summary",
-        chapter_number=chapter.chapter_number,
-        metadata={"label": f"chapter {chapter.chapter_number} summary"},
-    ).strip()
-    if not chapter.summary:
-        raise RuntimeError(f"Chapter {chapter.chapter_number} summary was empty.")
+    if not (chapter.summary or "").strip():
+        summary_provider_name, summary_model_name = _resolve_stage_route(client, run, "chapter_summary")
+        run.current_step = "chapter_summary"
+        try:
+            chapter.summary = _supervised_provider_chat(
+                session,
+                run,
+                client,
+                summary_provider_name,
+                summary_model_name,
+                build_summary_messages(chapter, outline_entry),
+                stage="chapter_summary",
+                chapter_number=chapter.chapter_number,
+                metadata={"label": f"chapter {chapter.chapter_number} summary"},
+            ).strip()
+            if not chapter.summary:
+                raise RuntimeError(f"Chapter {chapter.chapter_number} summary was empty.")
+        except Exception as exc:
+            chapter.summary = _fallback_chapter_summary(chapter, outline_entry, plan)
+            record_event(
+                session,
+                run,
+                "chapter_summary_fallback",
+                {
+                    "message": f"Chapter {chapter.chapter_number} summary used deterministic fallback.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
+        session.commit()
 
-    continuity_provider_name, continuity_model_name = _resolve_stage_route(client, run, "continuity_update")
-    continuity_update = _generate_structured_output(
-        session,
-        run,
-        client,
-        continuity_provider_name,
-        continuity_model_name,
-        lambda: build_continuity_update_messages(project, chapter, ledger, story_bible),
-        parse_continuity_update,
-        f"chapter {chapter.chapter_number} continuity update",
-        "continuity_update",
-        chapter.chapter_number,
-    )
+    if chapter.continuity_update:
+        continuity_update = ChapterContinuityUpdate.model_validate(chapter.continuity_update)
+        record_event(
+            session,
+            run,
+            "continuity_checkpoint_reused",
+            {
+                "message": f"Reused saved continuity update for chapter {chapter.chapter_number}.",
+                "chapter_number": chapter.chapter_number,
+            },
+        )
+    else:
+        continuity_provider_name, continuity_model_name = _resolve_stage_route(client, run, "continuity_update")
+        run.current_step = "continuity_update"
+        try:
+            continuity_update = _generate_structured_output(
+                session,
+                run,
+                client,
+                continuity_provider_name,
+                continuity_model_name,
+                lambda: build_continuity_update_messages(project, chapter, ledger, story_bible),
+                parse_continuity_update,
+                f"chapter {chapter.chapter_number} continuity update",
+                "continuity_update",
+                chapter.chapter_number,
+            )
+        except Exception as exc:
+            continuity_update = _fallback_continuity_update(chapter, ledger, outline_entry, plan)
+            record_event(
+                session,
+                run,
+                "continuity_update_fallback",
+                {
+                    "message": f"Chapter {chapter.chapter_number} continuity used deterministic fallback.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
     ledger_after = _ledger_from_update(ledger, continuity_update)
     ledger_after = _ledger_with_chapter_mode(ledger_after, chapter.chapter_number, outline_entry.chapter_mode)
     if continuity_update.timeline != ledger_after.timeline:
@@ -1536,6 +1791,7 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
     run.current_step = "completed"
     run.current_chapter = None
     run.status = RunStatus.COMPLETED
+    run.worker_id = None
     run.completed_at = datetime.utcnow()
     record_event(
         session,
@@ -1559,6 +1815,7 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
                 chapter.error_message = str(exc)
         run.status = RunStatus.FAILED
         run.current_step = "failed"
+        run.worker_id = None
         run.error_message = str(exc)
         run.completed_at = datetime.utcnow()
         record_event(session, run, "run_failed", {"message": str(exc)})
@@ -1571,6 +1828,7 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
                 chapter.error_message = str(exc)
         run.status = RunStatus.FAILED
         run.current_step = "failed"
+        run.worker_id = None
         run.error_message = str(exc)
         run.completed_at = datetime.utcnow()
         record_event(session, run, "run_failed", {"message": str(exc)})

@@ -41,7 +41,7 @@ from ..schemas import (
 )
 from ..services.provider_errors import ProviderError, ProviderTransportError
 from ..services.providers import ProviderManager, provider_definition
-from ..services.state import approve_outline_review, request_run_cancellation
+from ..services.state import approve_outline_review, request_run_cancellation, resume_failed_run
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
 from ..settings import Settings
 
@@ -421,6 +421,20 @@ def api_rerun(
     db.commit()
     new_run = get_run(db, new_run.id)
     return GenerationRunRead.model_validate(new_run)
+
+
+@router.post("/runs/{run_id}/resume", response_model=GenerationRunRead)
+def api_resume_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunRead:
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    try:
+        resume_failed_run(db, run)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    db.commit()
+    run = get_run(db, run.id)
+    return GenerationRunRead.model_validate(run)
 
 
 @router.get("/runs/{run_id}/events")

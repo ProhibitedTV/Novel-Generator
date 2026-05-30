@@ -497,8 +497,13 @@
         {% if editorial_next_step.publication_available %}
           <a class="button secondary" href="#publication-export">Publication export</a>
         {% endif %}
+        {% if editorial_next_step.resume_available %}
+          <form method="post" action="/runs/{{ run.id }}/resume">
+            <button type="submit">Resume from checkpoint</button>
+          </form>
+        {% endif %}
         <form method="post" action="/runs/{{ run.id }}/rerun">
-          <button type="submit">Run again</button>
+          <button class="{% if editorial_next_step.resume_available %}secondary{% endif %}" type="submit">Run again</button>
         </form>
       </div>
     </div>
@@ -543,6 +548,25 @@
           {% endif %}
         </div>
       </div>
+      {% if editorial_next_step.attempt_diagnostics %}
+        <div class="detail-item">
+          <span class="detail-label">Attempt diagnostics</span>
+          <div class="attempt-diagnostic-list">
+            {% for attempt in editorial_next_step.attempt_diagnostics %}
+              <div class="attempt-diagnostic">
+                <span class="badge status-{{ 'failed' if attempt.status == 'failed' else 'completed' }}">{{ attempt.status }}</span>
+                <div>
+                  <strong>{{ attempt.stage }}{% if attempt.chapter_number %} / chapter {{ attempt.chapter_number }}{% endif %}</strong>
+                  <p class="field-note">{{ attempt.provider_name }} / {{ attempt.model_name }}{% if attempt.duration_ms is not none %} / {{ attempt.duration_ms }}ms{% endif %}</p>
+                  {% if attempt.error %}
+                    <p class="error-text">{{ attempt.error }}</p>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
     </div>
   </section>
 {% endif %}

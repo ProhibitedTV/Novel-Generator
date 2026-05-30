@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import ChapterStatus, RunStatus
 from novel_generator.repositories import create_project, create_run, get_run, list_stage_attempts, recover_running_runs
 from novel_generator.schemas import ProjectCreate, RunCreate
 from novel_generator.services.pipeline import process_run_safe
-from novel_generator.services.state import approve_outline_review
+from novel_generator.services.state import approve_outline_review, resume_failed_run
 from novel_generator.settings import get_settings
 
 
@@ -495,6 +496,137 @@ def test_stage_attempts_are_recorded_for_failed_provider_calls(configured_enviro
         assert attempts[0].status == "failed"
         assert attempts[0].error_type == "RuntimeError"
         assert "provider unavailable" in (attempts[0].error_message or "")
+
+
+def test_failed_draft_can_resume_from_saved_chapter_plan(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient([_story_bible_json(), _outline_json(1), _plan_json(1), RuntimeError("draft down")]),
+        )
+
+        failed = get_run(session, run.id)
+        assert failed is not None
+        assert failed.status == RunStatus.FAILED
+        assert failed.chapters[0].plan is not None
+        assert failed.chapters[0].content is None
+
+        resume_failed_run(session, failed)
+        session.commit()
+        process_run_safe(
+            session,
+            failed,
+            settings,
+            FakeOllamaClient(
+                [
+                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them.",
+                    _critique_json(revision_required=False),
+                    "Iris chooses the lower route and accepts the cost of leaving the archive behind.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed is not None
+        assert refreshed.status == RunStatus.COMPLETED
+        attempts = list_stage_attempts(session, run.id)
+        assert sum(attempt.stage == "chapter_plan" for attempt in attempts) == 1
+        assert any(event.event_type == "run_resume_queued" for event in refreshed.events)
+        assert any(event.event_type == "chapter_plan_checkpoint_reused" for event in refreshed.events)
+
+
+def test_summary_fallback_completes_run_when_summary_provider_fails(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them.",
+                    _critique_json(revision_required=False),
+                    RuntimeError("summary down"),
+                    _continuity_json(1),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed is not None
+        assert refreshed.status == RunStatus.COMPLETED
+        assert any(event.event_type == "chapter_summary_fallback" for event in refreshed.events)
+        assert refreshed.chapters[0].summary
+
+
+def test_continuity_fallback_completes_run_when_continuity_provider_fails(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them.",
+                    _critique_json(revision_required=False),
+                    "Iris chooses the lower route and accepts the cost of leaving the archive behind.",
+                    RuntimeError("continuity down"),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed is not None
+        assert refreshed.status == RunStatus.COMPLETED
+        assert any(event.event_type == "continuity_update_fallback" for event in refreshed.events)
+        assert refreshed.chapters[0].continuity_update
 
 
 def test_large_run_generates_outline_in_chunks_and_pauses(configured_environment) -> None:
@@ -1152,3 +1284,28 @@ def test_recover_running_runs_marks_runs_as_queued(configured_environment) -> No
         refreshed = get_run(session, run.id)
         assert recovered == 1
         assert refreshed.status.value == "queued"
+        assert refreshed.recovery_count == 1
+        assert refreshed.events[-1].payload["recovery_reason"] == "worker_startup"
+
+
+def test_recover_running_runs_uses_stale_heartbeat_threshold(configured_environment) -> None:
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=2)
+        stale = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        stale.status = RunStatus.RUNNING
+        stale.last_heartbeat_at = datetime.utcnow() - timedelta(seconds=7200)
+        fresh = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        fresh.status = RunStatus.RUNNING
+        fresh.last_heartbeat_at = datetime.utcnow()
+        session.commit()
+
+        recovered = recover_running_runs(session, stale_after_seconds=3600, reason="stale_heartbeat")
+        session.commit()
+
+        refreshed_stale = get_run(session, stale.id)
+        refreshed_fresh = get_run(session, fresh.id)
+        assert recovered == 1
+        assert refreshed_stale.status == RunStatus.QUEUED
+        assert refreshed_stale.events[-1].payload["recovery_reason"] == "stale_heartbeat"
+        assert refreshed_fresh.status == RunStatus.RUNNING
