@@ -79,6 +79,31 @@
       </div>
     </div>
 
+    <section class="callout callout-{{ run_health.tone }} run-health-card" data-run-health>
+      <div class="callout-copy">
+        <p class="eyebrow">Run confidence</p>
+        <h2 data-run-health-title>{{ run_health.title }}</h2>
+        <p data-run-health-body>{{ run_health.body }}</p>
+      </div>
+      <div class="run-health-meta">
+        <div class="detail-item">
+          <span class="detail-label">Next milestone</span>
+          <strong data-run-health-next>{{ run_health.next_label }}</strong>
+        </div>
+        <div class="detail-item">
+          <span class="detail-label">Latest event</span>
+          <span class="detail-value" data-run-health-last>
+            {{ run_health.latest_event.summary if run_health.latest_event else "No worker events yet." }}
+          </span>
+        </div>
+        <div class="meta-chip-row{% if not run_health.fallback_events %} is-hidden{% endif %}" data-run-health-fallbacks>
+          {% for event in run_health.fallback_events %}
+            <span class="meta-chip">{{ event.label }} #{{ event.sequence }}</span>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
     <details class="compact-details run-meta-details">
       <summary>Run details and route</summary>
       <div class="run-meta-grid">

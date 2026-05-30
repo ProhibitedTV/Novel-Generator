@@ -295,6 +295,12 @@ function setupRunDetail() {
   const stepNode = runDetail.querySelector("[data-run-step-label]");
   const chapterNode = runDetail.querySelector("[data-run-chapter-label]");
   const routeNode = runDetail.querySelector("[data-run-route-label]");
+  const runHealthNode = runDetail.querySelector("[data-run-health]");
+  const runHealthTitleNode = runDetail.querySelector("[data-run-health-title]");
+  const runHealthBodyNode = runDetail.querySelector("[data-run-health-body]");
+  const runHealthNextNode = runDetail.querySelector("[data-run-health-next]");
+  const runHealthLastNode = runDetail.querySelector("[data-run-health-last]");
+  const runHealthFallbackNode = runDetail.querySelector("[data-run-health-fallbacks]");
   const elapsedNode = runDetail.querySelector("[data-run-elapsed]");
   const completedChapterNode = runDetail.querySelector("[data-run-completed-chapters]");
   const wordProgressNode = runDetail.querySelector("[data-run-word-progress]");
@@ -574,6 +580,78 @@ function setupRunDetail() {
     };
   }
 
+  function eventLabel(eventType) {
+    return String(eventType || "update").replace(/_/g, " ");
+  }
+
+  function eventSummary(event) {
+    if (!event) {
+      return null;
+    }
+    const summary = event.payload?.message || event.payload?.title || event.payload?.chapter_number || eventLabel(event.event_type);
+    return {
+      sequence: event.sequence || "-",
+      label: eventLabel(event.event_type),
+      summary: String(summary),
+    };
+  }
+
+  function fallbackEvents(run) {
+    return sortedEvents(run)
+      .filter((event) => String(event.event_type || "").includes("fallback"))
+      .slice(-4)
+      .map(eventSummary)
+      .filter(Boolean);
+  }
+
+  function runHealth(run) {
+    const normalizedStage = normalizeStage(run.current_step || "", run.status || "");
+    const currentStage = stageFor(normalizedStage);
+    const nextStageIndex = stageOrder.indexOf(normalizedStage);
+    const nextStage = nextStageIndex >= 0 && nextStageIndex + 1 < stageOrder.length ? stageFor(stageOrder[nextStageIndex + 1]) : null;
+    const runEvents = sortedEvents(run);
+    const latestEvent = eventSummary(runEvents.length ? runEvents[runEvents.length - 1] : null);
+    const fallbacks = fallbackEvents(run);
+    const completedChapters = completedChapterCount(run);
+    const allChaptersComplete = completedChapters === Number(run.requested_chapters || 0);
+    let tone = "warning";
+    let title = `Run status: ${String(run.status || "queued").replace(/_/g, " ")}`;
+    let body = currentStage.description;
+    let nextLabel = nextStage ? nextStage.label : "No next stage";
+
+    if (run.status === "queued") {
+      title = "Queued and waiting for the worker";
+      body = "The run settings are saved. The next healthy sign is a story-bible event from the worker.";
+    } else if (run.status === "running") {
+      tone = fallbacks.length ? "warning" : "success";
+      title = `Running: ${currentStage.label}`;
+    } else if (run.status === "awaiting_approval") {
+      title = "Outline review is waiting on you";
+      body = "Approve the outline to start drafting, or cancel and edit the project before the expensive chapter pass begins.";
+      nextLabel = "Approve outline or cancel and edit";
+    } else if (run.status === "failed") {
+      tone = "error";
+      const failureStage = stageLookup[run.current_step || ""] || currentStage;
+      title = `Stopped during ${failureStage.label}`;
+      body = run.error_message || latestEvent?.summary || "Check the latest event before rerunning.";
+      nextLabel = "Review outputs and recovery actions";
+    } else if (run.status === "canceled") {
+      tone = "error";
+      title = "Canceled before completion";
+      body = "This run is preserved for review. Rerun it, regenerate from a chapter, or delete it when you no longer need the history.";
+      nextLabel = "Review outputs and recovery actions";
+    } else if (run.status === "completed") {
+      tone = allChaptersComplete ? "success" : "warning";
+      title = allChaptersComplete ? "Run completed with all requested chapters" : "Run completed with incomplete chapter coverage";
+      body = allChaptersComplete
+        ? "Manuscript artifacts, QA feedback, and chapter checkpoints are ready for review."
+        : "Treat the output as partial and inspect the chapter list before exporting or rerunning.";
+      nextLabel = "Review outputs and recovery actions";
+    }
+
+    return { tone, title, body, nextLabel, latestEvent, fallbacks };
+  }
+
   function buildQualitySignals(chapter) {
     if (!chapter?.qa_notes) {
       return [];
@@ -684,6 +762,31 @@ function setupRunDetail() {
       } else {
         setHidden(stageNextNode, true);
       }
+    }
+  }
+
+  function renderRunHealth(run) {
+    const health = runHealth(run);
+    if (runHealthNode) {
+      runHealthNode.className = `callout callout-${health.tone} run-health-card`;
+    }
+    if (runHealthTitleNode) {
+      runHealthTitleNode.textContent = health.title;
+    }
+    if (runHealthBodyNode) {
+      runHealthBodyNode.textContent = health.body;
+    }
+    if (runHealthNextNode) {
+      runHealthNextNode.textContent = health.nextLabel;
+    }
+    if (runHealthLastNode) {
+      runHealthLastNode.textContent = health.latestEvent?.summary || "No worker events yet.";
+    }
+    if (runHealthFallbackNode) {
+      setHidden(runHealthFallbackNode, !health.fallbacks.length);
+      runHealthFallbackNode.innerHTML = health.fallbacks
+        .map((event) => `<span class="meta-chip">${escapeHtml(event.label)} #${escapeHtml(event.sequence)}</span>`)
+        .join("");
     }
   }
 
@@ -949,6 +1052,7 @@ function setupRunDetail() {
     runDetail.dataset.runCompletedAt = run.completed_at || "";
 
     updateStatus(run.status || "queued", run.current_step || "queued", run.current_chapter || "");
+    renderRunHealth(run);
     renderStagePanel(run);
     renderContract(run);
     renderQuality(run);

@@ -154,9 +154,10 @@
           <p>The newest background jobs across every project.</p>
         </div>
       </div>
-      {% if recent_runs %}
+      {% if recent_run_rows %}
         <div class="run-table">
-          {% for run in recent_runs %}
+          {% for row in recent_run_rows %}
+            {% set run = row.run %}
             <a class="run-row" href="/runs/{{ run.id }}">
               <div class="run-row-main">
                 <div class="run-row-top">
@@ -164,10 +165,13 @@
                   <span class="run-row-title">{{ run.project.title }}</span>
                 </div>
                 <div class="meta-chip-row">
-                  <span class="meta-chip long-value">{{ run.model_name }}</span>
-                  <span class="meta-chip">{{ run.current_step }}</span>
-                  <span class="meta-chip">{{ run.requested_chapters }} chapters</span>
+                  <span class="meta-chip long-value">{{ row.route.provider_name }} / {{ row.route.model_name }}</span>
+                  <span class="meta-chip">{{ row.stage_label }}</span>
+                  <span class="meta-chip">{{ row.progress.label }}</span>
                 </div>
+                <p class="field-note run-row-event">
+                  Latest: {{ row.latest_event.summary if row.latest_event else "No worker events yet." }}
+                </p>
               </div>
               <div class="run-row-meta">
                 <div class="meta-cluster">
@@ -176,8 +180,9 @@
                 </div>
                 <div class="meta-cluster">
                   <span class="run-meta-label">Progress</span>
-                  <span class="detail-value">{{ run.chapters|length }} tracked / {{ run.requested_chapters }} planned</span>
+                  <span class="detail-value">{{ row.progress.word_percent }}% words / {{ row.progress.artifact_count }} artifacts</span>
                 </div>
+                <span class="run-row-action">Open run</span>
               </div>
             </a>
           {% endfor %}

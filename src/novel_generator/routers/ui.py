@@ -329,6 +329,120 @@ def _stage_context(run: GenerationRun) -> tuple[dict[str, Any], dict[str, Any] |
     return current_stage, next_stage
 
 
+def _event_display_name(event_type: str) -> str:
+    return str(event_type or "update").replace("_", " ")
+
+
+def _event_summary(event: Any | None) -> dict[str, Any] | None:
+    if event is None:
+        return None
+    payload = event.payload or {}
+    summary = (
+        payload.get("message")
+        or payload.get("title")
+        or payload.get("chapter_number")
+        or _event_display_name(event.event_type)
+    )
+    return {
+        "sequence": event.sequence,
+        "event_type": event.event_type,
+        "label": _event_display_name(event.event_type),
+        "summary": str(summary),
+    }
+
+
+def _latest_event_summary(run: GenerationRun) -> dict[str, Any] | None:
+    events = _sorted_run_events(run)
+    return _event_summary(events[-1] if events else None)
+
+
+def _fallback_event_rows(run: GenerationRun) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for event in _sorted_run_events(run):
+        if "fallback" not in str(event.event_type):
+            continue
+        summary = _event_summary(event)
+        if summary:
+            rows.append(summary)
+    return rows[-4:]
+
+
+def _run_progress_context(run: GenerationRun) -> dict[str, Any]:
+    completed_chapters = _chapter_completion_count(run)
+    requested_chapters = max(1, int(run.requested_chapters or 1))
+    tracked_chapters = len(run.chapters)
+    chapter_percent = min(100, int(round((completed_chapters / requested_chapters) * 100)))
+    return {
+        "completed_chapters": completed_chapters,
+        "tracked_chapters": tracked_chapters,
+        "requested_chapters": run.requested_chapters,
+        "chapter_percent": chapter_percent,
+        "word_count": _run_word_count(run),
+        "word_percent": _word_progress_percent(run),
+        "artifact_count": len(run.artifacts),
+        "label": f"{completed_chapters}/{run.requested_chapters} chapters complete",
+    }
+
+
+def _run_health_context(run: GenerationRun) -> dict[str, Any]:
+    current_stage, next_stage = _stage_context(run)
+    latest_event = _latest_event_summary(run)
+    fallback_events = _fallback_event_rows(run)
+    progress = _run_progress_context(run)
+
+    if run.status == RunStatus.QUEUED:
+        tone = "warning"
+        title = "Queued and waiting for the worker"
+        body = "The run settings are saved. The next healthy sign is a story-bible event from the worker."
+    elif run.status == RunStatus.RUNNING:
+        tone = "success" if not fallback_events else "warning"
+        title = f"Running: {current_stage['label']}"
+        body = current_stage["description"]
+    elif run.status == RunStatus.AWAITING_APPROVAL:
+        tone = "warning"
+        title = "Outline review is waiting on you"
+        body = "Approve the outline to start drafting, or cancel and edit the project before the expensive chapter pass begins."
+    elif run.status == RunStatus.FAILED:
+        tone = "error"
+        failure_stage = RUN_STAGE_LOOKUP.get(str(run.current_step or ""), current_stage)
+        title = f"Stopped during {failure_stage['label']}"
+        body = run.error_message or (latest_event or {}).get("summary") or "Check the latest event before rerunning."
+    elif run.status == RunStatus.CANCELED:
+        tone = "error"
+        title = "Canceled before completion"
+        body = "This run is preserved for review. Rerun it, regenerate from a chapter, or delete it when you no longer need the history."
+    elif run.status == RunStatus.COMPLETED:
+        if progress["completed_chapters"] == run.requested_chapters:
+            tone = "success"
+            title = "Run completed with all requested chapters"
+            body = "Manuscript artifacts, QA feedback, and chapter checkpoints are ready for review."
+        else:
+            tone = "warning"
+            title = "Run completed with incomplete chapter coverage"
+            body = "Treat the output as partial and inspect the chapter list before exporting or rerunning."
+    else:
+        tone = "warning"
+        title = f"Run status: {run.status.value.replace('_', ' ')}"
+        body = current_stage["description"]
+
+    next_label = next_stage["label"] if next_stage else "No next stage"
+    if run.status == RunStatus.AWAITING_APPROVAL:
+        next_label = "Approve outline or cancel and edit"
+    elif run.status in TERMINAL_STATUSES:
+        next_label = "Review outputs and recovery actions"
+
+    return {
+        "tone": tone,
+        "title": title,
+        "body": body,
+        "current_stage": current_stage,
+        "next_label": next_label,
+        "latest_event": latest_event,
+        "fallback_events": fallback_events,
+        "progress": progress,
+    }
+
+
 def _safe_plan(chapter: Any | None) -> dict[str, Any]:
     if chapter is None or not chapter.plan:
         return {}
@@ -681,6 +795,21 @@ def _run_dashboard_context(run: GenerationRun) -> dict[str, Any]:
         "word_progress_percent": _word_progress_percent(run),
         "run_stage_data": RUN_STAGES,
         "event_count": len(run.events),
+        "run_health": _run_health_context(run),
+    }
+
+
+def _run_row_context(run: GenerationRun) -> dict[str, Any]:
+    current_stage, _ = _stage_context(run)
+    health = _run_health_context(run)
+    route = _latest_route_context(run)
+    return {
+        "run": run,
+        "stage_label": current_stage["label"],
+        "health": health,
+        "progress": health["progress"],
+        "latest_event": health["latest_event"],
+        "route": route,
     }
 
 
@@ -1427,6 +1556,7 @@ def _home_context(request: Request, db: Session, settings: Settings) -> dict[str
         "projects": projects,
         "recent_projects": projects[:3],
         "recent_runs": recent_runs,
+        "recent_run_rows": [_run_row_context(run) for run in recent_runs],
         "has_projects": bool(projects),
         "primary_action": primary_action,
         "ready_for_projects": ready_for_projects,
@@ -1528,6 +1658,7 @@ def _project_detail_context(
             provider_field="preferred_provider_name",
             model_field="preferred_model",
         ),
+        "project_run_rows": [_run_row_context(run) for run in run_stats["project_runs"]],
         "run_values": run_payload,
         "run_errors": run_errors or {},
         "run_task_route_rows": _task_route_rows(run_payload),
