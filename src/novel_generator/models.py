@@ -89,6 +89,7 @@ class GenerationRun(Base):
     pipeline_version: Mapped[int] = mapped_column(Integer, default=1)
     pause_after_outline: Mapped[bool] = mapped_column(Boolean, default=True)
     developmental_rewrite_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    quality_profile: Mapped[str] = mapped_column(String(32), default="balanced")
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.QUEUED)
     current_step: Mapped[str] = mapped_column(String(255), default="queued")
     current_chapter: Mapped[int | None] = mapped_column(Integer, nullable=True)

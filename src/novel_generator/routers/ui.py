@@ -29,7 +29,15 @@ from ..repositories import (
     update_project,
     update_provider_config,
 )
-from ..schemas import CanonicalEntity, ProjectCreate, ProjectUpdate, ProviderCapabilities, ProviderConfigUpdate, RunCreate
+from ..schemas import (
+    QUALITY_PROFILE_VALUES,
+    CanonicalEntity,
+    ProjectCreate,
+    ProjectUpdate,
+    ProviderCapabilities,
+    ProviderConfigUpdate,
+    RunCreate,
+)
 from ..services.genre_profiles import genre_profile, genre_profile_options
 from ..services.openai_compatible import OpenAICompatibleClient
 from ..services.ollama import OllamaClient
@@ -168,6 +176,29 @@ HIGH_TOKEN_DISCLOSURE = (
     "Full novel runs can use large prompts, chapter drafts, critiques, and QA payloads. "
     "Expect high token usage if the configured provider charges by token."
 )
+PREFLIGHT_OUTLINE_CHUNK_THRESHOLD = 32
+PREFLIGHT_OUTLINE_CHUNK_SIZE = 8
+QUALITY_PROFILE_DEFS = [
+    {
+        "value": "balanced",
+        "label": "Balanced",
+        "summary": "Current behavior",
+        "description": "Use the existing revision thresholds and keep developmental rewrite planning optional.",
+    },
+    {
+        "value": "draft",
+        "label": "Draft",
+        "summary": "Fastest full manuscript",
+        "description": "Defer non-blocking polish repairs so long runs reach a complete draft sooner.",
+    },
+    {
+        "value": "strict",
+        "label": "Strict",
+        "summary": "Most editorial scrutiny",
+        "description": "Use tighter revision thresholds and include developmental rewrite planning by default.",
+    },
+]
+QUALITY_PROFILE_LOOKUP = {item["value"]: item for item in QUALITY_PROFILE_DEFS}
 RUN_STAGE_LOOKUP = {stage["id"]: stage for stage in RUN_STAGES}
 RUN_STAGE_PROGRESS_ORDER = [
     "queued",
@@ -1245,6 +1276,7 @@ def _run_form_values(project: Project, values: dict[str, Any] | None = None) -> 
         "max_words_per_chapter": project.max_words_per_chapter,
         "pause_after_outline": True,
         "developmental_rewrite_enabled": False,
+        "quality_profile": "balanced",
         **_task_routing_form_values(project.task_routing),
     }
     if values:
@@ -1307,6 +1339,139 @@ def _form_route_privacy_summary(
         str(values.get(model_field, "") or ""),
         _task_routing_payload(values),
     )
+
+
+def _quality_profile_context(value: Any) -> dict[str, str]:
+    key = str(value or "balanced").strip().lower().replace("-", "_").replace(" ", "_")
+    if key not in QUALITY_PROFILE_VALUES:
+        key = "balanced"
+    return QUALITY_PROFILE_LOOKUP[key]
+
+
+def _quality_profile_options(selected: Any) -> list[dict[str, Any]]:
+    selected_key = _quality_profile_context(selected)["value"]
+    return [
+        {
+            **option,
+            "selected": option["value"] == selected_key,
+        }
+        for option in QUALITY_PROFILE_DEFS
+    ]
+
+
+def _positive_int(value: Any, fallback: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return max(1, fallback)
+    return max(1, parsed)
+
+
+def _run_preflight_context(
+    values: dict[str, Any],
+    settings: Settings,
+    configs_by_name: dict[str, Any],
+    statuses_by_name: dict[str, ProviderCapabilities],
+) -> dict[str, Any]:
+    provider_name = str(values.get("provider_name") or "ollama").strip() or "ollama"
+    model_name = str(values.get("model_name") or "").strip()
+    requested_chapters = _positive_int(values.get("requested_chapters"), 1)
+    target_word_count = _positive_int(values.get("target_word_count"), 1)
+    pause_after_outline = bool(values.get("pause_after_outline", True))
+    profile = _quality_profile_context(values.get("quality_profile"))
+    developmental_rewrite_enabled = bool(values.get("developmental_rewrite_enabled")) or profile["value"] == "strict"
+    task_routing = _task_routing_payload(values)
+    route_disclosure = _route_privacy_summary(provider_name, model_name, task_routing)
+    config = configs_by_name.get(provider_name)
+    provider_status = statuses_by_name.get(provider_name)
+
+    outline_chunks = (
+        1
+        if requested_chapters <= PREFLIGHT_OUTLINE_CHUNK_THRESHOLD
+        else max(1, (requested_chapters + PREFLIGHT_OUTLINE_CHUNK_SIZE - 1) // PREFLIGHT_OUTLINE_CHUNK_SIZE)
+    )
+    estimated_model_calls = 1 + outline_chunks + (requested_chapters * 5) + 1
+    if developmental_rewrite_enabled:
+        estimated_model_calls += 1
+
+    warnings: list[dict[str, str]] = []
+    if config is None:
+        warnings.append({"tone": "error", "message": "The selected provider is not configured."})
+    elif not config.is_enabled:
+        warnings.append({"tone": "error", "message": f"{provider_definition(provider_name).label} is disabled."})
+
+    if provider_status is None:
+        warnings.append({"tone": "error", "message": "Provider reachability has not been checked yet."})
+    elif not provider_status.reachable:
+        warnings.append(
+            {
+                "tone": "error",
+                "message": provider_status.error or f"{provider_definition(provider_name).label} is not reachable.",
+            }
+        )
+    elif provider_status.available_models and model_name not in provider_status.available_models:
+        warnings.append({"tone": "warning", "message": f"Model '{model_name}' is not in the detected model list."})
+
+    if requested_chapters > PREFLIGHT_OUTLINE_CHUNK_THRESHOLD:
+        warnings.append(
+            {
+                "tone": "warning",
+                "message": f"{requested_chapters} chapters will use {outline_chunks} outline chunks to reduce long-outline failures.",
+            }
+        )
+    if requested_chapters >= 64:
+        warnings.append(
+            {
+                "tone": "warning",
+                "message": "High chapter counts make checkpoint resume and outline review especially important.",
+            }
+        )
+    if route_disclosure["is_external"]:
+        warnings.append(
+            {
+                "tone": "warning",
+                "message": "One or more stages use an external route; verify cost and data-retention expectations before queueing.",
+            }
+        )
+    if not pause_after_outline:
+        warnings.append(
+            {
+                "tone": "warning",
+                "message": "Outline approval is disabled, so drafting will begin as soon as the outline is generated.",
+            }
+        )
+
+    has_error = any(item["tone"] == "error" for item in warnings)
+    has_warning = any(item["tone"] == "warning" for item in warnings)
+    tone = "error" if has_error else ("warning" if has_warning else "success")
+    status_label = "Blocked" if has_error else ("Review" if has_warning else "Ready")
+    provider_label = provider_definition(provider_name).label if config is not None else provider_name
+    model_status = "Detected"
+    if provider_status is None or not provider_status.available_models:
+        model_status = "No detected model list"
+    elif model_name not in provider_status.available_models:
+        model_status = "Not detected"
+
+    return {
+        "tone": tone,
+        "status_label": status_label,
+        "summary": "Provider, model, outline scale, and recovery guardrails checked before queueing.",
+        "warnings": warnings,
+        "rows": [
+            {"label": "Provider route", "value": f"{provider_label} / {model_name or '-'}"},
+            {"label": "Model reachability", "value": "Reachable" if provider_status and provider_status.reachable else "Unavailable"},
+            {"label": "Model status", "value": model_status},
+            {"label": "Outline chunks", "value": str(outline_chunks)},
+            {"label": "Estimated model calls", "value": f"{estimated_model_calls} minimum"},
+            {"label": "Quality profile", "value": profile["label"]},
+            {"label": "Target length", "value": f"{requested_chapters} chapters / {target_word_count} words"},
+        ],
+        "recovery_features": [
+            "Stage attempt ledger",
+            "Checkpoint resume",
+            f"Stale heartbeat recovery after {max(1, settings.run_stale_after_seconds // 60)} minutes",
+        ],
+    }
 
 
 def _provider_catalog(settings: Settings, db: Session) -> tuple[dict[str, Any], dict[str, ProviderCapabilities], ProviderManager]:
@@ -1978,6 +2143,13 @@ def _project_detail_context(
         "project_run_rows": [_run_row_context(run) for run in run_stats["project_runs"]],
         "run_values": run_payload,
         "run_errors": run_errors or {},
+        "quality_profile_options": _quality_profile_options(run_payload.get("quality_profile")),
+        "run_preflight": _run_preflight_context(
+            run_payload,
+            settings,
+            provider_configs_by_name,
+            provider_statuses_by_name,
+        ),
         "run_task_route_rows": _task_route_rows(run_payload),
         "run_route_disclosure": _form_route_privacy_summary(
             run_payload,
@@ -2054,6 +2226,7 @@ def _same_settings_payload(run: GenerationRun, *, source_run_id: str | None = No
         max_words_per_chapter=run.max_words_per_chapter,
         pause_after_outline=True,
         developmental_rewrite_enabled=run.developmental_rewrite_enabled,
+        quality_profile=run.quality_profile,
         task_routing=run.task_routing or {},
         source_run_id=source_run_id,
         resume_from_chapter=resume_from_chapter,
@@ -2697,6 +2870,7 @@ def create_run_ui(
     max_words_per_chapter: str = Form(""),
     pause_after_outline: str | None = Form(None),
     developmental_rewrite_enabled: str | None = Form(None),
+    quality_profile: str = Form("balanced"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -2713,6 +2887,7 @@ def create_run_ui(
         "max_words_per_chapter": max_words_per_chapter,
         "pause_after_outline": _coerce_checkbox(pause_after_outline),
         "developmental_rewrite_enabled": _coerce_checkbox(developmental_rewrite_enabled),
+        "quality_profile": quality_profile,
     }
     provider_configs_by_name, provider_statuses_by_name, manager = _provider_catalog(settings, db)
 
@@ -2801,6 +2976,7 @@ def run_detail(
             "run": run,
             "project": run.project,
             "run_genre_profile": run_profile,
+            "quality_profile": _quality_profile_context(run.quality_profile),
             "show_rerun": run.status in TERMINAL_STATUSES,
             "terminal_statuses": TERMINAL_STATUSES,
             "run_stages": RUN_STAGES,

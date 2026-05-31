@@ -2,6 +2,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupConfirmActions(document);
   setupModelPickers(document);
   setupRunModeNotes(document);
+  setupQualityProfileControls(document);
   setupOutlineReview(document);
   setupReviewSections(document);
   setupProviderConsole();
@@ -87,6 +88,37 @@ function setupRunModeNotes(root) {
       note.textContent = checkbox.checked ? note.dataset.pauseMessage || "" : note.dataset.straightMessage || "";
     };
     checkbox.addEventListener("change", sync);
+    sync();
+  });
+}
+
+function setupQualityProfileControls(root) {
+  const controls = Array.from(root.querySelectorAll("[data-quality-profile-control]"));
+  controls.forEach((control) => {
+    if (control.dataset.qualityProfileBound === "true") {
+      return;
+    }
+    control.dataset.qualityProfileBound = "true";
+    const form = control.closest("form");
+    const options = Array.from(control.querySelectorAll("[data-quality-profile-option]"));
+    const note = control.querySelector("[data-quality-profile-note]");
+    const rewriteToggle = form?.querySelector("[data-developmental-rewrite-toggle]");
+
+    const sync = () => {
+      const selected = options.find((option) => option.checked);
+      control.querySelectorAll(".quality-profile-option").forEach((label) => {
+        const input = label.querySelector("[data-quality-profile-option]");
+        label.classList.toggle("is-selected", Boolean(input?.checked));
+      });
+      if (note && selected) {
+        note.textContent = selected.dataset.profileNote || "";
+      }
+      if (rewriteToggle && selected?.value === "strict") {
+        rewriteToggle.checked = true;
+      }
+    };
+
+    options.forEach((option) => option.addEventListener("change", sync));
     sync();
   });
 }

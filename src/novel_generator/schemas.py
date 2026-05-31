@@ -10,6 +10,8 @@ from .models import ChapterStatus, RunStatus
 from .services.genre_profiles import DEFAULT_GENRE_PROFILE, GENRE_PROFILES
 
 
+QUALITY_PROFILE_VALUES = {"draft", "balanced", "strict"}
+
 ALLOWED_CHAPTER_MODES = {
     "investigation",
     "interpersonal_confrontation",
@@ -86,6 +88,13 @@ def _validate_genre_profile(value: Any) -> str:
     key = str(value or DEFAULT_GENRE_PROFILE).strip() or DEFAULT_GENRE_PROFILE
     if key not in GENRE_PROFILES:
         raise ValueError("Choose one of the supported genre profiles.")
+    return key
+
+
+def _validate_quality_profile(value: Any) -> str:
+    key = str(value or "balanced").strip().lower().replace("-", "_").replace(" ", "_")
+    if key not in QUALITY_PROFILE_VALUES:
+        raise ValueError("Choose draft, balanced, or strict.")
     return key
 
 
@@ -921,9 +930,15 @@ class RunCreate(BaseModel):
     max_words_per_chapter: int | None = Field(default=None, ge=1)
     pause_after_outline: bool = True
     developmental_rewrite_enabled: bool = False
+    quality_profile: str = "balanced"
     task_routing: TaskRouting | None = None
     source_run_id: str | None = None
     resume_from_chapter: int | None = Field(default=None, ge=1)
+
+    @field_validator("quality_profile", mode="before")
+    @classmethod
+    def validate_quality_profile(cls, value: Any) -> str:
+        return _validate_quality_profile(value)
 
 
 class GenerationRunRead(BaseModel):
@@ -941,6 +956,7 @@ class GenerationRunRead(BaseModel):
     pipeline_version: int
     pause_after_outline: bool
     developmental_rewrite_enabled: bool
+    quality_profile: str
     status: RunStatus
     current_step: str
     current_chapter: int | None
