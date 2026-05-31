@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import socket
 import time
 
 from ..db import build_session_factory
@@ -15,7 +17,11 @@ logger = logging.getLogger(__name__)
 def recover_incomplete_runs(settings: Settings) -> None:
     session_factory = build_session_factory(settings)
     with session_factory() as session:
-        count = recover_running_runs(session)
+        count = recover_running_runs(
+            session,
+            stale_after_seconds=settings.run_stale_after_seconds,
+            reason="worker_startup",
+        )
         session.commit()
         if count:
             logger.info("Recovered %s interrupted runs.", count)
@@ -23,9 +29,17 @@ def recover_incomplete_runs(settings: Settings) -> None:
 
 def run_worker_loop(settings: Settings) -> None:
     session_factory = build_session_factory(settings)
+    worker_id = f"{socket.gethostname()}:{os.getpid()}"
     while True:
         with session_factory() as session:
-            run = claim_next_queued_run(session)
+            stale_count = recover_running_runs(
+                session,
+                stale_after_seconds=settings.run_stale_after_seconds,
+                reason="stale_heartbeat",
+            )
+            if stale_count:
+                logger.warning("Recovered %s stale running runs.", stale_count)
+            run = claim_next_queued_run(session, worker_id=worker_id)
             session.commit()
             if run is None:
                 time.sleep(settings.worker_poll_interval_seconds)

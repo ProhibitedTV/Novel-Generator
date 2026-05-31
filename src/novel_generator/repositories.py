@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -136,6 +136,7 @@ def get_run(session: Session, run_id: str) -> GenerationRun | None:
             selectinload(GenerationRun.chapters),
             selectinload(GenerationRun.artifacts),
             selectinload(GenerationRun.events),
+            selectinload(GenerationRun.stage_attempts),
         )
     )
     return session.scalar(stmt)
@@ -425,7 +426,7 @@ def create_chapters_from_outline(session: Session, run: GenerationRun) -> list[C
     return created
 
 
-def claim_next_queued_run(session: Session) -> GenerationRun | None:
+def claim_next_queued_run(session: Session, worker_id: str | None = None) -> GenerationRun | None:
     stmt = (
         select(GenerationRun)
         .where(GenerationRun.status == RunStatus.QUEUED, GenerationRun.cancel_requested.is_(False))
@@ -438,21 +439,46 @@ def claim_next_queued_run(session: Session) -> GenerationRun | None:
     run.status = RunStatus.RUNNING
     run.current_step = "starting"
     run.started_at = run.started_at or datetime.utcnow()
+    run.worker_id = worker_id
+    run.last_heartbeat_at = datetime.utcnow()
     run.error_message = None
     session.flush()
     record_event(session, run, "run_started", {"message": "Worker claimed the run."})
     return run
 
 
-def recover_running_runs(session: Session) -> int:
-    runs = list(session.scalars(select(GenerationRun).where(GenerationRun.status == RunStatus.RUNNING)))
+def touch_run_heartbeat(session: Session, run: GenerationRun) -> None:
+    run.last_heartbeat_at = datetime.utcnow()
+    session.flush()
+
+
+def recover_running_runs(
+    session: Session,
+    *,
+    stale_after_seconds: int | None = None,
+    reason: str = "worker_startup",
+) -> int:
+    stmt = select(GenerationRun).where(GenerationRun.status == RunStatus.RUNNING)
+    if stale_after_seconds is not None:
+        cutoff = datetime.utcnow() - timedelta(seconds=stale_after_seconds)
+        stmt = stmt.where(
+            (GenerationRun.last_heartbeat_at.is_(None)) | (GenerationRun.last_heartbeat_at < cutoff)
+        )
+    runs = list(session.scalars(stmt))
     for run in runs:
         run.status = RunStatus.QUEUED
         run.current_step = "recovered"
+        run.worker_id = None
+        run.last_heartbeat_at = None
+        run.recovery_count += 1
         record_event(
             session,
             run,
             "run_requeued",
-            {"message": "Run was re-queued after an interrupted worker."},
+            {
+                "message": "Run was re-queued after an interrupted worker.",
+                "recovery_reason": reason,
+                "recovery_count": run.recovery_count,
+            },
         )
     return len(runs)

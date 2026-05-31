@@ -36,7 +36,7 @@ from ..services.ollama import OllamaClient
 from ..services.exports import export_publication_artifact, publication_export_options
 from ..services.provider_errors import ProviderError, ProviderTransportError
 from ..services.providers import ProviderManager, TASK_ROUTE_STAGES, provider_definition, provider_options
-from ..services.state import approve_outline_review, request_run_cancellation
+from ..services.state import approve_outline_review, request_run_cancellation, resume_failed_run
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
 from ..settings import Settings
 
@@ -1728,6 +1728,24 @@ def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
     ]
 
 
+def _run_attempt_diagnostics(run: GenerationRun) -> list[dict[str, Any]]:
+    attempts = sorted(getattr(run, "stage_attempts", []) or [], key=lambda item: (item.started_at, item.id))
+    failed = [attempt for attempt in attempts if attempt.status == "failed"]
+    source = failed[-5:] if failed else attempts[-5:]
+    return [
+        {
+            "stage": attempt.stage.replace("_", " "),
+            "chapter_number": attempt.chapter_number,
+            "status": attempt.status,
+            "provider_name": attempt.provider_name,
+            "model_name": attempt.model_name,
+            "error": attempt.error_message or "",
+            "duration_ms": attempt.duration_ms,
+        }
+        for attempt in source
+    ]
+
+
 def _run_editorial_next_step_context(run: GenerationRun, chapter_cards: list[dict[str, Any]]) -> dict[str, Any]:
     show = run.status in TERMINAL_STATUSES
     comparison_card = _run_comparison_card(run)
@@ -1799,6 +1817,8 @@ def _run_editorial_next_step_context(run: GenerationRun, chapter_cards: list[dic
         "compare_available": run.status == RunStatus.COMPLETED and len(completed_runs) >= 2,
         "comparison_run_count": len(completed_runs),
         "publication_available": run.status == RunStatus.COMPLETED,
+        "resume_available": run.status == RunStatus.FAILED,
+        "attempt_diagnostics": _run_attempt_diagnostics(run),
     }
 
 
@@ -2985,6 +3005,23 @@ def rerun_ui(
     )
     db.commit()
     return _redirect(f"/runs/{new_run.id}", message="Run re-queued.", message_tone="success")
+
+
+@router.post("/runs/{run_id}/resume")
+def resume_run_ui(run_id: str, db: Session = Depends(get_db)):
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    try:
+        resume_failed_run(db, run)
+    except ValueError as exc:
+        return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="warning")
+    db.commit()
+    return _redirect(
+        f"/runs/{run.id}",
+        message="Run queued to resume from the latest checkpoint.",
+        message_tone="success",
+    )
 
 
 @router.post("/runs/{run_id}/delete")

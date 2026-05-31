@@ -200,6 +200,36 @@ def test_rerun_api_requeues_same_settings_as_v2_run(client, monkeypatch) -> None
     assert rerun_response.json()["id"] != run_id
 
 
+def test_resume_failed_run_api_requeues_same_run(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+
+    _, run_id = create_project_and_run(client)
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.FAILED
+        run.current_step = "failed"
+        run.error_message = "Draft provider disconnected."
+        session.commit()
+
+    response = client.post(f"/api/runs/{run_id}/resume")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == run_id
+    assert payload["status"] == "queued"
+    assert payload["error_message"] is None
+    assert payload["recovery_count"] == 1
+
+
+def test_resume_run_api_rejects_non_failed_run(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+
+    _, run_id = create_project_and_run(client)
+
+    response = client.post(f"/api/runs/{run_id}/resume")
+    assert response.status_code == 409
+
+
 def test_approve_outline_api_requeues_paused_run(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
 

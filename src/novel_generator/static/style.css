@@ -1291,6 +1291,22 @@ dd {
   background: rgba(255, 255, 255, 0.58);
 }
 
+.attempt-diagnostic-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.attempt-diagnostic {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+  padding: 0.75rem;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+}
+
 .artifact-kind {
   text-transform: uppercase;
   letter-spacing: 0.08em;
