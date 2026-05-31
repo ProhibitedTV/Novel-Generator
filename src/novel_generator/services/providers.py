@@ -96,6 +96,8 @@ class ProviderManager:
                 base_url=config.base_url,
                 timeout_seconds=self.settings.ollama_timeout_seconds,
                 max_retries=self.settings.ollama_max_retries,
+                chat_timeout_seconds=self.settings.provider_chat_timeout_seconds,
+                retry_backoff_seconds=self.settings.provider_retry_backoff_seconds,
             )
         elif key == "openai_compatible":
             client = OpenAICompatibleClient(
@@ -103,6 +105,8 @@ class ProviderManager:
                 timeout_seconds=self.settings.ollama_timeout_seconds,
                 max_retries=self.settings.ollama_max_retries,
                 api_key=config.api_key,
+                chat_timeout_seconds=self.settings.provider_chat_timeout_seconds,
+                retry_backoff_seconds=self.settings.provider_retry_backoff_seconds,
             )
         else:
             raise ProviderError(f"Unsupported provider '{provider_name}'.")

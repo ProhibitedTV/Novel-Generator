@@ -100,6 +100,9 @@ class GenerationRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     resume_from_chapter: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recovery_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -118,6 +121,11 @@ class GenerationRun(Base):
     )
     artifacts: Mapped[list["Artifact"]] = relationship(back_populates="run", cascade="all, delete-orphan")
     events: Mapped[list["RunEvent"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    stage_attempts: Mapped[list["RunStageAttempt"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="RunStageAttempt.started_at",
+    )
 
 
 class ChapterDraft(Base):
@@ -173,3 +181,34 @@ class RunEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     run: Mapped[GenerationRun] = relationship(back_populates="events")
+
+
+class RunStageAttempt(Base):
+    __tablename__ = "run_stage_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "stage",
+            "chapter_number",
+            "attempt_number",
+            name="uq_run_stage_attempt_number",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("generation_runs.id", ondelete="CASCADE"))
+    stage: Mapped[str] = mapped_column(String(64))
+    chapter_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    provider_name: Mapped[str] = mapped_column(String(64))
+    model_name: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(32), default="running")
+    error_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_chars: Mapped[int] = mapped_column(Integer, default=0)
+    attempt_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    run: Mapped[GenerationRun] = relationship(back_populates="stage_attempts")

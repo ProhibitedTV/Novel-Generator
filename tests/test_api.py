@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import RunStatus
-from novel_generator.repositories import get_project, get_run, record_event
+from novel_generator.repositories import begin_stage_attempt, complete_stage_attempt, get_project, get_run, record_event
 from novel_generator.services.openai_compatible import OpenAICompatibleClient
 from novel_generator.services.ollama import OllamaClient
 
@@ -72,6 +72,35 @@ def test_project_and_run_api_flow(client, monkeypatch) -> None:
     cancel_response = client.post(f"/api/runs/{run_id}/cancel")
     assert cancel_response.status_code == 200
     assert cancel_response.json()["status"] == "canceled"
+
+
+def test_run_stage_attempts_api_returns_safe_attempt_metadata(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+
+    _, run_id = create_project_and_run(client)
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        attempt = begin_stage_attempt(
+            session,
+            run,
+            stage="story_bible",
+            chapter_number=None,
+            provider_name="ollama",
+            model_name="test-model",
+            metadata={"label": "story bible"},
+        )
+        complete_stage_attempt(session, attempt, '{"ok": true}')
+        session.commit()
+
+    response = client.get(f"/api/runs/{run_id}/attempts")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["stage"] == "story_bible"
+    assert payload[0]["status"] == "success"
+    assert payload[0]["output_chars"] == len('{"ok": true}')
+    assert payload[0]["metadata"] == {"label": "story bible"}
+    assert "messages" not in payload[0]
 
 
 def test_project_patch_api_updates_story_brief_and_preserves_defaults(client, monkeypatch) -> None:

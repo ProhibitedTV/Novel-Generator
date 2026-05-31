@@ -889,6 +889,26 @@ class RunEventRead(BaseModel):
     created_at: datetime
 
 
+class RunStageAttemptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    run_id: str
+    stage: str
+    chapter_number: int | None
+    attempt_number: int
+    provider_name: str
+    model_name: str
+    status: str
+    error_type: str | None
+    error_message: str | None
+    duration_ms: int | None
+    output_chars: int
+    metadata: dict[str, Any] = Field(default_factory=dict, validation_alias="attempt_metadata")
+    started_at: datetime
+    completed_at: datetime | None
+
+
 class RunCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -932,6 +952,9 @@ class GenerationRunRead(BaseModel):
     error_message: str | None
     cancel_requested: bool
     resume_from_chapter: int | None
+    worker_id: str | None
+    last_heartbeat_at: datetime | None
+    recovery_count: int
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None

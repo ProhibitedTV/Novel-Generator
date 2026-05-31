@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
+import time
 
 import httpx
 
@@ -58,12 +59,16 @@ class OpenAICompatibleClient:
         timeout_seconds: float,
         max_retries: int,
         api_key: str | None = None,
+        chat_timeout_seconds: float | None = None,
+        retry_backoff_seconds: float = 0.0,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.api_key = (api_key or "").strip()
+        self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
+        self.retry_backoff_seconds = retry_backoff_seconds
         self._client_factory = client_factory
 
     def _headers(self) -> dict[str, str]:
@@ -78,10 +83,14 @@ class OpenAICompatibleClient:
     def _chat_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(
             connect=self.timeout_seconds,
-            read=None,
+            read=self.chat_timeout_seconds,
             write=self.timeout_seconds,
             pool=self.timeout_seconds,
         )
+
+    def _sleep_before_retry(self, attempt: int) -> None:
+        if self.retry_backoff_seconds > 0:
+            time.sleep(self.retry_backoff_seconds * (attempt + 1))
 
     def _make_client(self, *, for_chat: bool = False) -> httpx.Client:
         if self._client_factory is not None:
@@ -101,6 +110,7 @@ class OpenAICompatibleClient:
                 last_error = exc
                 if attempt >= self.max_retries:
                     break
+                self._sleep_before_retry(attempt)
         raise OpenAICompatibleTransportError(
             str(last_error) if last_error else "Unknown OpenAI-compatible transport error."
         )
@@ -158,6 +168,7 @@ class OpenAICompatibleClient:
                 last_error = exc
                 if attempt >= self.max_retries:
                     break
+                self._sleep_before_retry(attempt)
         raise OpenAICompatibleTransportError(
             str(last_error) if last_error else "Unable to complete OpenAI-compatible chat request."
         )

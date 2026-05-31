@@ -14,6 +14,7 @@ from .models import (
     Project,
     ProviderConfig,
     RunEvent,
+    RunStageAttempt,
     RunStatus,
 )
 from .schemas import ProjectCreate, ProjectUpdate, ProviderConfigUpdate, RunCreate
@@ -166,6 +167,7 @@ def get_run_for_processing(session: Session, run_id: str) -> GenerationRun | Non
             selectinload(GenerationRun.project),
             selectinload(GenerationRun.chapters),
             selectinload(GenerationRun.artifacts),
+            selectinload(GenerationRun.stage_attempts),
         )
     )
     return session.scalar(stmt)
@@ -283,6 +285,76 @@ def record_event(session: Session, run: GenerationRun, event_type: str, payload:
     session.add(event)
     session.flush()
     return event
+
+
+def begin_stage_attempt(
+    session: Session,
+    run: GenerationRun,
+    *,
+    stage: str,
+    chapter_number: int | None,
+    provider_name: str,
+    model_name: str,
+    metadata: dict | None = None,
+) -> RunStageAttempt:
+    next_attempt = (
+        session.scalar(
+            select(func.coalesce(func.max(RunStageAttempt.attempt_number), 0) + 1).where(
+                RunStageAttempt.run_id == run.id,
+                RunStageAttempt.stage == stage,
+                RunStageAttempt.chapter_number.is_(chapter_number)
+                if chapter_number is None
+                else RunStageAttempt.chapter_number == chapter_number,
+            )
+        )
+        or 1
+    )
+    attempt = RunStageAttempt(
+        run_id=run.id,
+        stage=stage,
+        chapter_number=chapter_number,
+        attempt_number=next_attempt,
+        provider_name=provider_name,
+        model_name=model_name,
+        status="running",
+        attempt_metadata=dict(metadata or {}),
+        started_at=datetime.utcnow(),
+    )
+    session.add(attempt)
+    session.flush()
+    return attempt
+
+
+def complete_stage_attempt(session: Session, attempt: RunStageAttempt, output: str) -> RunStageAttempt:
+    now = datetime.utcnow()
+    attempt.status = "success"
+    attempt.completed_at = now
+    attempt.duration_ms = max(0, int((now - attempt.started_at).total_seconds() * 1000))
+    attempt.output_chars = len(output or "")
+    attempt.error_type = None
+    attempt.error_message = None
+    session.flush()
+    return attempt
+
+
+def fail_stage_attempt(session: Session, attempt: RunStageAttempt, exc: Exception) -> RunStageAttempt:
+    now = datetime.utcnow()
+    attempt.status = "failed"
+    attempt.completed_at = now
+    attempt.duration_ms = max(0, int((now - attempt.started_at).total_seconds() * 1000))
+    attempt.error_type = type(exc).__name__
+    attempt.error_message = str(exc)
+    session.flush()
+    return attempt
+
+
+def list_stage_attempts(session: Session, run_id: str) -> list[RunStageAttempt]:
+    stmt = (
+        select(RunStageAttempt)
+        .where(RunStageAttempt.run_id == run_id)
+        .order_by(RunStageAttempt.started_at.asc(), RunStageAttempt.id.asc())
+    )
+    return list(session.scalars(stmt))
 
 
 def list_events_after(session: Session, run_id: str, after_sequence: int) -> list[RunEvent]:

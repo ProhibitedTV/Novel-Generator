@@ -8,7 +8,14 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from ..models import ChapterStatus, GenerationRun, RunStatus
-from ..repositories import create_chapters_from_outline, record_event, replace_artifacts
+from ..repositories import (
+    begin_stage_attempt,
+    complete_stage_attempt,
+    create_chapters_from_outline,
+    fail_stage_attempt,
+    record_event,
+    replace_artifacts,
+)
 from ..schemas import (
     ChapterContinuityUpdate,
     ChapterCritique,
@@ -207,24 +214,77 @@ def _ensure_not_canceled(session: Session, run: GenerationRun) -> None:
 
 
 def _generate_structured_output(
+    session: Session,
+    run: GenerationRun,
     client: ProviderManager | OllamaClient,
     provider_name: str,
     model_name: str,
     build_messages: Callable[[], list[dict[str, str]]],
     parser: Callable[[str], Any],
     label: str,
+    stage: str,
+    chapter_number: int | None = None,
 ) -> Any:
-    raw_output = _provider_chat(client, provider_name, model_name, build_messages())
+    raw_output = _supervised_provider_chat(
+        session,
+        run,
+        client,
+        provider_name,
+        model_name,
+        build_messages(),
+        stage=stage,
+        chapter_number=chapter_number,
+        metadata={"label": label, "phase": "initial"},
+    )
     try:
         return parser(raw_output)
     except Exception as exc:
-        repaired_output = _provider_chat(
+        repaired_output = _supervised_provider_chat(
+            session,
+            run,
             client,
             provider_name,
             model_name,
             build_json_repair_messages(raw_output, label, str(exc)),
+            stage=stage,
+            chapter_number=chapter_number,
+            metadata={"label": label, "phase": "repair", "repair_error": str(exc)},
         )
         return parser(repaired_output)
+
+
+def _supervised_provider_chat(
+    session: Session,
+    run: GenerationRun,
+    client: ProviderManager | OllamaClient,
+    provider_name: str,
+    model_name: str,
+    messages: list[dict[str, str]],
+    *,
+    stage: str,
+    chapter_number: int | None = None,
+    metadata: dict | None = None,
+    stream: bool = False,
+) -> str:
+    attempt = begin_stage_attempt(
+        session,
+        run,
+        stage=stage,
+        chapter_number=chapter_number,
+        provider_name=provider_name,
+        model_name=model_name,
+        metadata=metadata,
+    )
+    session.commit()
+    try:
+        output = _provider_chat(client, provider_name, model_name, messages, stream=stream)
+    except Exception as exc:
+        fail_stage_attempt(session, attempt, exc)
+        session.commit()
+        raise
+    complete_stage_attempt(session, attempt, output)
+    session.commit()
+    return output
 
 
 def _provider_chat(
@@ -761,12 +821,15 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
     session.commit()
     try:
         story_bible = _generate_structured_output(
+            session,
+            run,
             client,
             provider_name,
             model_name,
             lambda: build_story_bible_messages(project, run),
             parse_story_bible,
             "story bible",
+            "story_bible",
         )
     except Exception as exc:
         story_bible = _fallback_story_bible(project, run)
@@ -828,6 +891,8 @@ def _generate_outline_chunks(
         session.commit()
         try:
             chunk = _generate_structured_output(
+                session,
+                run,
                 client,
                 provider_name,
                 model_name,
@@ -841,6 +906,8 @@ def _generate_outline_chunks(
                 ),
                 lambda raw, start=start_chapter, end=end_chapter: parse_outline_chunk(raw, start, end),
                 f"structured outline chapters {start_chapter}-{end_chapter}",
+                "outline_chunk",
+                None,
             )
         except Exception as exc:
             chunk = _fallback_outline_entries(
@@ -893,12 +960,15 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
             outline = _generate_outline_chunks(session, run, story_bible, client, provider_name, model_name)
         else:
             outline = _generate_structured_output(
+                session,
+                run,
                 client,
                 provider_name,
                 model_name,
                 lambda: build_outline_messages(project, run, story_bible),
                 lambda raw: parse_outline(raw, run.requested_chapters),
                 "structured outline",
+                "outline",
             )
         run.outline = _validated_outline_or_fallback(session, project, run, story_bible, outline)
     except Exception as exc:
@@ -955,6 +1025,8 @@ def _draft_chapter(
     session.commit()
 
     plan = _generate_structured_output(
+        session,
+        run,
         client,
         plan_provider_name,
         plan_model_name,
@@ -969,6 +1041,8 @@ def _draft_chapter(
         ),
         parse_chapter_plan,
         f"chapter {chapter.chapter_number} plan",
+        "chapter_plan",
+        chapter.chapter_number,
     )
     _persist_structured_plan(chapter, plan)
     session.commit()
@@ -990,7 +1064,9 @@ def _draft_chapter(
     session.commit()
 
     chapter.content = sanitize_chapter_content(
-        _provider_chat(
+        _supervised_provider_chat(
+            session,
+            run,
             client,
             draft_provider_name,
             draft_model_name,
@@ -1004,6 +1080,9 @@ def _draft_chapter(
                 run.summary_context or "",
                 plan,
             ),
+            stage="chapter_draft",
+            chapter_number=chapter.chapter_number,
+            metadata={"label": f"chapter {chapter.chapter_number} draft"},
         )
     )
     if not chapter.content.strip():
@@ -1016,6 +1095,8 @@ def _draft_chapter(
     run.current_step = "chapter_revision"
     lint_result = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
     critique = _generate_structured_output(
+        session,
+        run,
         client,
         critique_provider_name,
         critique_model_name,
@@ -1030,6 +1111,8 @@ def _draft_chapter(
         ),
         parse_chapter_critique,
         f"chapter {chapter.chapter_number} critique",
+        "chapter_critique",
+        chapter.chapter_number,
     )
     combined_critique = _combine_chapter_feedback(critique, lint_result)
     _persist_structured_qa(chapter, combined_critique)
@@ -1051,7 +1134,9 @@ def _draft_chapter(
         session.commit()
         revision_provider_name, revision_model_name = _resolve_stage_route(client, run, "chapter_revision")
         chapter.content = sanitize_chapter_content(
-            _provider_chat(
+            _supervised_provider_chat(
+                session,
+                run,
                 client,
                 revision_provider_name,
                 revision_model_name,
@@ -1065,6 +1150,12 @@ def _draft_chapter(
                     combined_critique,
                     combined_critique.blocking_issues + combined_critique.soft_warnings,
                 ),
+                stage="chapter_revision",
+                chapter_number=chapter.chapter_number,
+                metadata={
+                    "label": f"chapter {chapter.chapter_number} revision",
+                    "repair_scope": combined_critique.repair_scope,
+                },
             )
         )
         if not chapter.content.strip():
@@ -1074,6 +1165,8 @@ def _draft_chapter(
 
         final_lint = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
         final_critique = _generate_structured_output(
+            session,
+            run,
             client,
             critique_provider_name,
             critique_model_name,
@@ -1088,6 +1181,8 @@ def _draft_chapter(
             ),
             parse_chapter_critique,
             f"chapter {chapter.chapter_number} post-repair critique",
+            "chapter_critique",
+            chapter.chapter_number,
         )
         combined_critique = _combine_chapter_feedback(final_critique, final_lint)
         _persist_structured_qa(chapter, combined_critique)
@@ -1096,23 +1191,32 @@ def _draft_chapter(
     _ensure_not_canceled(session, run)
     summary_provider_name, summary_model_name = _resolve_stage_route(client, run, "chapter_summary")
     run.current_step = "chapter_summary"
-    chapter.summary = _provider_chat(
+    chapter.summary = _supervised_provider_chat(
+        session,
+        run,
         client,
         summary_provider_name,
         summary_model_name,
         build_summary_messages(chapter, outline_entry),
+        stage="chapter_summary",
+        chapter_number=chapter.chapter_number,
+        metadata={"label": f"chapter {chapter.chapter_number} summary"},
     ).strip()
     if not chapter.summary:
         raise RuntimeError(f"Chapter {chapter.chapter_number} summary was empty.")
 
     continuity_provider_name, continuity_model_name = _resolve_stage_route(client, run, "continuity_update")
     continuity_update = _generate_structured_output(
+        session,
+        run,
         client,
         continuity_provider_name,
         continuity_model_name,
         lambda: build_continuity_update_messages(project, chapter, ledger, story_bible),
         parse_continuity_update,
         f"chapter {chapter.chapter_number} continuity update",
+        "continuity_update",
+        chapter.chapter_number,
     )
     ledger_after = _ledger_from_update(ledger, continuity_update)
     ledger_after = _ledger_with_chapter_mode(ledger_after, chapter.chapter_number, outline_entry.chapter_mode)
@@ -1157,12 +1261,15 @@ def _run_manuscript_qa(
     session.commit()
     try:
         qa_report = _generate_structured_output(
+            session,
+            run,
             client,
             provider_name,
             model_name,
             lambda: build_manuscript_qa_messages(run.project, story_bible, lint_findings, chapters),
             parse_manuscript_qa_report,
             "manuscript QA report",
+            "manuscript_qa",
         )
     except Exception as exc:
         fallback_message = (
@@ -1316,12 +1423,15 @@ def _run_developmental_rewrite(
     session.commit()
     try:
         plan = _generate_structured_output(
+            session,
+            run,
             client,
             provider_name,
             model_name,
             lambda: build_developmental_rewrite_messages(run.project, story_bible, continuity_ledger, qa_report, chapters),
             parse_developmental_rewrite_plan,
             "developmental rewrite plan",
+            "developmental_rewrite",
         )
     except Exception as exc:
         record_event(
