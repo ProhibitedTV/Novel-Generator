@@ -17,7 +17,11 @@ logger = logging.getLogger(__name__)
 def recover_incomplete_runs(settings: Settings) -> None:
     session_factory = build_session_factory(settings)
     with session_factory() as session:
-        count = recover_running_runs(session, reason="worker_startup")
+        count = recover_running_runs(
+            session,
+            stale_after_seconds=settings.run_stale_after_seconds,
+            reason="worker_startup",
+        )
         session.commit()
         if count:
             logger.info("Recovered %s interrupted runs.", count)

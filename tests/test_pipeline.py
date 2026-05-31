@@ -8,6 +8,7 @@ from novel_generator.models import ChapterStatus, RunStatus
 from novel_generator.repositories import create_project, create_run, get_run, list_stage_attempts, recover_running_runs
 from novel_generator.schemas import ProjectCreate, RunCreate
 from novel_generator.services.pipeline import process_run_safe
+from novel_generator.services.runner import recover_incomplete_runs
 from novel_generator.services.state import approve_outline_review, resume_failed_run
 from novel_generator.settings import get_settings
 
@@ -1308,4 +1309,30 @@ def test_recover_running_runs_uses_stale_heartbeat_threshold(configured_environm
         assert recovered == 1
         assert refreshed_stale.status == RunStatus.QUEUED
         assert refreshed_stale.events[-1].payload["recovery_reason"] == "stale_heartbeat"
+        assert refreshed_fresh.status == RunStatus.RUNNING
+
+
+def test_worker_startup_recovery_only_requeues_stale_runs(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=2)
+        stale = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        stale.status = RunStatus.RUNNING
+        stale.last_heartbeat_at = datetime.utcnow() - timedelta(seconds=7200)
+        fresh = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        fresh.status = RunStatus.RUNNING
+        fresh.last_heartbeat_at = datetime.utcnow()
+        session.commit()
+
+        stale_id = stale.id
+        fresh_id = fresh.id
+
+    recover_incomplete_runs(settings)
+
+    with session_factory() as session:
+        refreshed_stale = get_run(session, stale_id)
+        refreshed_fresh = get_run(session, fresh_id)
+        assert refreshed_stale.status == RunStatus.QUEUED
+        assert refreshed_stale.events[-1].payload["recovery_reason"] == "worker_startup"
         assert refreshed_fresh.status == RunStatus.RUNNING
