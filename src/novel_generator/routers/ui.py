@@ -9,10 +9,11 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_app_settings, get_db, get_templates
-from ..models import ChapterStatus, GenerationRun, Project, RunStatus
+from ..models import ChapterStatus, GenerationRun, Project, RunStageAttempt, RunStatus
 from ..repositories import (
     create_project,
     create_run,
@@ -229,6 +230,34 @@ RUN_STAGE_PROGRESS_ORDER = [
     "chapter_edit",
     "export",
     "completed",
+]
+CALIBRATION_STAGE_GROUPS = [
+    {
+        "id": "structured",
+        "label": "Structured/support",
+        "description": "JSON-heavy planning, continuity, QA, and editorial control stages.",
+        "stages": {
+            "story_bible",
+            "outline",
+            "chapter_plan",
+            "chapter_critique",
+            "chapter_summary",
+            "continuity_update",
+            "manuscript_qa",
+            "developmental_rewrite",
+        },
+    },
+    {
+        "id": "prose",
+        "label": "Prose/editing",
+        "description": "Longer creative drafting, targeted rewrite, and final chapter polish stages.",
+        "stages": {
+            "chapter_draft",
+            "chapter_revision",
+            "developmental_revision",
+            "chapter_edit",
+        },
+    },
 ]
 QUALITY_SIGNAL_DEFS = [
     {"field": "forward_motion_score", "label": "Forward motion", "lower_is_better": False},
@@ -1523,6 +1552,168 @@ def _provider_option_rows(configs_by_name: dict[str, Any], statuses_by_name: dic
     return rows
 
 
+def _stage_display_label(stage_id: str) -> str:
+    stage = RUN_STAGE_LOOKUP.get(stage_id)
+    if stage:
+        return stage["label"]
+    return stage_id.replace("_", " ").title()
+
+
+def _average_int(values: list[int]) -> int | None:
+    if not values:
+        return None
+    return int(round(sum(values) / len(values)))
+
+
+def _format_calibration_duration(duration_ms: int | None) -> str:
+    if duration_ms is None:
+        return "-"
+    seconds = max(0, duration_ms) / 1000
+    if seconds >= 60:
+        return f"{seconds / 60:.1f}m"
+    if seconds >= 10:
+        return f"{int(round(seconds))}s"
+    return f"{seconds:.1f}s"
+
+
+def _calibration_badge(total: int, success_rate: int | None) -> dict[str, str]:
+    if total == 0:
+        return {"label": "No evidence", "tone": "queued"}
+    if total < 3:
+        return {"label": "Needs more data", "tone": "running"}
+    if success_rate is not None and success_rate >= 90:
+        return {"label": "Strong evidence", "tone": "completed"}
+    if success_rate is not None and success_rate >= 75:
+        return {"label": "Usable evidence", "tone": "running"}
+    return {"label": "Watch failures", "tone": "failed"}
+
+
+def _attempt_summary(attempts: list[RunStageAttempt]) -> dict[str, Any]:
+    total = len(attempts)
+    successes = sum(1 for attempt in attempts if attempt.status == "success")
+    failures = sum(1 for attempt in attempts if attempt.status == "failed")
+    running = sum(1 for attempt in attempts if attempt.status == "running")
+    completed_total = successes + failures
+    success_rate = int(round((successes / completed_total) * 100)) if completed_total else None
+    durations = [int(attempt.duration_ms) for attempt in attempts if attempt.duration_ms is not None]
+    output_lengths = [int(attempt.output_chars or 0) for attempt in attempts if attempt.status == "success"]
+    badge = _calibration_badge(completed_total, success_rate)
+    return {
+        "total": total,
+        "successes": successes,
+        "failures": failures,
+        "running": running,
+        "completed_total": completed_total,
+        "success_rate": success_rate,
+        "success_rate_label": f"{success_rate}%" if success_rate is not None else "-",
+        "avg_duration_ms": _average_int(durations),
+        "avg_duration_label": _format_calibration_duration(_average_int(durations)),
+        "avg_output_chars": _average_int(output_lengths),
+        "avg_output_label": f"{_average_int(output_lengths):,}" if output_lengths else "-",
+        "badge_label": badge["label"],
+        "badge_tone": badge["tone"],
+    }
+
+
+def _calibration_recommendation(
+    model_label: str,
+    summary: dict[str, Any],
+    category_summaries: dict[str, dict[str, Any]],
+) -> str:
+    structured = category_summaries.get("structured", {})
+    prose = category_summaries.get("prose", {})
+    if summary["failures"] and (summary["success_rate"] or 0) < 75:
+        return f"Keep {model_label} manual-only until the failed stages are understood."
+    if summary["completed_total"] < 3:
+        return f"Benchmark {model_label} on a short run before routing long books to it."
+    structured_ready = structured.get("completed_total", 0) >= 3 and (structured.get("success_rate") or 0) >= 85
+    prose_ready = prose.get("completed_total", 0) >= 2 and (prose.get("success_rate") or 0) >= 85
+    if structured_ready and not prose_ready:
+        return f"Candidate for structured/support routing; keep prose stages on the current default."
+    if structured_ready and prose_ready:
+        return f"Candidate for broader draft-profile routing after one more observed long run."
+    if prose_ready:
+        return f"Prose/editing stages look promising; gather more structured-stage evidence first."
+    return f"Keep routing manual and watch the next run for stage-specific behavior."
+
+
+def _model_calibration_context(db: Session, *, recent_limit: int = 500) -> dict[str, Any]:
+    attempts = list(
+        db.scalars(
+            select(RunStageAttempt)
+            .order_by(RunStageAttempt.started_at.desc(), RunStageAttempt.id.desc())
+            .limit(recent_limit)
+        )
+    )
+    finished_attempts = [attempt for attempt in attempts if attempt.status in {"success", "failed"}]
+    models: dict[tuple[str, str], dict[str, Any]] = {}
+    for attempt in attempts:
+        provider_name = str(attempt.provider_name or "unknown").strip() or "unknown"
+        model_name = str(attempt.model_name or "unknown").strip() or "unknown"
+        key = (provider_name, model_name)
+        if key not in models:
+            try:
+                provider_label = provider_definition(provider_name).label
+            except ProviderError:
+                provider_label = provider_name
+            models[key] = {
+                "provider_name": provider_name,
+                "provider_label": provider_label,
+                "model_name": model_name,
+                "attempts": [],
+                "stage_attempts": {},
+            }
+        models[key]["attempts"].append(attempt)
+        models[key]["stage_attempts"].setdefault(attempt.stage, []).append(attempt)
+
+    model_rows: list[dict[str, Any]] = []
+    for row in models.values():
+        summary = _attempt_summary(row["attempts"])
+        category_rows: list[dict[str, Any]] = []
+        category_summaries: dict[str, dict[str, Any]] = {}
+        for group in CALIBRATION_STAGE_GROUPS:
+            group_attempts = [attempt for attempt in row["attempts"] if attempt.stage in group["stages"]]
+            group_summary = _attempt_summary(group_attempts)
+            category_summaries[group["id"]] = group_summary
+            category_rows.append({**group, **group_summary})
+
+        stage_rows = []
+        for stage_id, stage_attempts in sorted(
+            row["stage_attempts"].items(),
+            key=lambda item: (-len(item[1]), _stage_display_label(item[0])),
+        ):
+            stage_rows.append(
+                {
+                    "stage_id": stage_id,
+                    "stage_label": _stage_display_label(stage_id),
+                    **_attempt_summary(stage_attempts),
+                }
+            )
+
+        model_label = f"{row['provider_label']} / {row['model_name']}"
+        model_rows.append(
+            {
+                **row,
+                **summary,
+                "model_label": model_label,
+                "categories": category_rows,
+                "stages": stage_rows[:6],
+                "recommendation": _calibration_recommendation(model_label, summary, category_summaries),
+            }
+        )
+
+    model_rows.sort(key=lambda row: (row["completed_total"], row["successes"], row["model_label"]), reverse=True)
+    overall = _attempt_summary(finished_attempts)
+    return {
+        "has_data": bool(finished_attempts),
+        "attempt_window": len(attempts),
+        "model_count": len(model_rows),
+        "models": model_rows[:6],
+        "summary": overall,
+        "manual_note": "Calibration is advisory only. Provider defaults and per-stage routes change only when you save them.",
+    }
+
+
 def _validate_provider_selection(
     provider_name: str,
     model_name: str,
@@ -2453,6 +2644,7 @@ def _provider_settings_context(
             len(projects),
         ),
         "setup_steps": _onboarding_steps(provider_config, provider_status or saved_status, projects),
+        "model_calibration": _model_calibration_context(db),
         "page_error": page_error,
     }
 

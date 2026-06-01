@@ -7,6 +7,7 @@ from novel_generator.dependencies import get_session_factory
 from novel_generator.models import Artifact, ChapterStatus, RunStatus
 from novel_generator.repositories import (
     begin_stage_attempt,
+    complete_stage_attempt,
     create_chapters_from_outline,
     create_project,
     create_run,
@@ -439,6 +440,54 @@ def test_provider_settings_validation_and_live_actions_render(client, monkeypatc
     assert "Runs locally on your configured Ollama host." in response.text
     assert "This route may send manuscript text and story data to the configured external provider." in response.text
     assert "Full novel runs can use large prompts" in response.text
+
+
+def test_provider_settings_renders_attempt_ledger_model_calibration(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        OllamaClient,
+        "health",
+        lambda self, default_model: reachable_status(default_model, ["gemma4:e4b", "qwen3:14b"]),
+    )
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        for stage in ("story_bible", "outline", "chapter_plan"):
+            attempt = begin_stage_attempt(
+                session,
+                run,
+                stage=stage,
+                chapter_number=None,
+                provider_name="ollama",
+                model_name="gemma4:e4b",
+                metadata={"label": stage},
+            )
+            complete_stage_attempt(session, attempt, '{"ok": true}')
+        prose_attempt = begin_stage_attempt(
+            session,
+            run,
+            stage="chapter_draft",
+            chapter_number=1,
+            provider_name="ollama",
+            model_name="qwen3:14b",
+            metadata={"label": "draft chapter"},
+        )
+        fail_stage_attempt(session, prose_attempt, RuntimeError("draft timed out"))
+        session.commit()
+
+    response = client.get("/settings/provider")
+
+    assert response.status_code == 200
+    assert "Model calibration" in response.text
+    assert "Calibration is advisory only" in response.text
+    assert "Ollama / gemma4:e4b" in response.text
+    assert "Candidate for structured/support routing" in response.text
+    assert "Structured/support: 100% / 3 calls" in response.text
+    assert "Ollama / qwen3:14b" in response.text
+    assert "Keep Ollama / qwen3:14b manual-only" in response.text
+    assert "Draft chapter 0%" in response.text
 
 
 def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> None:
