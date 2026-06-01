@@ -115,8 +115,9 @@ The generation pipeline is designed to finish a complete book package, even for 
 5. Persist progress after each step.
 6. Run manuscript QA after the full draft is assembled.
 7. Build a standard developmental rewrite plan and revised-outline report.
-8. Line-edit each saved chapter for polish while preserving approved story state.
-9. Run final manuscript QA, then export Markdown, DOCX, and QA artifacts.
+8. Apply targeted developmental revision waves to chapters marked for structural action.
+9. Line-edit each saved chapter for polish while preserving approved story state.
+10. Run final manuscript QA, then export Markdown, DOCX, and QA artifacts.
 
 ## Self-Hosting Notes
 

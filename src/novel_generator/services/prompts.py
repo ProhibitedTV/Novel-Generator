@@ -14,6 +14,7 @@ from ..schemas import (
     ChapterCritique,
     ChapterPlan,
     ContinuityLedger,
+    DevelopmentalChapterAction,
     DevelopmentalRewritePlan,
     ManuscriptQaReport,
     StoryBible,
@@ -1140,6 +1141,56 @@ def build_chapter_edit_messages(
                 "- honor the style profile and selected genre profile without imitating any protected style reference\n"
                 "- keep roughly the same length unless trimming improves repetition or clarity\n\n"
                 "Return final edited chapter prose only."
+            ),
+        },
+    ]
+
+
+def build_developmental_revision_messages(
+    project: Project,
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+    qa_report: ManuscriptQaReport,
+    developmental_action: DevelopmentalChapterAction | dict[str, Any],
+) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    action = developmental_action if isinstance(developmental_action, dict) else developmental_action.model_dump()
+    profile = _story_bible_genre_profile(bible)
+    continuity_payload = _chapter_continuity_payload(chapter)
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a structural fiction reviser applying a developmental editor's chapter action. "
+                "Return revised chapter prose only, with no heading, notes, JSON, markdown fences, or explanation."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Apply the developmental revision action to chapter {chapter.chapter_number} of '{project.title}'.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Chapter continuity state:\n{json.dumps(continuity_payload, indent=2)}\n\n"
+                f"Current continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Developmental action:\n{json.dumps(action, indent=2)}\n\n"
+                f"Manuscript QA context:\n{json.dumps(_qa_editing_context(qa_report), indent=2)}\n\n"
+                f"Current chapter prose:\n{chapter.content or ''}\n\n"
+                "Developmental revision rules:\n"
+                "- preserve the approved chapter number, POV, named entities, canon, and the core continuity outcome unless the action explicitly requires a sharper consequence\n"
+                "- if action is rewrite, rebuild the weakest structural beats so required_story_change and permanent_consequence happen visibly on the page\n"
+                "- if action is bridge, add connective motivation, causality, or aftermath inside the existing chapter rather than adding a detached scene\n"
+                "- if action is merge or cut, compress repeated material and make the chapter carry only the permanent consequence that must survive\n"
+                "- if action is reorder, clarify causality and before/after state without changing the approved outline order\n"
+                "- make the chapter less cuttable by adding one irreversible protagonist choice, cost, reveal, relationship fracture, or world-state change\n"
+                "- keep continuity stable with the chapter continuity state and current ledger\n"
+                "- do not include an editorial memo, diff, heading, outline summary, or future-planning language\n\n"
+                "Return revised chapter prose only."
             ),
         },
     ]
