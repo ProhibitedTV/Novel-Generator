@@ -194,6 +194,76 @@
     </div>
 
     <div class="support-stack">
+      <section class="support-block" data-model-calibration>
+        <div class="section-header-copy">
+          <h3>Model calibration</h3>
+          <p>Recent attempt-ledger evidence for manual stage routing. {{ model_calibration.manual_note }}</p>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric-card">
+            <span class="detail-label">Recent attempts</span>
+            <strong>{{ model_calibration.summary.completed_total }}</strong>
+            <span class="field-note">{{ model_calibration.summary.successes }} success / {{ model_calibration.summary.failures }} failed</span>
+          </div>
+          <div class="metric-card">
+            <span class="detail-label">Success rate</span>
+            <strong>{{ model_calibration.summary.success_rate_label }}</strong>
+            <span class="field-note">Completed model calls only</span>
+          </div>
+          <div class="metric-card">
+            <span class="detail-label">Observed models</span>
+            <strong>{{ model_calibration.model_count }}</strong>
+            <span class="field-note">Last {{ model_calibration.attempt_window }} ledger rows</span>
+          </div>
+        </div>
+
+        {% if model_calibration.has_data %}
+          <div class="support-stack">
+            {% for model in model_calibration.models %}
+              <section class="support-block">
+                <div class="section-header">
+                  <div class="section-header-copy">
+                    <h4 class="run-row-title">{{ model.model_label }}</h4>
+                    <p>{{ model.recommendation }}</p>
+                  </div>
+                  <span class="badge status-{{ model.badge_tone }}">{{ model.badge_label }}</span>
+                </div>
+
+                <div class="detail-list compact-details">
+                  <div class="detail-item inline-detail">
+                    <span class="detail-label">Attempts</span>
+                    <span class="detail-value">{{ model.completed_total }}</span>
+                  </div>
+                  <div class="detail-item inline-detail">
+                    <span class="detail-label">Success rate</span>
+                    <span class="detail-value">{{ model.success_rate_label }}</span>
+                  </div>
+                  <div class="detail-item inline-detail">
+                    <span class="detail-label">Avg duration</span>
+                    <span class="detail-value">{{ model.avg_duration_label }}</span>
+                  </div>
+                </div>
+
+                <div class="disclosure-stage-list">
+                  {% for category in model.categories %}
+                    <span class="meta-chip">{{ category.label }}: {{ category.success_rate_label }} / {{ category.completed_total }} calls</span>
+                  {% endfor %}
+                </div>
+
+                <div class="disclosure-stage-list">
+                  {% for stage in model.stages %}
+                    <span class="meta-chip">{{ stage.stage_label }} {{ stage.success_rate_label }}</span>
+                  {% endfor %}
+                </div>
+              </section>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty-state">No completed attempt rows yet. Run a short benchmark or a small project before changing long-book routing.</p>
+        {% endif %}
+      </section>
+
       <section class="support-block">
         <div class="section-header-copy">
           <h3>Recommended setup flow</h3>
