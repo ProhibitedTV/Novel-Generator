@@ -793,6 +793,94 @@ def test_completed_run_can_create_publication_export(client, monkeypatch) -> Non
         assert any(event.event_type == "publication_export_created" for event in run.events)
 
 
+def test_completed_long_run_renders_manuscript_edition_workspace(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.COMPLETED
+        run.current_step = "completed"
+        run.requested_chapters = 64
+        run.target_word_count = 64000
+        run.outline = [outline_entry(chapter_number, total_chapters=64) for chapter_number in range(1, 65)]
+        create_chapters_from_outline(session, run)
+        for chapter in run.chapters:
+            chapter.status = ChapterStatus.COMPLETED
+            chapter.content = f"Completed chapter {chapter.chapter_number} prose with a concrete final beat."
+            chapter.summary = f"Summary for chapter {chapter.chapter_number}."
+            chapter.word_count = 700 if chapter.chapter_number == 8 else 1000
+            chapter.continuity_update = {"chapter_outcome": f"Outcome {chapter.chapter_number}"}
+            chapter.qa_notes = {
+                "strengths": ["Stable chapter motion."],
+                "warnings": ["Ending still needs a sharper object."] if chapter.chapter_number == 8 else [],
+                "revision_required": chapter.chapter_number == 8,
+                "ending_concreteness_score": 4 if chapter.chapter_number == 8 else 8,
+                "technical_escalation_fatigue_score": 7 if chapter.chapter_number == 8 else 2,
+            }
+            record_event(
+                session,
+                run,
+                "final_chapter_edit_completed",
+                {"chapter_number": chapter.chapter_number, "message": f"Final edit completed for chapter {chapter.chapter_number}."},
+            )
+        run.artifacts.append(
+            Artifact(
+                kind="markdown",
+                filename="manuscript.md",
+                relative_path=f"{run.id}/manuscript.md",
+                content_type="text/markdown",
+            )
+        )
+        run.artifacts.append(
+            Artifact(
+                kind="docx",
+                filename="manuscript.docx",
+                relative_path=f"{run.id}/manuscript.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        )
+        run.artifacts.append(
+            Artifact(
+                kind="qa-report",
+                filename="qa-report.md",
+                relative_path=f"{run.id}/qa-report.md",
+                content_type="text/markdown",
+            )
+        )
+        run.artifacts.append(
+            Artifact(
+                kind="publication-docx",
+                filename="publication-print-6x9.docx",
+                relative_path=f"{run.id}/publication-print-6x9.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        )
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert 'data-edition-workspace' in response.text
+    assert "Edition snapshot" in response.text
+    assert "Current generated edition #1" in response.text
+    assert "Word-count map" in response.text
+    assert response.text.count("data-edition-word-row") == 64
+    assert 'data-edition-artifact-group="manuscript"' in response.text
+    assert 'data-edition-artifact-group="publication"' in response.text
+    assert 'data-edition-artifact-group="editorial"' in response.text
+    assert "64 / 64" in response.text
+    assert "Below target" in response.text
+    assert "Edited" in response.text
+    assert "Risk" in response.text
+    assert 'data-chapter-final-edit="true"' in response.text
+    assert "Final edit saved" in response.text
+    assert "Open risky" in response.text
+    assert "Collapse all" in response.text
+
+
 def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
     _, run_id = seed_project_and_run()

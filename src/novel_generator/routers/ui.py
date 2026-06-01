@@ -1834,7 +1834,21 @@ def _review_chip(label: str, tone: str = "neutral") -> dict[str, str]:
     return {"label": label, "tone": tone}
 
 
-def _chapter_status_chips(chapter: Any) -> list[dict[str, str]]:
+def _chapter_final_edit_numbers(run: GenerationRun) -> set[int]:
+    numbers: set[int] = set()
+    for event in _sorted_run_events(run):
+        if event.event_type != "final_chapter_edit_completed":
+            continue
+        try:
+            chapter_number = int((event.payload or {}).get("chapter_number") or 0)
+        except (TypeError, ValueError):
+            chapter_number = 0
+        if chapter_number:
+            numbers.add(chapter_number)
+    return numbers
+
+
+def _chapter_status_chips(chapter: Any, *, final_edit_completed: bool = False) -> list[dict[str, str]]:
     chips: list[dict[str, str]] = []
     if chapter.word_count:
         chips.append(_review_chip(f"{chapter.word_count} words", "neutral"))
@@ -1844,6 +1858,8 @@ def _chapter_status_chips(chapter: Any) -> list[dict[str, str]]:
         chips.append(_review_chip("Continuity updated", "success"))
     if chapter.qa_notes:
         chips.append(_review_chip("QA stored", "success"))
+    if final_edit_completed:
+        chips.append(_review_chip("Final edit saved", "success"))
     if chapter.content:
         chips.append(_review_chip("Preview ready", "success"))
     if chapter.error_message:
@@ -1895,18 +1911,157 @@ def _chapter_continuity_chips(chapter: Any) -> list[dict[str, str]]:
 
 def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
+    final_edit_numbers = _chapter_final_edit_numbers(run)
     for chapter in _sorted_run_chapters(run):
         risk_chips = _chapter_risk_chips(chapter)
+        final_edit_completed = chapter.chapter_number in final_edit_numbers
         cards.append(
             {
                 "chapter": chapter,
-                "status_chips": _chapter_status_chips(chapter),
+                "status_chips": _chapter_status_chips(chapter, final_edit_completed=final_edit_completed),
                 "risk_chips": risk_chips,
                 "continuity_chips": _chapter_continuity_chips(chapter),
                 "has_risk": any(chip["tone"] in {"risk", "warning"} for chip in risk_chips),
+                "final_edit_completed": final_edit_completed,
             }
         )
     return cards
+
+
+def _artifact_group_context(run: GenerationRun) -> list[dict[str, Any]]:
+    groups = [
+        {
+            "id": "manuscript",
+            "label": "Manuscript exports",
+            "description": "Primary draft files generated from the latest saved chapter prose.",
+            "empty": "Draft manuscript exports appear after the run completes.",
+            "artifacts": [],
+        },
+        {
+            "id": "publication",
+            "label": "Publication helpers",
+            "description": "Optional ebook and print-helper outputs created from the completed run.",
+            "empty": "Create an ebook or print-helper export when this edition is ready for formatting review.",
+            "artifacts": [],
+        },
+        {
+            "id": "editorial",
+            "label": "Editorial reports",
+            "description": "QA and developmental planning artifacts for deciding the next revision move.",
+            "empty": "QA and editorial reports appear when their stages finish.",
+            "artifacts": [],
+        },
+    ]
+    lookup = {group["id"]: group for group in groups}
+    for artifact in sorted(run.artifacts, key=lambda item: (item.kind, item.filename)):
+        if artifact.kind in {"markdown", "docx"}:
+            lookup["manuscript"]["artifacts"].append(artifact)
+        elif artifact.kind.startswith("publication-"):
+            lookup["publication"]["artifacts"].append(artifact)
+        else:
+            lookup["editorial"]["artifacts"].append(artifact)
+    return groups
+
+
+def _manuscript_edition_context(run: GenerationRun, chapter_cards: list[dict[str, Any]]) -> dict[str, Any]:
+    chapters = _sorted_run_chapters(run)
+    completed_runs = [
+        candidate
+        for candidate in _sort_runs(run.project)
+        if candidate.status == RunStatus.COMPLETED
+    ]
+    completed_oldest_first = list(reversed(completed_runs))
+    completed_ids = [candidate.id for candidate in completed_oldest_first]
+    edition_number = (
+        completed_ids.index(run.id) + 1
+        if run.id in completed_ids
+        else len(completed_oldest_first) + 1
+    )
+    latest_completed = completed_runs[0] if completed_runs else None
+    is_current_edition = run.status == RunStatus.COMPLETED and latest_completed is not None and latest_completed.id == run.id
+    total_words = _run_word_count(run)
+    completed_chapters = len([chapter for chapter in chapters if chapter.status == ChapterStatus.COMPLETED and chapter.content])
+    qa_chapters = len([chapter for chapter in chapters if chapter.qa_notes])
+    final_edit_numbers = _chapter_final_edit_numbers(run)
+    risk_chapters = [card for card in chapter_cards if card["has_risk"]]
+    missing_chapters = [chapter for chapter in chapters if not chapter.content]
+    manuscript_artifacts = [artifact for artifact in run.artifacts if artifact.kind in {"markdown", "docx"}]
+    publication_artifacts = [artifact for artifact in run.artifacts if artifact.kind.startswith("publication-")]
+    qa_artifact = next((artifact for artifact in run.artifacts if artifact.kind == "qa-report"), None)
+    primary_artifact = next((artifact for artifact in manuscript_artifacts if artifact.kind == "docx"), None) or next(
+        (artifact for artifact in manuscript_artifacts if artifact.kind == "markdown"),
+        None,
+    )
+
+    word_rows: list[dict[str, Any]] = []
+    within_target_count = 0
+    for card in chapter_cards:
+        chapter = card["chapter"]
+        word_count = int(chapter.word_count or 0)
+        if not chapter.content:
+            tone = "pending"
+            label = "Missing prose"
+        elif word_count < run.min_words_per_chapter:
+            tone = "warning"
+            label = "Below target"
+        elif word_count > run.max_words_per_chapter:
+            tone = "warning"
+            label = "Above target"
+        else:
+            tone = "success"
+            label = "In range"
+            within_target_count += 1
+        word_rows.append(
+            {
+                "chapter_number": chapter.chapter_number,
+                "title": chapter.title,
+                "word_count": word_count,
+                "tone": tone,
+                "label": label,
+                "has_risk": card["has_risk"],
+                "final_edit_completed": card["final_edit_completed"],
+                "status": chapter.status.value,
+            }
+        )
+
+    shortest = min((row for row in word_rows if row["word_count"]), key=lambda row: row["word_count"], default=None)
+    longest = max((row for row in word_rows if row["word_count"]), key=lambda row: row["word_count"], default=None)
+    average_words = round(total_words / completed_chapters) if completed_chapters else 0
+
+    if run.status == RunStatus.COMPLETED and is_current_edition:
+        snapshot_label = "Current generated edition"
+    elif run.status == RunStatus.COMPLETED:
+        snapshot_label = "Earlier completed edition"
+    elif run.status in TERMINAL_STATUSES:
+        snapshot_label = "Partial run snapshot"
+    else:
+        snapshot_label = "In-progress edition draft"
+
+    return {
+        "show": bool(chapters) or bool(run.artifacts),
+        "snapshot_label": snapshot_label,
+        "edition_number": edition_number,
+        "is_current_edition": is_current_edition,
+        "complete": run.status == RunStatus.COMPLETED and not missing_chapters,
+        "total_words": total_words,
+        "target_words": run.target_word_count,
+        "word_percent": _word_progress_percent(run),
+        "average_words": average_words,
+        "shortest": shortest,
+        "longest": longest,
+        "completed_chapters": completed_chapters,
+        "requested_chapters": run.requested_chapters,
+        "qa_chapters": qa_chapters,
+        "final_edit_chapters": len(final_edit_numbers),
+        "risk_chapters": len(risk_chapters),
+        "missing_chapters": len(missing_chapters),
+        "within_target_count": within_target_count,
+        "word_rows": word_rows,
+        "artifact_groups": _artifact_group_context(run),
+        "primary_artifact": primary_artifact,
+        "qa_artifact": qa_artifact,
+        "publication_artifacts": publication_artifacts,
+    }
 
 
 def _book_completion_context(run: GenerationRun) -> dict[str, Any]:
@@ -1944,7 +2099,8 @@ def _book_completion_context(run: GenerationRun) -> dict[str, Any]:
         row("Manuscript exports", manuscript_artifact_count, 1),
     ]
     required_complete = all(item["complete"] for item in rows)
-    percent = round((sum(min(item["current"], item["target"]) for item in rows) / sum(item["target"] for item in rows)) * 100)
+    raw_percent = round((sum(min(item["current"], item["target"]) for item in rows) / sum(item["target"] for item in rows)) * 100)
+    percent = raw_percent if required_complete else min(99, raw_percent)
     if run.status == RunStatus.COMPLETED and required_complete:
         title = "Complete book package"
         body = "All requested chapters, continuity checkpoints, QA, final edit, and manuscript exports are present."
@@ -3064,6 +3220,7 @@ def run_detail(
             "outline_review": outline_review,
             "chapter_review_cards": chapter_review_cards,
             "book_completion": _book_completion_context(run),
+            "manuscript_edition": _manuscript_edition_context(run, chapter_review_cards),
             "editorial_next_step": _run_editorial_next_step_context(run, chapter_review_cards),
             "story_bible": run.story_bible or {},
             "continuity_ledger": run.continuity_ledger or {},
