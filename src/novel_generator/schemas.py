@@ -929,7 +929,7 @@ class RunCreate(BaseModel):
     min_words_per_chapter: int | None = Field(default=None, ge=1)
     max_words_per_chapter: int | None = Field(default=None, ge=1)
     pause_after_outline: bool = True
-    developmental_rewrite_enabled: bool = False
+    developmental_rewrite_enabled: bool = True
     quality_profile: str = "balanced"
     task_routing: TaskRouting | None = None
     source_run_id: str | None = None

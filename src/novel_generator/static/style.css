@@ -304,6 +304,73 @@ textarea:focus-visible {
   padding: 1.4rem;
 }
 
+.project-premise-preview,
+.project-card .chapter-copy,
+.run-row-event {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.project-premise-preview {
+  -webkit-line-clamp: 4;
+}
+
+.project-card .chapter-copy {
+  -webkit-line-clamp: 5;
+}
+
+.run-row-event {
+  -webkit-line-clamp: 3;
+}
+
+.project-brief-details {
+  margin: 0.85rem 0;
+}
+
+.project-brief-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.project-brief-body p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.project-command-bar {
+  position: sticky;
+  top: 0.75rem;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  padding: 0.82rem 0.9rem;
+  border: 1px solid rgba(23, 106, 90, 0.22);
+  border-radius: var(--radius);
+  background: rgba(255, 252, 246, 0.96);
+  box-shadow: 0 14px 30px rgba(45, 37, 28, 0.12);
+}
+
+.project-command-summary {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.project-command-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.project-command-actions .button {
+  padding: 0.62rem 0.82rem;
+}
+
 .hero-card h1,
 .panel h1,
 .panel h2,
@@ -702,6 +769,26 @@ dd {
 
 .outline-card.is-focused-outline {
   box-shadow: 0 0 0 3px rgba(23, 106, 90, 0.2), var(--shadow);
+}
+
+.outline-review-dock {
+  position: sticky;
+  bottom: 0.85rem;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  margin-top: 1rem;
+  padding: 0.82rem;
+  border: 1px solid rgba(23, 106, 90, 0.24);
+  border-radius: var(--radius);
+  background: rgba(255, 252, 246, 0.96);
+  box-shadow: 0 18px 38px rgba(45, 37, 28, 0.16);
+}
+
+.outline-review-dock .row-actions {
+  justify-content: flex-end;
 }
 
 .outline-warning-reasons {
@@ -1335,9 +1422,79 @@ dd {
   box-shadow: 0 20px 45px rgba(23, 106, 90, 0.12);
 }
 
+.chapter-card.is-focused-chapter {
+  box-shadow: 0 0 0 3px rgba(23, 106, 90, 0.18), var(--shadow);
+}
+
 .chapter-card p,
 .chapter-card details {
   margin: 0;
+}
+
+.chapter-review-toolbar {
+  display: grid;
+  gap: 0.85rem;
+  margin-bottom: 0.9rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.chapter-review-controls {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.8fr) minmax(7rem, 0.5fr) repeat(2, auto) auto;
+  gap: 0.55rem;
+  align-items: end;
+}
+
+.chapter-review-controls button {
+  min-height: 2.55rem;
+}
+
+.chapter-anchor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-height: 8.2rem;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.chapter-anchor {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--accent-strong);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.chapter-anchor:hover,
+.chapter-anchor:focus-visible {
+  border-color: rgba(23, 106, 90, 0.38);
+  background: rgba(23, 106, 90, 0.1);
+}
+
+.chapter-anchor.has-risk {
+  border-color: rgba(166, 66, 51, 0.28);
+  color: var(--danger);
+  background: rgba(166, 66, 51, 0.07);
+}
+
+.chapter-anchor.is-current {
+  border-color: rgba(23, 106, 90, 0.48);
+  background: rgba(23, 106, 90, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(23, 106, 90, 0.18);
+}
+
+.chapter-anchor.is-muted {
+  opacity: 0.32;
 }
 
 .chapter-topline {
@@ -1727,6 +1884,48 @@ code {
   padding: 0.72rem 0.85rem;
 }
 
+.length-preset-shell {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.72rem 0.78rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.length-preset-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.length-preset-row button {
+  width: 100%;
+  min-height: 2.45rem;
+  padding-inline: 0.55rem;
+}
+
+.run-estimate-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.run-estimate-strip > div {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+  padding: 0.68rem 0.72rem;
+  border: 1px solid rgba(217, 207, 192, 0.9);
+  border-radius: var(--radius);
+  background: rgba(247, 243, 235, 0.72);
+}
+
+.run-estimate-strip strong {
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
 .quality-profile-section {
   gap: 0.85rem;
 }
@@ -1859,6 +2058,96 @@ code {
   line-height: 1.22;
 }
 
+.run-progress-rails {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.progress-rail {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.72rem 0.78rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.progress-rail-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.progress-track {
+  width: 100%;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(28, 31, 38, 0.08);
+  overflow: hidden;
+}
+
+.progress-track span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(23, 106, 90, 0.7), rgba(23, 106, 90, 0.98));
+}
+
+.book-completion-panel {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+  padding: 0.95rem;
+  border: 1px solid rgba(23, 106, 90, 0.2);
+  border-radius: var(--radius);
+  background: rgba(23, 106, 90, 0.06);
+}
+
+.book-completion-score {
+  display: grid;
+  justify-items: end;
+  align-content: center;
+  gap: 0.1rem;
+  min-width: 7rem;
+}
+
+.book-completion-score strong {
+  font-size: clamp(1.55rem, 4vw, 2.25rem);
+  line-height: 1;
+  color: var(--accent-strong);
+}
+
+.book-completion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.55rem;
+}
+
+.book-completion-item {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+  padding: 0.62rem 0.68rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.book-completion-success {
+  border-color: rgba(18, 107, 63, 0.22);
+  background: rgba(18, 107, 63, 0.07);
+}
+
+.book-completion-warning {
+  border-color: rgba(184, 126, 24, 0.28);
+  background: rgba(184, 126, 24, 0.08);
+}
+
 .run-meta-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
@@ -1918,9 +2207,12 @@ code {
   .run-overview,
   .metric-grid,
   .run-setup-grid,
+  .project-command-bar,
   .run-status-strip,
+  .run-progress-rails,
   .run-meta-grid,
   .quality-profile-grid,
+  .run-estimate-strip,
   .preflight-grid,
   .management-grid,
   .quick-action-grid,
@@ -1936,6 +2228,10 @@ code {
 
   .shell-header {
     justify-items: start;
+  }
+
+  .project-command-actions {
+    justify-content: flex-start;
   }
 
   .project-card,
@@ -1981,12 +2277,18 @@ code {
 
   .outline-summary-strip,
   .outline-distribution-grid,
-  .outline-filter-bar {
+  .outline-filter-bar,
+  .outline-review-dock,
+  .chapter-review-controls {
     grid-template-columns: 1fr;
   }
 
   .outline-filter-actions {
     align-items: stretch;
+  }
+
+  .outline-review-dock .row-actions {
+    justify-content: flex-start;
   }
 
   .editorial-next-grid,
@@ -2026,15 +2328,46 @@ code {
   }
 
   .project-card dl,
+  .project-command-bar,
   .stats-grid,
   .story-bible-grid,
   .artifact-card,
   .run-stepper,
   .metric-grid,
   .run-status-strip,
+  .run-progress-rails,
+  .run-estimate-strip,
+  .length-preset-row,
   .run-setup-grid,
   .quick-action-grid {
     grid-template-columns: 1fr;
+  }
+
+  .book-completion-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .book-completion-score {
+    justify-items: start;
+  }
+
+  .project-command-bar {
+    position: static;
+  }
+
+  .project-command-actions,
+  .project-command-actions .button {
+    width: 100%;
+  }
+
+  .project-command-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-review-toolbar,
+  .outline-review-dock {
+    position: static;
   }
 
   .model-chip-list {

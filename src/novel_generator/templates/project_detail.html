@@ -8,17 +8,24 @@
     <div class="page-header-copy">
       <p class="eyebrow">Project</p>
       <h1>{{ project.title }}</h1>
-      <p class="hero-copy">{{ project.premise }}</p>
+      <p class="hero-copy project-premise-preview">{{ project.premise }}</p>
     </div>
     <div class="hero-actions">
+      <a class="button" href="#queue-run">Queue full draft</a>
       <a class="button secondary" href="/projects">Back to projects</a>
       <a class="button secondary" href="/settings/provider">Provider settings</a>
     </div>
   </div>
 
-  {% if project.notes %}
-    <p class="muted">{{ project.notes }}</p>
-  {% endif %}
+  <details class="compact-details project-brief-details">
+    <summary>Full project brief</summary>
+    <div class="project-brief-body">
+      <p>{{ project.premise }}</p>
+      {% if project.notes %}
+        <p>{{ project.notes }}</p>
+      {% endif %}
+    </div>
+  </details>
 
   <dl class="stats-grid">
     <div><dt>Target words</dt><dd>{{ project.desired_word_count }}</dd></div>
@@ -46,7 +53,21 @@
   </section>
 {% endif %}
 
-<section class="panel">
+<section class="project-command-bar" aria-label="Project command shortcuts">
+  <div class="project-command-summary">
+    <span class="detail-label">Complete book target</span>
+    <strong>{{ project.requested_chapters }} chapters / {{ project.desired_word_count }} words</strong>
+    <span class="field-note long-value">{{ project.preferred_provider_name }} / {{ project.preferred_model }}</span>
+  </div>
+  <div class="project-command-actions">
+    <a class="button" href="#queue-run">Queue full draft</a>
+    <a class="button secondary" href="#run-history">Run history</a>
+    <a class="button secondary" href="#canon">Canon</a>
+    <a class="button secondary" href="#edit-project">Edit defaults</a>
+  </div>
+</section>
+
+<section class="panel" id="edit-project">
   <details class="editor-shell" {% if open_edit_form %}open{% endif %}>
     <summary>Edit project defaults</summary>
 
@@ -378,7 +399,7 @@
   {% endif %}
 </section>
 
-<section class="grid two-up form-layout">
+<section class="grid two-up form-layout" id="queue-run">
   <article class="panel">
     <div class="section-header">
       <div class="section-header-copy">
@@ -391,7 +412,7 @@
       <p class="error-text">{{ run_errors.__all__ }}</p>
     {% endif %}
 
-    <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form run-queue-form">
+    <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form run-queue-form" data-run-queue-form>
       <div class="run-setup-grid">
         <div class="form-section run-cardlet">
           <div class="section-header-copy">
@@ -474,35 +495,59 @@
           <div class="grid compact run-shape-grid">
             <label>
               Total words
-              <input class="{{ 'input-invalid' if run_errors.target_word_count }}" type="number" name="target_word_count" value="{{ run_values.target_word_count }}" min="1000">
+              <input data-run-target-words class="{{ 'input-invalid' if run_errors.target_word_count }}" type="number" name="target_word_count" value="{{ run_values.target_word_count }}" min="1000">
             </label>
             <label>
               Chapters
-              <input class="{{ 'input-invalid' if run_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ run_values.requested_chapters }}" min="1">
+              <input data-run-chapter-count class="{{ 'input-invalid' if run_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ run_values.requested_chapters }}" min="1">
             </label>
           </div>
           {% if run_errors.target_word_count %}<p class="field-error">{{ run_errors.target_word_count }}</p>{% endif %}
           {% if run_errors.requested_chapters %}<p class="field-error">{{ run_errors.requested_chapters }}</p>{% endif %}
 
+          <div class="length-preset-shell" aria-label="Chapter count presets">
+            <span class="detail-label">Book length</span>
+            <div class="length-preset-row">
+              <button class="secondary" type="button" data-run-length-preset="12">12 chapters</button>
+              <button class="secondary" type="button" data-run-length-preset="32">32 chapters</button>
+              <button class="secondary" type="button" data-run-length-preset="64">64 chapters</button>
+            </div>
+          </div>
+
           <div class="grid compact">
             <label>
               Min words per chapter
-              <input class="{{ 'input-invalid' if run_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ run_values.min_words_per_chapter }}" min="100">
+              <input data-run-min-words class="{{ 'input-invalid' if run_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ run_values.min_words_per_chapter }}" min="100">
             </label>
             <label>
               Max words per chapter
-              <input class="{{ 'input-invalid' if run_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ run_values.max_words_per_chapter }}" min="100">
+              <input data-run-max-words class="{{ 'input-invalid' if run_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ run_values.max_words_per_chapter }}" min="100">
             </label>
           </div>
           {% if run_errors.min_words_per_chapter %}<p class="field-error">{{ run_errors.min_words_per_chapter }}</p>{% endif %}
           {% if run_errors.max_words_per_chapter %}<p class="field-error">{{ run_errors.max_words_per_chapter }}</p>{% endif %}
+
+          <div class="run-estimate-strip" data-run-estimate>
+            <div>
+              <span class="detail-label">Outline chunks</span>
+              <strong data-run-estimate-outline>{{ run_preflight.outline_chunks }}</strong>
+            </div>
+            <div>
+              <span class="detail-label">Minimum calls</span>
+              <strong data-run-estimate-calls>{{ run_preflight.estimated_model_calls }} minimum</strong>
+            </div>
+            <div>
+              <span class="detail-label">Avg chapter target</span>
+              <strong data-run-estimate-average>--</strong>
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="form-section run-cardlet quality-profile-section" data-quality-profile-control>
         <div class="section-header-copy">
           <h3>Quality profile</h3>
-          <p>Choose how aggressively this run should spend time on editorial repair passes.</p>
+          <p>Choose how aggressively this run should spend time on chapter repairs before the standard developmental and final edit passes.</p>
         </div>
         <div class="quality-profile-grid">
           {% for option in quality_profile_options %}
@@ -540,21 +585,21 @@
       <label class="toggle-card run-mode-card">
         <span class="toggle-input">
           <input data-developmental-rewrite-toggle type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled or run_values.quality_profile == "strict" %}checked{% endif %}>
-          <strong>Run developmental rewrite planning</strong>
+          <strong>Include developmental rewrite planning</strong>
         </span>
-        <span class="field-note">After manuscript QA, produce a structural rewrite report, revised outline, and QA comparison for merge, cut, bridge, reorder, or rewrite decisions.</span>
+        <span class="field-note">Standard for polished book runs. After manuscript QA, produce a structural rewrite report, revised outline, and QA comparison before the final chapter edit pass.</span>
       </label>
 
       <div
         class="inline-note inline-note-success run-mode-note"
         data-run-mode-note
-        data-pause-message="Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, optional developmental rewrite planning, and export artifacts."
-        data-straight-message="Move straight from story bible and outline generation into chapter drafting, editorial QA, optional developmental rewrite planning, and export."
+        data-pause-message="Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, developmental planning, final chapter editing, final QA, and export artifacts."
+        data-straight-message="Move straight from story bible and outline generation into chapter drafting, editorial QA, developmental planning, final chapter editing, final QA, and export."
       >
         {% if run_values.pause_after_outline %}
-          Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, optional developmental rewrite planning, and export artifacts.
+          Build the story bible and outline, wait for approval, then draft chapters, run editorial QA, developmental planning, final chapter editing, final QA, and export artifacts.
         {% else %}
-          Move straight from story bible and outline generation into chapter drafting, editorial QA, optional developmental rewrite planning, and export.
+          Move straight from story bible and outline generation into chapter drafting, editorial QA, developmental planning, final chapter editing, final QA, and export.
         {% endif %}
       </div>
 
@@ -641,7 +686,14 @@
           <span class="run-flow-number">5</span>
           <div>
             <strong>Plan a developmental rewrite</strong>
-            <p class="field-note">Optional full-manuscript planning converts QA risks into structural actions, a revised outline, and a before/after QA comparison.</p>
+            <p class="field-note">Standard full-manuscript planning converts QA risks into structural actions, a revised outline, and a before/after QA comparison.</p>
+          </div>
+        </li>
+        <li class="run-flow-item">
+          <span class="run-flow-number">6</span>
+          <div>
+            <strong>Run a final chapter edit</strong>
+            <p class="field-note">Each saved chapter gets a polish pass for clarity, sentence rhythm, transitions, and concrete on-page consequences before final QA/export.</p>
           </div>
         </li>
       </ol>
@@ -667,7 +719,7 @@
   </aside>
 </section>
 
-<section class="panel">
+<section class="panel" id="run-history">
   <div class="section-header">
     <div class="section-header-copy">
       <h2>Run history</h2>

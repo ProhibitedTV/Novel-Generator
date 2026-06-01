@@ -117,9 +117,16 @@ RUN_STAGES = [
     {
         "id": "developmental_rewrite",
         "label": "Developmental rewrite",
-        "description": "Creating a full-manuscript structural rewrite plan when enabled.",
-        "why": "This optional stage turns QA risks into chapter-level keep, merge, cut, bridge, reorder, or rewrite actions.",
+        "description": "Creating the standard full-manuscript structural rewrite plan.",
+        "why": "This stage turns QA risks into chapter-level keep, merge, cut, bridge, reorder, or rewrite actions before the final edit pass.",
         "result": "Rewrite report, revised-outline, and QA comparison artifacts should appear beside the manuscript exports.",
+    },
+    {
+        "id": "chapter_edit",
+        "label": "Final edit",
+        "description": "Polishing saved chapter prose before final QA and export.",
+        "why": "The worker is line-editing each chapter for clarity, rhythm, concrete sensory detail, and cleaner transitions while preserving the story state.",
+        "result": "Chapter text and word counts should update without changing the approved outline or continuity checkpoints.",
     },
     {
         "id": "export",
@@ -183,7 +190,7 @@ QUALITY_PROFILE_DEFS = [
         "value": "balanced",
         "label": "Balanced",
         "summary": "Current behavior",
-        "description": "Use the existing revision thresholds and keep developmental rewrite planning optional.",
+        "description": "Use the existing revision thresholds, standard developmental planning, and the final edit pass.",
     },
     {
         "value": "draft",
@@ -195,7 +202,7 @@ QUALITY_PROFILE_DEFS = [
         "value": "strict",
         "label": "Strict",
         "summary": "Most editorial scrutiny",
-        "description": "Use tighter revision thresholds and include developmental rewrite planning by default.",
+        "description": "Use tighter revision thresholds with standard developmental planning and the final edit pass.",
     },
 ]
 QUALITY_PROFILE_LOOKUP = {item["value"]: item for item in QUALITY_PROFILE_DEFS}
@@ -211,6 +218,7 @@ RUN_STAGE_PROGRESS_ORDER = [
     "chapter_summary",
     "manuscript_qa",
     "developmental_rewrite",
+    "chapter_edit",
     "export",
     "completed",
 ]
@@ -1275,7 +1283,7 @@ def _run_form_values(project: Project, values: dict[str, Any] | None = None) -> 
         "min_words_per_chapter": project.min_words_per_chapter,
         "max_words_per_chapter": project.max_words_per_chapter,
         "pause_after_outline": True,
-        "developmental_rewrite_enabled": False,
+        "developmental_rewrite_enabled": True,
         "quality_profile": "balanced",
         **_task_routing_form_values(project.task_routing),
     }
@@ -1390,7 +1398,7 @@ def _run_preflight_context(
         if requested_chapters <= PREFLIGHT_OUTLINE_CHUNK_THRESHOLD
         else max(1, (requested_chapters + PREFLIGHT_OUTLINE_CHUNK_SIZE - 1) // PREFLIGHT_OUTLINE_CHUNK_SIZE)
     )
-    estimated_model_calls = 1 + outline_chunks + (requested_chapters * 5) + 1
+    estimated_model_calls = 1 + outline_chunks + (requested_chapters * 5) + 1 + requested_chapters + 1
     if developmental_rewrite_enabled:
         estimated_model_calls += 1
 
@@ -1457,6 +1465,8 @@ def _run_preflight_context(
         "status_label": status_label,
         "summary": "Provider, model, outline scale, and recovery guardrails checked before queueing.",
         "warnings": warnings,
+        "outline_chunks": outline_chunks,
+        "estimated_model_calls": estimated_model_calls,
         "rows": [
             {"label": "Provider route", "value": f"{provider_label} / {model_name or '-'}"},
             {"label": "Model reachability", "value": "Reachable" if provider_status and provider_status.reachable else "Unavailable"},
@@ -1469,6 +1479,8 @@ def _run_preflight_context(
         "recovery_features": [
             "Stage attempt ledger",
             "Checkpoint resume",
+            "Standard developmental planning",
+            "Final chapter editing pass",
             f"Stale heartbeat recovery after {max(1, settings.run_stale_after_seconds // 60)} minutes",
         ],
     }
@@ -1882,15 +1894,80 @@ def _chapter_continuity_chips(chapter: Any) -> list[dict[str, str]]:
 
 
 def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
-    return [
-        {
-            "chapter": chapter,
-            "status_chips": _chapter_status_chips(chapter),
-            "risk_chips": _chapter_risk_chips(chapter),
-            "continuity_chips": _chapter_continuity_chips(chapter),
+    cards: list[dict[str, Any]] = []
+    for chapter in _sorted_run_chapters(run):
+        risk_chips = _chapter_risk_chips(chapter)
+        cards.append(
+            {
+                "chapter": chapter,
+                "status_chips": _chapter_status_chips(chapter),
+                "risk_chips": risk_chips,
+                "continuity_chips": _chapter_continuity_chips(chapter),
+                "has_risk": any(chip["tone"] in {"risk", "warning"} for chip in risk_chips),
+            }
+        )
+    return cards
+
+
+def _book_completion_context(run: GenerationRun) -> dict[str, Any]:
+    chapters = _sorted_run_chapters(run)
+    requested_chapters = max(1, run.requested_chapters or len(chapters) or 1)
+    outline_count = len(run.outline or [])
+    drafted_count = len([chapter for chapter in chapters if chapter.content])
+    summary_count = len([chapter for chapter in chapters if chapter.summary])
+    continuity_count = len([chapter for chapter in chapters if chapter.continuity_update])
+    qa_count = len([chapter for chapter in chapters if chapter.qa_notes])
+    qa_artifact_count = len([artifact for artifact in run.artifacts if artifact.kind == "qa-report"])
+    manuscript_artifact_count = len([artifact for artifact in run.artifacts if artifact.kind != "qa-report"])
+    final_edit_count = 1 if any(event.event_type == "final_editing_completed" for event in run.events) else 0
+
+    def row(label: str, current: int, target: int, *, required: bool = True) -> dict[str, Any]:
+        is_complete = current >= target if required else current > 0
+        tone = "success" if is_complete else ("warning" if current else "pending")
+        return {
+            "label": label,
+            "current": current,
+            "target": target,
+            "tone": tone,
+            "complete": is_complete,
         }
-        for chapter in _sorted_run_chapters(run)
+
+    rows = [
+        row("Story bible", 1 if run.story_bible else 0, 1),
+        row("Outline chapters", outline_count, requested_chapters),
+        row("Drafted chapters", drafted_count, requested_chapters),
+        row("Chapter summaries", summary_count, requested_chapters),
+        row("Continuity checkpoints", continuity_count, requested_chapters),
+        row("Chapter QA", qa_count, requested_chapters),
+        row("Final edit pass", final_edit_count, 1),
+        row("Manuscript QA report", qa_artifact_count, 1),
+        row("Manuscript exports", manuscript_artifact_count, 1),
     ]
+    required_complete = all(item["complete"] for item in rows)
+    percent = round((sum(min(item["current"], item["target"]) for item in rows) / sum(item["target"] for item in rows)) * 100)
+    if run.status == RunStatus.COMPLETED and required_complete:
+        title = "Complete book package"
+        body = "All requested chapters, continuity checkpoints, QA, final edit, and manuscript exports are present."
+    elif run.status == RunStatus.COMPLETED:
+        title = "Completed with gaps to review"
+        body = "The run reached a terminal state, but one or more book-completion checkpoints is incomplete."
+    elif run.status == RunStatus.FAILED:
+        title = "Recover from the last checkpoint"
+        body = "Use the checklist to see what survived before resuming or regenerating from a chapter."
+    elif run.status == RunStatus.AWAITING_APPROVAL:
+        title = "Outline approval gate"
+        body = "Approve the outline only after the structure looks strong enough to spend the full chapter pass."
+    else:
+        title = "Building the book package"
+        body = "A complete run should finish chapters, checkpoint continuity, run manuscript QA, complete the final edit, run final QA, and export artifacts."
+
+    return {
+        "title": title,
+        "body": body,
+        "rows": rows,
+        "percent": percent,
+        "complete": required_complete,
+    }
 
 
 def _run_attempt_diagnostics(run: GenerationRun) -> list[dict[str, Any]]:
@@ -2986,6 +3063,7 @@ def run_detail(
             "outline_entries": outline_review["entries"],
             "outline_review": outline_review,
             "chapter_review_cards": chapter_review_cards,
+            "book_completion": _book_completion_context(run),
             "editorial_next_step": _run_editorial_next_step_context(run, chapter_review_cards),
             "story_bible": run.story_bible or {},
             "continuity_ledger": run.continuity_ledger or {},

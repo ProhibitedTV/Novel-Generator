@@ -51,6 +51,7 @@ from .provider_errors import ProviderError, ProviderTransportError
 from .prompts import (
     build_chapter_critique_messages,
     build_chapter_draft_messages,
+    build_chapter_edit_messages,
     build_chapter_plan_messages,
     build_chapter_revision_messages,
     build_outline_chunk_messages,
@@ -1754,7 +1755,7 @@ def _run_developmental_rewrite(
     chapters: list,
     qa_report: ManuscriptQaReport,
     client: ProviderManager | OllamaClient,
-) -> tuple[str, str, str]:
+) -> tuple[DevelopmentalRewritePlan, str, str, str]:
     story_bible = _story_bible_from_run(run)
     continuity_ledger = _continuity_ledger_from_run(run)
     provider_name, model_name = _resolve_stage_route(client, run, "developmental_rewrite")
@@ -1798,7 +1799,126 @@ def _run_developmental_rewrite(
         {"message": "Developmental rewrite plan created.", "chapter_action_count": len(plan.chapter_actions)},
     )
     session.commit()
-    return rewrite_markdown, revised_outline_markdown, developmental_qa_markdown
+    return plan, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown
+
+
+def _completed_final_edit_chapters(run: GenerationRun) -> set[int]:
+    completed: set[int] = set()
+    for event in run.events:
+        if event.event_type != "final_chapter_edit_completed":
+            continue
+        chapter_number = event.payload.get("chapter_number")
+        try:
+            completed.add(int(chapter_number))
+        except (TypeError, ValueError):
+            continue
+    return completed
+
+
+def _run_final_editing_pass(
+    session: Session,
+    run: GenerationRun,
+    chapters: list,
+    qa_report: ManuscriptQaReport,
+    developmental_plan: DevelopmentalRewritePlan | None,
+    client: ProviderManager | OllamaClient,
+) -> None:
+    story_bible = _story_bible_from_run(run)
+    continuity_ledger = _continuity_ledger_from_run(run)
+    provider_name, model_name = _resolve_stage_route(client, run, "chapter_revision")
+    edited_chapters = _completed_final_edit_chapters(run)
+    run.current_step = "chapter_edit"
+    run.current_chapter = None
+    record_event(
+        session,
+        run,
+        "final_editing_started",
+        {
+            "message": "Running final chapter editing pass.",
+            "provider_name": provider_name,
+            "model_name": model_name,
+            "chapters": len(chapters),
+        },
+    )
+    session.commit()
+
+    for chapter in chapters:
+        _ensure_not_canceled(session, run)
+        run.current_step = "chapter_edit"
+        run.current_chapter = chapter.chapter_number
+        if chapter.chapter_number in edited_chapters:
+            record_event(
+                session,
+                run,
+                "final_chapter_edit_checkpoint_reused",
+                {
+                    "message": f"Reused saved final edit for chapter {chapter.chapter_number}.",
+                    "chapter_number": chapter.chapter_number,
+                },
+            )
+            session.commit()
+            continue
+
+        try:
+            outline_entry = _outline_entry(run, chapter.chapter_number)
+            edited_content = sanitize_chapter_content(
+                _supervised_provider_chat(
+                    session,
+                    run,
+                    client,
+                    provider_name,
+                    model_name,
+                    build_chapter_edit_messages(
+                        run.project,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        continuity_ledger,
+                        qa_report,
+                        developmental_plan,
+                    ),
+                    stage="chapter_edit",
+                    chapter_number=chapter.chapter_number,
+                    metadata={"label": f"chapter {chapter.chapter_number} final edit"},
+                )
+            )
+            if not edited_content.strip():
+                raise RuntimeError(f"Chapter {chapter.chapter_number} final edit was empty.")
+            chapter.content = edited_content
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "final_chapter_edit_completed",
+                {
+                    "message": f"Final edit saved for chapter {chapter.chapter_number}.",
+                    "chapter_number": chapter.chapter_number,
+                    "word_count": chapter.word_count,
+                },
+            )
+            session.commit()
+        except Exception as exc:
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "final_chapter_edit_fallback",
+                {
+                    "message": f"Final edit failed for chapter {chapter.chapter_number}; kept the existing chapter prose.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
+            session.commit()
+
+    run.current_chapter = None
+    record_event(
+        session,
+        run,
+        "final_editing_completed",
+        {"message": "Final chapter editing pass completed.", "chapters": len(chapters)},
+    )
+    session.commit()
 
 
 def process_run(session: Session, run: GenerationRun, settings: Settings, client: ProviderManager | OllamaClient) -> None:
@@ -1851,17 +1971,22 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
         )
 
     qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
+    developmental_plan: DevelopmentalRewritePlan | None = None
     rewrite_markdown = None
     revised_outline_markdown = None
     developmental_qa_markdown = None
     if run.developmental_rewrite_enabled:
-        rewrite_markdown, revised_outline_markdown, developmental_qa_markdown = _run_developmental_rewrite(
+        developmental_plan, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown = _run_developmental_rewrite(
             session,
             run,
             completed_chapters,
             qa_report,
             client,
         )
+
+    _run_final_editing_pass(session, run, completed_chapters, qa_report, developmental_plan, client)
+    completed_chapters = _require_requested_chapters(session, run)
+    qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
 
     run.current_step = "export"
     record_event(session, run, "artifact_export_started", {"message": "Rendering manuscript artifacts."})

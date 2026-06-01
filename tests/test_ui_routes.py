@@ -288,10 +288,22 @@ def test_project_detail_renders_quality_profile_controls_and_preflight(client, m
     assert 'value="balanced"' in response.text
     assert "Run preflight" in response.text
     assert 'data-run-preflight' in response.text
+    assert 'href="#queue-run"' in response.text
+    assert 'id="queue-run"' in response.text
+    assert 'id="run-history"' in response.text
+    assert 'id="edit-project"' in response.text
+    assert "Full project brief" in response.text
     assert "Estimated model calls" in response.text
-    assert "23 minimum" in response.text
+    assert "29 minimum" in response.text
     assert "Stage attempt ledger" in response.text
     assert "Checkpoint resume" in response.text
+    assert 'data-run-queue-form' in response.text
+    assert 'data-run-target-words' in response.text
+    assert 'data-run-chapter-count' in response.text
+    assert 'data-run-length-preset="32"' in response.text
+    assert 'data-run-length-preset="64"' in response.text
+    assert 'data-run-estimate' in response.text
+    assert 'data-run-estimate-calls' in response.text
 
 
 def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch) -> None:
@@ -303,7 +315,7 @@ def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch)
     assert response.status_code == 200
     assert "64 chapters will use 8 outline chunks" in response.text
     assert "High chapter counts make checkpoint resume" in response.text
-    assert "330 minimum" in response.text
+    assert "396 minimum" in response.text
 
 
 def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:
@@ -452,6 +464,10 @@ def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> 
     assert 'data-run-elapsed' in response.text
     assert "What The Worker Is Doing" in response.text
     assert "Run confidence" in response.text
+    assert "Complete book target" in response.text
+    assert 'data-run-chapter-progress-bar' in response.text
+    assert 'data-run-word-progress-bar' in response.text
+    assert 'data-book-completion' in response.text
     assert "Running: Draft chapter" in response.text
     assert "Next milestone" in response.text
     assert "Current Chapter Contract" in response.text
@@ -601,6 +617,7 @@ def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> No
     assert "Chapter-mode distribution" in response.text
     assert 'data-outline-workspace' in response.text
     assert 'data-outline-act-filter' in response.text
+    assert 'data-outline-review-dock' in response.text
     assert 'id="outline-chapter-1"' in response.text
     assert "Character agendas" in response.text
     assert "Canon registry" in response.text
@@ -675,6 +692,7 @@ def test_outline_review_workspace_renders_sixty_four_chapter_navigation(client, 
     assert 'id="outline-chapter-64"' in response.text
     assert 'data-outline-anchor="64"' in response.text
     assert 'data-outline-jump-input' in response.text
+    assert 'data-outline-review-dock' in response.text
     assert "64 / 64" in response.text
     assert "Approve and continue" in response.text
     assert "Cancel and edit project" in response.text
@@ -879,6 +897,52 @@ def test_run_detail_surfaces_rich_chapter_qa_notes(client, monkeypatch) -> None:
     assert "tracking Nora" in response.text
 
 
+def test_run_detail_renders_sixty_four_chapter_review_navigation(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        run = get_run(session, run_id)
+        assert run is not None
+        run.status = RunStatus.RUNNING
+        run.current_step = "chapter_draft"
+        run.current_chapter = 32
+        run.requested_chapters = 64
+        run.target_word_count = 64000
+        run.outline = [outline_entry(chapter_number, total_chapters=64) for chapter_number in range(1, 65)]
+        create_chapters_from_outline(session, run)
+        for chapter in run.chapters:
+            if chapter.chapter_number <= 31:
+                chapter.status = ChapterStatus.COMPLETED
+                chapter.content = f"Completed chapter {chapter.chapter_number} prose."
+                chapter.summary = f"Summary for chapter {chapter.chapter_number}."
+                chapter.word_count = 1000
+                chapter.continuity_update = {"chapter_outcome": f"Outcome {chapter.chapter_number}"}
+                chapter.qa_notes = {"strengths": ["Stable."], "revision_required": False}
+            if chapter.chapter_number == 32:
+                chapter.qa_notes = {
+                    "warnings": ["The midpoint ending is abstract."],
+                    "revision_required": True,
+                    "ending_concreteness_score": 4,
+                    "technical_escalation_fatigue_score": 7,
+                }
+        session.commit()
+
+    response = client.get(f"/runs/{run_id}")
+
+    assert response.status_code == 200
+    assert 'data-chapter-review-toolbar' in response.text
+    assert 'data-chapter-status-filter' in response.text
+    assert 'data-chapter-jump-input' in response.text
+    assert 'href="#chapter-64"' in response.text
+    assert 'id="chapter-64"' in response.text
+    assert 'data-chapter-anchor="64"' in response.text
+    assert 'data-chapter-risk="true"' in response.text
+    assert "Needs review" in response.text
+    assert "31 / 64" in response.text
+
+
 def test_project_detail_renders_cleanup_controls_for_finished_runs(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
     project_id, run_id = seed_project_and_run()
@@ -929,7 +993,7 @@ def test_project_run_setup_warns_for_external_default_provider(client, monkeypat
     assert "This route may send manuscript text and story data to the configured external provider." in response.text
     assert "Full novel runs can use large prompts" in response.text
     assert "Chapter draft: OpenAI-compatible API" in response.text
-    assert "Run developmental rewrite planning" in response.text
+    assert "Include developmental rewrite planning" in response.text
     assert "Developmental rewrite: OpenAI-compatible API" in response.text
 
 

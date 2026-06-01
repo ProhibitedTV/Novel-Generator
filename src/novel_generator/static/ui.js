@@ -1,9 +1,11 @@
 document.addEventListener("DOMContentLoaded", () => {
   setupConfirmActions(document);
   setupModelPickers(document);
+  setupRunLengthControls(document);
   setupRunModeNotes(document);
   setupQualityProfileControls(document);
   setupOutlineReview(document);
+  setupChapterNavigator(document);
   setupReviewSections(document);
   setupProviderConsole();
   setupRunDetail();
@@ -71,6 +73,86 @@ function bindModelChoice(choice, syncChoices) {
     input.focus();
     input.scrollIntoView({ behavior: "smooth", block: "nearest" });
     syncChoices(targetId);
+  });
+}
+
+function setupRunLengthControls(root) {
+  const forms = Array.from(root.querySelectorAll("[data-run-queue-form]"));
+  forms.forEach((form) => {
+    if (form.dataset.runLengthBound === "true") {
+      return;
+    }
+    form.dataset.runLengthBound = "true";
+
+    const chapterInput = form.querySelector("[data-run-chapter-count]");
+    const targetInput = form.querySelector("[data-run-target-words]");
+    const minInput = form.querySelector("[data-run-min-words]");
+    const maxInput = form.querySelector("[data-run-max-words]");
+    const outlineNode = form.querySelector("[data-run-estimate-outline]");
+    const callsNode = form.querySelector("[data-run-estimate-calls]");
+    const averageNode = form.querySelector("[data-run-estimate-average]");
+    const presetButtons = Array.from(form.querySelectorAll("[data-run-length-preset]"));
+    const outlineThreshold = 32;
+    const outlineChunkSize = 8;
+
+    const readInt = (node, fallback) => {
+      const value = Number.parseInt(node?.value || "", 10);
+      return Number.isFinite(value) && value > 0 ? value : fallback;
+    };
+
+    const outlineChunksFor = (chapters) => {
+      if (chapters <= outlineThreshold) {
+        return 1;
+      }
+      return Math.max(1, Math.ceil(chapters / outlineChunkSize));
+    };
+
+    const sync = () => {
+      const chapters = readInt(chapterInput, 1);
+      const targetWords = readInt(targetInput, 0);
+      const minWords = readInt(minInput, 0);
+      const maxWords = readInt(maxInput, minWords || 0);
+      const outlineChunks = outlineChunksFor(chapters);
+      const developmentalRewrite = form.querySelector("[data-developmental-rewrite-toggle]")?.checked ? 1 : 0;
+      const finalEditCalls = chapters + 1;
+      const minimumCalls = 1 + outlineChunks + chapters * 5 + 1 + developmentalRewrite + finalEditCalls;
+      const average = chapters > 0 && targetWords > 0 ? Math.round(targetWords / chapters) : 0;
+
+      if (outlineNode) {
+        outlineNode.textContent = String(outlineChunks);
+      }
+      if (callsNode) {
+        callsNode.textContent = `${minimumCalls} minimum`;
+      }
+      if (averageNode) {
+        const rangeNote = minWords && maxWords ? ` (${minWords}-${maxWords})` : "";
+        averageNode.textContent = average ? `${average} words${rangeNote}` : "--";
+      }
+    };
+
+    presetButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const chapters = Number.parseInt(button.dataset.runLengthPreset || "", 10);
+        if (!Number.isFinite(chapters) || !chapterInput) {
+          return;
+        }
+        chapterInput.value = String(chapters);
+        const minWords = readInt(minInput, 0);
+        const currentTarget = readInt(targetInput, 0);
+        const minimumTarget = minWords ? chapters * minWords : 0;
+        if (targetInput && minimumTarget && currentTarget < minimumTarget) {
+          targetInput.value = String(minimumTarget);
+        }
+        chapterInput.dispatchEvent(new Event("input", { bubbles: true }));
+        sync();
+      });
+    });
+
+    [chapterInput, targetInput, minInput, maxInput, form.querySelector("[data-developmental-rewrite-toggle]")].forEach((node) => {
+      node?.addEventListener("input", sync);
+      node?.addEventListener("change", sync);
+    });
+    sync();
   });
 }
 
@@ -235,6 +317,104 @@ function setupOutlineReview(root) {
       syncFilters();
     });
     syncFilters();
+  });
+}
+
+function setupChapterNavigator(root) {
+  const toolbars = Array.from(root.querySelectorAll("[data-chapter-review-toolbar]"));
+  toolbars.forEach((toolbar) => {
+    if (toolbar.dataset.chapterNavigatorBound === "true") {
+      return;
+    }
+    toolbar.dataset.chapterNavigatorBound = "true";
+
+    const section = toolbar.closest("section");
+    const cards = Array.from(section?.querySelectorAll("[data-chapter-card]") || []);
+    const anchors = Array.from(toolbar.querySelectorAll("[data-chapter-anchor]"));
+    const statusFilter = toolbar.querySelector("[data-chapter-status-filter]");
+    const jumpInput = toolbar.querySelector("[data-chapter-jump-input]");
+    const jumpButton = toolbar.querySelector("[data-chapter-jump]");
+    const clearButton = toolbar.querySelector("[data-chapter-clear]");
+    const visibleCount = toolbar.querySelector("[data-chapter-visible-count]");
+    const emptyState = toolbar.querySelector("[data-chapter-empty]");
+
+    const setHidden = (node, hidden) => {
+      if (node) {
+        node.classList.toggle("is-hidden", hidden);
+      }
+    };
+    const numberValue = (node, fallback) => {
+      const value = Number(node?.value);
+      return Number.isFinite(value) ? value : fallback;
+    };
+
+    const sync = () => {
+      const filter = statusFilter?.value || "";
+      let shown = 0;
+
+      cards.forEach((card) => {
+        let visible = true;
+        const isCurrent = card.dataset.chapterCurrent === "true";
+        const isComplete = card.dataset.chapterStatus === "completed";
+        const hasRisk = card.dataset.chapterRisk === "true";
+        const hasContent = card.dataset.chapterHasContent === "true";
+
+        if (filter === "current") {
+          visible = isCurrent;
+        } else if (filter === "complete") {
+          visible = isComplete;
+        } else if (filter === "risk") {
+          visible = hasRisk;
+        } else if (filter === "pending") {
+          visible = !hasContent;
+        }
+
+        setHidden(card, !visible);
+        if (visible) {
+          shown += 1;
+        }
+      });
+
+      anchors.forEach((anchor) => {
+        const chapter = Number(anchor.dataset.chapterAnchor || 0);
+        const card = cards.find((candidate) => Number(candidate.dataset.chapterNumber || 0) === chapter);
+        anchor.classList.toggle("is-muted", Boolean(card?.classList.contains("is-hidden")));
+      });
+
+      if (visibleCount) {
+        visibleCount.textContent = `${shown} chapter${shown === 1 ? "" : "s"} visible`;
+      }
+      setHidden(emptyState, shown > 0);
+    };
+
+    const jump = () => {
+      const chapter = numberValue(jumpInput, 1);
+      const target = cards.find((card) => Number(card.dataset.chapterNumber || 0) === chapter);
+      if (!target) {
+        return;
+      }
+      target.classList.remove("is-hidden");
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      target.classList.add("is-focused-chapter");
+      window.history.replaceState(null, "", `#${target.id}`);
+      window.setTimeout(() => target.classList.remove("is-focused-chapter"), 1600);
+    };
+
+    statusFilter?.addEventListener("change", sync);
+    jumpButton?.addEventListener("click", jump);
+    jumpInput?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        jump();
+      }
+    });
+    clearButton?.addEventListener("click", () => {
+      if (statusFilter) {
+        statusFilter.value = "";
+      }
+      sync();
+    });
+    sync();
   });
 }
 
@@ -476,8 +656,11 @@ function setupRunDetail() {
   const runHealthFallbackNode = runDetail.querySelector("[data-run-health-fallbacks]");
   const elapsedNode = runDetail.querySelector("[data-run-elapsed]");
   const completedChapterNode = runDetail.querySelector("[data-run-completed-chapters]");
+  const chapterProgressLabelNodes = Array.from(runDetail.querySelectorAll("[data-run-chapter-progress-label]"));
+  const chapterProgressBarNodes = Array.from(runDetail.querySelectorAll("[data-run-chapter-progress-bar]"));
   const wordProgressNode = runDetail.querySelector("[data-run-word-progress]");
-  const wordProgressLabelNode = runDetail.querySelector("[data-run-word-progress-label]");
+  const wordProgressLabelNodes = Array.from(runDetail.querySelectorAll("[data-run-word-progress-label]"));
+  const wordProgressBarNodes = Array.from(runDetail.querySelectorAll("[data-run-word-progress-bar]"));
   const artifactCountNode = runDetail.querySelector("[data-run-artifact-count]");
   const eventCountNode = runDetail.querySelector("[data-run-event-count]");
   const stepper = runDetail.querySelector("[data-run-stepper]");
@@ -1197,17 +1380,28 @@ function setupRunDetail() {
     const completedChapters = completedChapterCount(run);
     const words = totalWords(run);
     const targetWords = Number(run.target_word_count || 0);
+    const requestedChapters = Number(run.requested_chapters || runDetail.dataset.runRequestedChapters || 0);
     const progressPercent = targetWords > 0 ? Math.min(100, Math.round((words / targetWords) * 100)) : 0;
+    const chapterProgressPercent = requestedChapters > 0 ? Math.min(100, Math.round((completedChapters / requestedChapters) * 100)) : 0;
 
     if (completedChapterNode) {
       completedChapterNode.textContent = String(completedChapters);
     }
+    chapterProgressLabelNodes.forEach((node) => {
+      node.textContent = `${completedChapters} / ${requestedChapters || "-"}`;
+    });
+    chapterProgressBarNodes.forEach((node) => {
+      node.style.width = `${chapterProgressPercent}%`;
+    });
     if (wordProgressNode) {
       wordProgressNode.textContent = String(words);
     }
-    if (wordProgressLabelNode) {
-      wordProgressLabelNode.textContent = `${progressPercent}%`;
-    }
+    wordProgressLabelNodes.forEach((node) => {
+      node.textContent = `${progressPercent}%`;
+    });
+    wordProgressBarNodes.forEach((node) => {
+      node.style.width = `${progressPercent}%`;
+    });
     if (artifactCountNode) {
       artifactCountNode.textContent = String(Array.from(run.artifacts || []).length);
     }
