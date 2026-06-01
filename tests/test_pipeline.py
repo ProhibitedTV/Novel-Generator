@@ -849,6 +849,7 @@ def test_developmental_rewrite_pass_exports_report_and_revised_outline(configure
                     _continuity_json(1),
                     _qa_report_json(),
                     _developmental_rewrite_json(),
+                    "Iris burns the archive key in front of Tarin, and the lower stair opens at the cost of his escort.",
                 ]
             ),
         )
@@ -895,6 +896,10 @@ def test_final_editing_pass_polishes_saved_chapter_before_export(configured_envi
                     _qa_report_json(),
                     _developmental_rewrite_json(),
                     (
+                        "Iris burned the archive key in front of Tarin, and the lower stair opened while his escort "
+                        "turned away from him."
+                    ),
+                    (
                         "Iris slipped out of the archive with grit under her nails while Tarin held the sealed map case "
                         "like a debt. When the visible actor 1 sealed the corridor, she chose the lower route and left "
                         "her last safe exit behind."
@@ -909,7 +914,12 @@ def test_final_editing_pass_polishes_saved_chapter_before_export(configured_envi
         chapter = refreshed.chapters[0]
         assert chapter.content.startswith("Iris slipped out of the archive with grit")
         assert "last safe exit" in chapter.content
+        assert any(event.event_type == "developmental_chapter_revision_completed" for event in refreshed.events)
         assert any(event.event_type == "final_chapter_edit_completed" for event in refreshed.events)
+        assert any(
+            attempt.stage == "developmental_revision" and attempt.status == "success"
+            for attempt in refreshed.stage_attempts
+        )
         assert any(attempt.stage == "chapter_edit" and attempt.status == "success" for attempt in refreshed.stage_attempts)
 
 
@@ -1282,6 +1292,7 @@ def test_strict_quality_profile_triggers_revision_where_balanced_does_not(config
                     _continuity_json(1),
                     _qa_report_json(),
                     _developmental_rewrite_json(),
+                    "Iris burns the archive key in front of Tarin before taking the lower route underground.",
                 ]
             ),
         )
@@ -1299,6 +1310,7 @@ def test_strict_quality_profile_triggers_revision_where_balanced_does_not(config
             for event in refreshed_strict.events
         )
         assert any(event.event_type == "developmental_rewrite_completed" for event in refreshed_strict.events)
+        assert any(event.event_type == "developmental_chapter_revision_completed" for event in refreshed_strict.events)
 
 
 def test_draft_quality_profile_defers_non_blocking_revision(configured_environment) -> None:

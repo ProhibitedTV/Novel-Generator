@@ -25,6 +25,7 @@ from ..schemas import (
     CanonicalEntity,
     ContinuityBibleRow,
     ContinuityLedger,
+    DevelopmentalChapterAction,
     DevelopmentalRewritePlan,
     ManuscriptQaReport,
     StoryBible,
@@ -54,6 +55,7 @@ from .prompts import (
     build_chapter_edit_messages,
     build_chapter_plan_messages,
     build_chapter_revision_messages,
+    build_developmental_revision_messages,
     build_outline_chunk_messages,
     build_continuity_update_messages,
     build_developmental_rewrite_messages,
@@ -1815,6 +1817,184 @@ def _completed_final_edit_chapters(run: GenerationRun) -> set[int]:
     return completed
 
 
+def _completed_developmental_revision_chapters(run: GenerationRun) -> set[int]:
+    completed: set[int] = set()
+    for event in run.events:
+        if event.event_type != "developmental_chapter_revision_completed":
+            continue
+        chapter_number = event.payload.get("chapter_number")
+        try:
+            completed.add(int(chapter_number))
+        except (TypeError, ValueError):
+            continue
+    return completed
+
+
+def _developmental_actions_by_chapter(plan: DevelopmentalRewritePlan) -> dict[int, DevelopmentalChapterAction]:
+    actions: dict[int, DevelopmentalChapterAction] = {}
+    for action in plan.chapter_actions:
+        for chapter_number in action.chapter_numbers:
+            actions[int(chapter_number)] = action
+    return actions
+
+
+def _developmental_action_requires_revision(action: DevelopmentalChapterAction | None) -> bool:
+    if action is None:
+        return False
+    return action.action not in {"", "keep", "none", "no_change"}
+
+
+def _run_developmental_revision_waves(
+    session: Session,
+    run: GenerationRun,
+    chapters: list,
+    qa_report: ManuscriptQaReport,
+    developmental_plan: DevelopmentalRewritePlan,
+    client: ProviderManager | OllamaClient,
+) -> None:
+    story_bible = _story_bible_from_run(run)
+    continuity_ledger = _continuity_ledger_from_run(run)
+    provider_name, model_name = _resolve_stage_route(client, run, "chapter_revision")
+    completed_revisions = _completed_developmental_revision_chapters(run)
+    actions_by_chapter = _developmental_actions_by_chapter(developmental_plan)
+    targets = [
+        (chapter, actions_by_chapter.get(chapter.chapter_number))
+        for chapter in chapters
+        if _developmental_action_requires_revision(actions_by_chapter.get(chapter.chapter_number))
+    ]
+    if not targets:
+        record_event(
+            session,
+            run,
+            "developmental_revision_skipped",
+            {"message": "Developmental plan did not require structural chapter revisions."},
+        )
+        session.commit()
+        return
+
+    run.current_step = "developmental_revision"
+    run.current_chapter = None
+    record_event(
+        session,
+        run,
+        "developmental_revision_started",
+        {
+            "message": "Applying developmental revision actions to targeted chapters.",
+            "provider_name": provider_name,
+            "model_name": model_name,
+            "chapters": len(targets),
+        },
+    )
+    session.commit()
+
+    for chapter, action in targets:
+        assert action is not None
+        _ensure_not_canceled(session, run)
+        run.current_step = "developmental_revision"
+        run.current_chapter = chapter.chapter_number
+        if chapter.chapter_number in completed_revisions:
+            record_event(
+                session,
+                run,
+                "developmental_chapter_revision_checkpoint_reused",
+                {
+                    "message": f"Reused saved developmental revision for chapter {chapter.chapter_number}.",
+                    "chapter_number": chapter.chapter_number,
+                    "action": action.action,
+                },
+            )
+            session.commit()
+            continue
+
+        before_word_count = len((chapter.content or "").split())
+        before_chars = len(chapter.content or "")
+        record_event(
+            session,
+            run,
+            "developmental_chapter_revision_started",
+            {
+                "message": f"Applying developmental {action.action} action to chapter {chapter.chapter_number}.",
+                "chapter_number": chapter.chapter_number,
+                "action": action.action,
+                "reason": action.reason,
+                "required_story_change": action.required_story_change,
+                "permanent_consequence": action.permanent_consequence,
+            },
+        )
+        session.commit()
+        try:
+            outline_entry = _outline_entry(run, chapter.chapter_number)
+            revised_content = sanitize_chapter_content(
+                _supervised_provider_chat(
+                    session,
+                    run,
+                    client,
+                    provider_name,
+                    model_name,
+                    build_developmental_revision_messages(
+                        run.project,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        continuity_ledger,
+                        qa_report,
+                        action,
+                    ),
+                    stage="developmental_revision",
+                    chapter_number=chapter.chapter_number,
+                    metadata={
+                        "label": f"chapter {chapter.chapter_number} developmental revision",
+                        "action": action.action,
+                    },
+                )
+            )
+            if not revised_content.strip():
+                raise RuntimeError(f"Chapter {chapter.chapter_number} developmental revision was empty.")
+            chapter.content = revised_content
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "developmental_chapter_revision_completed",
+                {
+                    "message": f"Developmental revision saved for chapter {chapter.chapter_number}.",
+                    "chapter_number": chapter.chapter_number,
+                    "action": action.action,
+                    "before_word_count": before_word_count,
+                    "after_word_count": chapter.word_count,
+                    "word_delta": chapter.word_count - before_word_count,
+                    "before_chars": before_chars,
+                    "after_chars": len(chapter.content or ""),
+                },
+            )
+            session.commit()
+        except Exception as exc:
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "developmental_chapter_revision_fallback",
+                {
+                    "message": f"Developmental revision failed for chapter {chapter.chapter_number}; kept existing chapter prose.",
+                    "chapter_number": chapter.chapter_number,
+                    "action": action.action,
+                    "error": str(exc),
+                    "before_word_count": before_word_count,
+                    "after_word_count": chapter.word_count,
+                },
+            )
+            session.commit()
+
+    run.current_chapter = None
+    record_event(
+        session,
+        run,
+        "developmental_revision_completed",
+        {"message": "Developmental revision wave completed.", "chapters": len(targets)},
+    )
+    session.commit()
+
+
 def _run_final_editing_pass(
     session: Session,
     run: GenerationRun,
@@ -1983,6 +2163,7 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
             qa_report,
             client,
         )
+        _run_developmental_revision_waves(session, run, completed_chapters, qa_report, developmental_plan, client)
 
     _run_final_editing_pass(session, run, completed_chapters, qa_report, developmental_plan, client)
     completed_chapters = _require_requested_chapters(session, run)
