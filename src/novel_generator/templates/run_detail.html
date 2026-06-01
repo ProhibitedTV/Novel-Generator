@@ -10,6 +10,7 @@
   data-run-status="{{ run.status.value }}"
   data-run-step="{{ run.current_step }}"
   data-run-current-chapter="{{ run.current_chapter or '' }}"
+  data-run-requested-chapters="{{ run.requested_chapters }}"
   data-run-created-at="{{ run.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}"
   data-run-started-at="{{ run.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') if run.started_at else '' }}"
   data-run-completed-at="{{ run.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') if run.completed_at else '' }}"
@@ -81,6 +82,27 @@
         <span class="detail-label">Events</span>
         <strong data-run-event-count>{{ event_count }}</strong>
         <span class="field-note"><span data-run-artifact-count>{{ run.artifacts|length }}</span> artifacts</span>
+      </div>
+    </div>
+
+    <div class="run-progress-rails">
+      <div class="progress-rail">
+        <div class="progress-rail-topline">
+          <span class="detail-label">Chapter completion</span>
+          <strong data-run-chapter-progress-label>{{ completed_chapter_count }} / {{ run.requested_chapters }}</strong>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <span data-run-chapter-progress-bar style="width: {{ (completed_chapter_count / run.requested_chapters * 100)|round(0, 'floor') if run.requested_chapters else 0 }}%"></span>
+        </div>
+      </div>
+      <div class="progress-rail">
+        <div class="progress-rail-topline">
+          <span class="detail-label">Word target</span>
+          <strong><span data-run-word-progress-label>{{ word_progress_percent }}%</span></strong>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <span data-run-word-progress-bar style="width: {{ word_progress_percent }}%"></span>
+        </div>
       </div>
     </div>
 
@@ -165,6 +187,28 @@
       </div>
     </details>
   </div>
+
+  <section class="book-completion-panel" data-book-completion>
+    <div class="section-header">
+      <div class="section-header-copy">
+        <p class="eyebrow">Complete book target</p>
+        <h2>{{ book_completion.title }}</h2>
+        <p>{{ book_completion.body }}</p>
+      </div>
+      <div class="book-completion-score">
+        <strong>{{ book_completion.percent }}%</strong>
+        <span class="field-note">package ready</span>
+      </div>
+    </div>
+    <div class="book-completion-grid">
+      {% for item in book_completion.rows %}
+        <div class="book-completion-item book-completion-{{ item.tone }}">
+          <span class="detail-label">{{ item.label }}</span>
+          <strong>{{ item.current }} / {{ item.target }}</strong>
+        </div>
+      {% endfor %}
+    </div>
+  </section>
 
   <div class="run-stepper" data-run-stepper>
     {% for stage in run_stages %}
@@ -888,6 +932,24 @@
             </details>
           {% endif %}
 
+          {% if awaiting_outline_approval %}
+            <div class="outline-review-dock" data-outline-review-dock>
+              <div>
+                <span class="detail-label">Approval controls</span>
+                <strong>{{ outline_review.chapter_count }} chapter{{ "" if outline_review.chapter_count == 1 else "s" }} ready for review</strong>
+                <p class="field-note">These controls stay near the outline so a 32 or 64 chapter review can finish without scrolling back to the top.</p>
+              </div>
+              <div class="hero-actions">
+                <form method="post" action="/runs/{{ run.id }}/approve-outline">
+                  <button type="submit">Approve and continue</button>
+                </form>
+                <form method="post" action="/runs/{{ run.id }}/cancel-and-edit" data-confirm="Cancel this paused run and reopen the project editor so you can adjust the brief or defaults?">
+                  <button class="secondary" type="submit">Cancel and edit project</button>
+                </form>
+              </div>
+            </div>
+          {% endif %}
+
           <div class="outline-filter-bar">
             <label>
               Act
@@ -1141,10 +1203,55 @@
     <p>{{ run.chapters|length }} tracked</p>
   </div>
   {% if chapter_review_cards %}
+    <div class="chapter-review-toolbar" data-chapter-review-toolbar>
+      <div class="chapter-review-controls">
+        <label>
+          View
+          <select data-chapter-status-filter>
+            <option value="">All chapters</option>
+            <option value="current">Current chapter</option>
+            <option value="complete">Complete chapters</option>
+            <option value="risk">Needs review</option>
+            <option value="pending">Pending output</option>
+          </select>
+        </label>
+        <label>
+          Jump
+          <input type="number" min="1" max="{{ run.requested_chapters }}" value="{{ run.current_chapter or 1 }}" data-chapter-jump-input>
+        </label>
+        <div class="outline-filter-actions">
+          <button class="secondary" type="button" data-chapter-jump>Jump</button>
+          <button class="secondary" type="button" data-chapter-clear>Reset</button>
+        </div>
+      </div>
+      <p class="field-note"><span data-chapter-visible-count>{{ chapter_review_cards|length }} chapters visible</span></p>
+      <nav class="chapter-anchor-list" aria-label="Drafted chapters">
+        {% for card in chapter_review_cards %}
+          {% set chapter = card.chapter %}
+          <a
+            href="#chapter-{{ chapter.chapter_number }}"
+            class="chapter-anchor status-{{ chapter.status.value }}{% if card.has_risk %} has-risk{% endif %}{% if run.current_chapter == chapter.chapter_number %} is-current{% endif %}"
+            data-chapter-anchor="{{ chapter.chapter_number }}"
+          >
+            {{ chapter.chapter_number }}
+          </a>
+        {% endfor %}
+      </nav>
+      <p class="empty-state is-hidden" data-chapter-empty>No chapters match the current filter.</p>
+    </div>
     <div class="chapter-list">
       {% for card in chapter_review_cards %}
         {% set chapter = card.chapter %}
-        <article class="chapter-card{% if run.current_chapter == chapter.chapter_number %} active-chapter{% endif %}">
+        <article
+          id="chapter-{{ chapter.chapter_number }}"
+          class="chapter-card{% if run.current_chapter == chapter.chapter_number %} active-chapter{% endif %}"
+          data-chapter-card
+          data-chapter-number="{{ chapter.chapter_number }}"
+          data-chapter-status="{{ chapter.status.value }}"
+          data-chapter-current="{{ 'true' if run.current_chapter == chapter.chapter_number else 'false' }}"
+          data-chapter-risk="{{ 'true' if card.has_risk else 'false' }}"
+          data-chapter-has-content="{{ 'true' if chapter.content else 'false' }}"
+        >
           <div class="chapter-topline">
             <div class="chapter-heading">
               <p class="eyebrow">Chapter {{ chapter.chapter_number }}</p>

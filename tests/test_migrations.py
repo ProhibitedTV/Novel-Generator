@@ -75,9 +75,40 @@ def test_quality_profile_migration_defaults_existing_runs(tmp_path: Path, monkey
 
     command.upgrade(config, "head")
 
-    with engine.connect() as connection:
+    with engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO generation_runs (
+                    id, project_id, source_run_id, model_name, target_word_count,
+                    requested_chapters, min_words_per_chapter, max_words_per_chapter,
+                    status, current_step, current_chapter, outline, summary_context,
+                    error_message, cancel_requested, resume_from_chapter, created_at,
+                    started_at, completed_at, updated_at, pipeline_version,
+                    pause_after_outline, story_bible, continuity_ledger, provider_name,
+                    task_routing, worker_id, last_heartbeat_at, recovery_count
+                )
+                VALUES (
+                    'run-default', 'project-1', NULL, 'test-model', 4000,
+                    4, 800, 1200, 'QUEUED', 'queued', NULL, NULL, NULL,
+                    NULL, 0, NULL, :now, NULL, NULL, :now, 2,
+                    1, NULL, NULL, 'ollama', '{}', NULL, NULL, 0
+                )
+                """
+            ),
+            {"now": now},
+        )
+
         quality_profile = connection.scalar(sa.text("SELECT quality_profile FROM generation_runs WHERE id = 'run-1'"))
+        existing_rewrite_flag = connection.scalar(
+            sa.text("SELECT developmental_rewrite_enabled FROM generation_runs WHERE id = 'run-1'")
+        )
+        default_rewrite_flag = connection.scalar(
+            sa.text("SELECT developmental_rewrite_enabled FROM generation_runs WHERE id = 'run-default'")
+        )
     assert quality_profile == "balanced"
+    assert existing_rewrite_flag in (0, False)
+    assert default_rewrite_flag in (1, True)
 
     get_settings.cache_clear()
     get_session_factory.cache_clear()

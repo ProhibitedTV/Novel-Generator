@@ -39,23 +39,23 @@ def create_project_and_run(
     client,
     *,
     pause_after_outline: bool = True,
-    developmental_rewrite_enabled: bool = False,
+    developmental_rewrite_enabled: bool | None = None,
     quality_profile: str = "balanced",
 ) -> tuple[str, str]:
     project_response = client.post("/api/projects", json=create_project_payload())
     assert project_response.status_code == 201
     project_id = project_response.json()["id"]
 
-    run_response = client.post(
-        "/api/runs",
-        json={
-            "project_id": project_id,
-            "model_name": "test-model",
-            "pause_after_outline": pause_after_outline,
-            "developmental_rewrite_enabled": developmental_rewrite_enabled,
-            "quality_profile": quality_profile,
-        },
-    )
+    run_payload = {
+        "project_id": project_id,
+        "model_name": "test-model",
+        "pause_after_outline": pause_after_outline,
+        "quality_profile": quality_profile,
+    }
+    if developmental_rewrite_enabled is not None:
+        run_payload["developmental_rewrite_enabled"] = developmental_rewrite_enabled
+
+    run_response = client.post("/api/runs", json=run_payload)
     assert run_response.status_code == 201
     return project_id, run_response.json()["id"]
 
@@ -69,7 +69,7 @@ def test_project_and_run_api_flow(client, monkeypatch) -> None:
     assert detail_response.status_code == 200
     assert detail_response.json()["project_id"] == project_id
     assert detail_response.json()["pause_after_outline"] is True
-    assert detail_response.json()["developmental_rewrite_enabled"] is False
+    assert detail_response.json()["developmental_rewrite_enabled"] is True
     assert detail_response.json()["quality_profile"] == "balanced"
 
     cancel_response = client.post(f"/api/runs/{run_id}/cancel")

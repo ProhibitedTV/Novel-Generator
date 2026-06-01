@@ -805,8 +805,10 @@ def test_approved_run_completes_and_generates_qa_report(configured_environment) 
         assert all(chapter.content for chapter in refreshed.chapters)
         assert all(chapter.summary for chapter in refreshed.chapters)
         assert all(chapter.continuity_update for chapter in refreshed.chapters)
-        assert len(refreshed.artifacts) == 3
+        assert len(refreshed.artifacts) == 6
         assert any(artifact.kind == "qa-report" for artifact in refreshed.artifacts)
+        assert any(artifact.kind == "developmental-rewrite-report" for artifact in refreshed.artifacts)
+        assert any(event.event_type == "final_editing_completed" for event in refreshed.events)
         assert refreshed.summary_context is not None
 
 
@@ -858,6 +860,57 @@ def test_developmental_rewrite_pass_exports_report_and_revised_outline(configure
         assert "revised-outline" in artifact_kinds
         assert "developmental-qa-report" in artifact_kinds
         assert any(event.event_type == "developmental_rewrite_completed" for event in refreshed.events)
+
+
+def test_final_editing_pass_polishes_saved_chapter_before_export(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(project_id=project.id, model_name="test-model", pause_after_outline=False),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    (
+                        "Iris slips out of the archive while Tarin resists following her. "
+                        "Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them."
+                    ),
+                    _critique_json(revision_required=False),
+                    "Iris chooses the lower route and accepts the cost of leaving the archive behind.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                    _developmental_rewrite_json(),
+                    (
+                        "Iris slipped out of the archive with grit under her nails while Tarin held the sealed map case "
+                        "like a debt. When the visible actor 1 sealed the corridor, she chose the lower route and left "
+                        "her last safe exit behind."
+                    ),
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.COMPLETED
+        chapter = refreshed.chapters[0]
+        assert chapter.content.startswith("Iris slipped out of the archive with grit")
+        assert "last safe exit" in chapter.content
+        assert any(event.event_type == "final_chapter_edit_completed" for event in refreshed.events)
+        assert any(attempt.stage == "chapter_edit" and attempt.status == "success" for attempt in refreshed.stage_attempts)
 
 
 def test_manuscript_qa_fallback_completes_when_model_output_stays_invalid(configured_environment) -> None:

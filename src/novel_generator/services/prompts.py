@@ -1054,6 +1054,97 @@ def build_developmental_rewrite_messages(
     ]
 
 
+def _developmental_action_for_chapter(plan: DevelopmentalRewritePlan | dict[str, Any] | None, chapter_number: int) -> dict[str, Any]:
+    if plan is None:
+        return {}
+    payload = plan if isinstance(plan, dict) else plan.model_dump()
+    for action in payload.get("chapter_actions", []) or []:
+        chapter_numbers = action.get("chapter_numbers", []) if isinstance(action, dict) else []
+        if chapter_number in [int(number) for number in chapter_numbers if str(number).isdigit()]:
+            return action
+    return {}
+
+
+def _qa_editing_context(qa_report: ManuscriptQaReport) -> dict[str, Any]:
+    payload = qa_report.model_dump()
+    keys = [
+        "overall_verdict",
+        "warnings",
+        "continuity_risks",
+        "repetition_risks",
+        "ending_coherence_notes",
+        "lint_findings",
+        "chapter_ending_quality_notes",
+        "easy_win_warnings",
+        "proper_noun_continuity_findings",
+        "side_character_agency_notes",
+        "atmospheric_repetition_findings",
+        "emotional_pacing_notes",
+        "ideology_consistency_findings",
+        "civilian_texture_findings",
+        "technical_escalation_fatigue_findings",
+        "crisis_loop_findings",
+        "scene_mode_distribution_notes",
+        "story_turn_quality_notes",
+        "genre_contract_notes",
+    ]
+    return {key: payload.get(key) for key in keys if payload.get(key)}
+
+
+def build_chapter_edit_messages(
+    project: Project,
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+    qa_report: ManuscriptQaReport,
+    developmental_plan: DevelopmentalRewritePlan | dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    profile = _story_bible_genre_profile(bible)
+    style_profile = bible.get("style_profile") or {}
+    continuity_payload = _chapter_continuity_payload(chapter)
+    developmental_action = _developmental_action_for_chapter(developmental_plan, chapter.chapter_number)
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a senior line editor and continuity-safe copy editor for fiction. "
+                "Return polished chapter prose only, with no heading, notes, JSON, or markdown fences."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Final-edit chapter {chapter.chapter_number} of '{project.title}'.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prose style profile:\n{json.dumps(style_profile, indent=2)}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Chapter continuity state:\n{json.dumps(continuity_payload, indent=2)}\n\n"
+                f"Current continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Manuscript QA editing context:\n{json.dumps(_qa_editing_context(qa_report), indent=2)}\n\n"
+                f"Developmental action for this chapter:\n{json.dumps(developmental_action, indent=2)}\n\n"
+                f"Current chapter prose:\n{chapter.content or ''}\n\n"
+                "Final editing instructions:\n"
+                "- preserve the same plot events, order of events, POV, named entities, relationship state, and continuity outcome\n"
+                "- do not add a new scene, new twist, new system rule, new character, chapter heading, author note, or outline summary\n"
+                "- polish sentence rhythm, paragraph flow, transitions, sensory specificity, and dialogue subtext\n"
+                "- remove repeated phrasing, filler explanation, and meta/outlining language such as 'the next problem', 'the chapter ends', 'pushing the story forward', or 'sets up'\n"
+                "- replace vague emotional labels with concrete gesture, image, choice, or fallout where the existing scene supports it\n"
+                "- make technical stakes legible through visible human cost and on-page consequence\n"
+                "- sharpen side-character agency without changing the continuity outcome\n"
+                "- keep the ending concrete: a visible action, irreversible choice, reveal, reversal, or state change, not a thesis about what comes next\n"
+                "- honor the style profile and selected genre profile without imitating any protected style reference\n"
+                "- keep roughly the same length unless trimming improves repetition or clarity\n\n"
+                "Return final edited chapter prose only."
+            ),
+        },
+    ]
+
+
 def build_json_repair_messages(raw_text: str, label: str, issue: str | None = None) -> list[dict[str, str]]:
     issue_text = f"\nParser or schema error:\n{issue}\n\n" if issue else "\n"
     return [
