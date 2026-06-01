@@ -1405,6 +1405,174 @@ dd {
   background: rgba(255, 255, 255, 0.58);
 }
 
+.edition-workspace {
+  border-color: rgba(23, 106, 90, 0.2);
+}
+
+.edition-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.edition-stat,
+.edition-output-group,
+.edition-word-map {
+  padding: 0.85rem;
+  border: 1px solid rgba(217, 207, 192, 0.95);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.edition-stat {
+  display: grid;
+  gap: 0.25rem;
+  align-content: start;
+}
+
+.edition-stat strong {
+  font-size: clamp(1.15rem, 1.6vw, 1.45rem);
+  line-height: 1.1;
+}
+
+.edition-layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.85fr) minmax(0, 1.35fr);
+  gap: 1rem;
+  align-items: start;
+  margin-top: 1rem;
+}
+
+.edition-output-groups {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.edition-output-group {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.edition-group-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+  flex-wrap: wrap;
+}
+
+.edition-artifact-links {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.edition-artifact-links a {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.edition-artifact-links a:hover,
+.edition-artifact-links a:focus-visible {
+  border-color: rgba(23, 106, 90, 0.38);
+  background: rgba(23, 106, 90, 0.08);
+}
+
+.edition-word-map {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.edition-word-list {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 24rem;
+  overflow: auto;
+  padding-right: 0.15rem;
+}
+
+.edition-word-row {
+  display: grid;
+  grid-template-columns: 2.1rem minmax(0, 1fr) 4.75rem 6.5rem auto auto;
+  gap: 0.55rem;
+  align-items: center;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid rgba(212, 221, 215, 0.95);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+}
+
+.edition-word-row:hover,
+.edition-word-row:focus-visible {
+  border-color: rgba(23, 106, 90, 0.38);
+  background: rgba(23, 106, 90, 0.08);
+}
+
+.edition-word-success {
+  border-color: rgba(23, 101, 59, 0.2);
+}
+
+.edition-word-warning {
+  border-color: rgba(141, 104, 24, 0.25);
+  background: var(--warning-soft);
+}
+
+.edition-word-pending {
+  opacity: 0.82;
+}
+
+.edition-word-row.has-risk {
+  border-color: rgba(166, 66, 51, 0.26);
+}
+
+.edition-word-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: var(--radius-sm);
+  background: rgba(23, 106, 90, 0.1);
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.edition-word-title,
+.edition-word-count,
+.edition-word-label,
+.edition-word-flag {
+  font-size: 0.86rem;
+}
+
+.edition-word-count,
+.edition-word-label,
+.edition-word-flag {
+  font-weight: 700;
+}
+
+.edition-word-flag {
+  display: inline-flex;
+  justify-content: center;
+  padding: 0.24rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(23, 101, 59, 0.22);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.edition-word-flag.risk {
+  border-color: rgba(166, 66, 51, 0.24);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .artifact-kind {
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -2218,6 +2386,7 @@ code {
   .quick-action-grid,
   .stats-grid,
   .run-stepper,
+  .edition-layout,
   .checklist-item,
   .section-header,
   .chapter-topline,
@@ -2296,6 +2465,10 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .edition-stat-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .regenerate-suggestion {
     grid-template-columns: 1fr;
   }
@@ -2341,6 +2514,20 @@ code {
   .run-setup-grid,
   .quick-action-grid {
     grid-template-columns: 1fr;
+  }
+
+  .edition-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .edition-word-row {
+    grid-template-columns: 2.1rem minmax(0, 1fr);
+  }
+
+  .edition-word-count,
+  .edition-word-label,
+  .edition-word-flag {
+    justify-self: start;
   }
 
   .book-completion-grid {

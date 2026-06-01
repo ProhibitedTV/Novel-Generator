@@ -335,8 +335,11 @@ function setupChapterNavigator(root) {
     const jumpInput = toolbar.querySelector("[data-chapter-jump-input]");
     const jumpButton = toolbar.querySelector("[data-chapter-jump]");
     const clearButton = toolbar.querySelector("[data-chapter-clear]");
+    const openRiskyButton = toolbar.querySelector("[data-chapter-open-risky]");
+    const collapseButton = toolbar.querySelector("[data-chapter-collapse]");
     const visibleCount = toolbar.querySelector("[data-chapter-visible-count]");
     const emptyState = toolbar.querySelector("[data-chapter-empty]");
+    const reviewSections = Array.from(section?.querySelectorAll("[data-review-section]") || []);
 
     const setHidden = (node, hidden) => {
       if (node) {
@@ -413,6 +416,31 @@ function setupChapterNavigator(root) {
         statusFilter.value = "";
       }
       sync();
+    });
+    openRiskyButton?.addEventListener("click", () => {
+      if (statusFilter) {
+        statusFilter.value = "risk";
+      }
+      sync();
+      let firstRiskCard = null;
+      cards.forEach((card) => {
+        if (card.dataset.chapterRisk !== "true") {
+          return;
+        }
+        if (!firstRiskCard) {
+          firstRiskCard = card;
+        }
+        const firstReviewSection = card.querySelector("[data-review-section]");
+        if (firstReviewSection) {
+          firstReviewSection.open = true;
+        }
+      });
+      firstRiskCard?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    collapseButton?.addEventListener("click", () => {
+      reviewSections.forEach((reviewSection) => {
+        reviewSection.open = false;
+      });
     });
     sync();
   });

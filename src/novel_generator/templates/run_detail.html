@@ -210,6 +210,122 @@
     </div>
   </section>
 
+  {% if manuscript_edition.show %}
+    <section class="panel edition-workspace" id="manuscript-edition" data-edition-workspace>
+      <div class="section-header">
+        <div class="section-header-copy">
+          <p class="eyebrow">Manuscript edition</p>
+          <h2>Edition snapshot</h2>
+          <p>{{ manuscript_edition.snapshot_label }} #{{ manuscript_edition.edition_number }}. Use this workspace to verify chapter coverage, final-edit state, QA, and export readiness before treating the run as the book candidate.</p>
+        </div>
+        <div class="hero-actions">
+          {% if manuscript_edition.primary_artifact %}
+            <a class="button" href="/api/artifacts/{{ manuscript_edition.primary_artifact.id }}/download">Download manuscript</a>
+          {% endif %}
+          {% if manuscript_edition.qa_artifact %}
+            <a class="button secondary" href="/api/artifacts/{{ manuscript_edition.qa_artifact.id }}/download">Download QA</a>
+          {% endif %}
+          {% if run.status.value == "completed" %}
+            <a class="button secondary" href="#publication-export">Create publication export</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="edition-stat-grid">
+        <div class="edition-stat">
+          <span class="detail-label">Manuscript words</span>
+          <strong>{{ manuscript_edition.total_words }}</strong>
+          <span class="field-note">{{ manuscript_edition.word_percent }}% of {{ manuscript_edition.target_words }}</span>
+        </div>
+        <div class="edition-stat">
+          <span class="detail-label">Chapter coverage</span>
+          <strong>{{ manuscript_edition.completed_chapters }} / {{ manuscript_edition.requested_chapters }}</strong>
+          <span class="field-note">{{ manuscript_edition.missing_chapters }} missing prose</span>
+        </div>
+        <div class="edition-stat">
+          <span class="detail-label">Final edit</span>
+          <strong>{{ manuscript_edition.final_edit_chapters }} / {{ manuscript_edition.requested_chapters }}</strong>
+          <span class="field-note">chapter checkpoints</span>
+        </div>
+        <div class="edition-stat">
+          <span class="detail-label">QA coverage</span>
+          <strong>{{ manuscript_edition.qa_chapters }} / {{ manuscript_edition.requested_chapters }}</strong>
+          <span class="field-note">{{ manuscript_edition.risk_chapters }} chapters flagged</span>
+        </div>
+        <div class="edition-stat">
+          <span class="detail-label">Word range</span>
+          <strong>{{ manuscript_edition.within_target_count }} / {{ manuscript_edition.requested_chapters }}</strong>
+          <span class="field-note">{{ run.min_words_per_chapter }}-{{ run.max_words_per_chapter }} target</span>
+        </div>
+        <div class="edition-stat">
+          <span class="detail-label">Average chapter</span>
+          <strong>{{ manuscript_edition.average_words }}</strong>
+          <span class="field-note">words</span>
+        </div>
+      </div>
+
+      <div class="edition-layout">
+        <div class="edition-output-groups">
+          {% for group in manuscript_edition.artifact_groups %}
+            <article class="edition-output-group" data-edition-artifact-group="{{ group.id }}">
+              <div class="edition-group-topline">
+                <div>
+                  <strong>{{ group.label }}</strong>
+                  <p class="field-note">{{ group.description }}</p>
+                </div>
+                <span class="meta-chip">{{ group.artifacts|length }}</span>
+              </div>
+              {% if group.artifacts %}
+                <div class="edition-artifact-links">
+                  {% for artifact in group.artifacts %}
+                    <a href="/api/artifacts/{{ artifact.id }}/download">
+                      <span>{{ artifact.filename }}</span>
+                      <span class="artifact-kind">{{ artifact.kind }}</span>
+                    </a>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <p class="empty-state">{{ group.empty }}</p>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+
+        <div class="edition-word-map">
+          <div class="edition-group-topline">
+            <div>
+              <strong>Word-count map</strong>
+              <p class="field-note">Jump into outliers, flagged chapters, or chapters that missed the final edit checkpoint.</p>
+            </div>
+            {% if manuscript_edition.shortest and manuscript_edition.longest %}
+              <span class="meta-chip">Low {{ manuscript_edition.shortest.word_count }} / high {{ manuscript_edition.longest.word_count }}</span>
+            {% endif %}
+          </div>
+          <div class="edition-word-list">
+            {% for row in manuscript_edition.word_rows %}
+              <a
+                href="#chapter-{{ row.chapter_number }}"
+                class="edition-word-row edition-word-{{ row.tone }}{% if row.has_risk %} has-risk{% endif %}"
+                data-edition-word-row
+              >
+                <span class="edition-word-number">{{ row.chapter_number }}</span>
+                <span class="edition-word-title long-value">{{ row.title }}</span>
+                <span class="edition-word-count">{{ row.word_count }}</span>
+                <span class="edition-word-label">{{ row.label }}</span>
+                {% if row.final_edit_completed %}
+                  <span class="edition-word-flag">Edited</span>
+                {% endif %}
+                {% if row.has_risk %}
+                  <span class="edition-word-flag risk">Risk</span>
+                {% endif %}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
   <div class="run-stepper" data-run-stepper>
     {% for stage in run_stages %}
       <article class="run-stage" data-stage="{{ stage.id }}">
@@ -1222,6 +1338,8 @@
         <div class="outline-filter-actions">
           <button class="secondary" type="button" data-chapter-jump>Jump</button>
           <button class="secondary" type="button" data-chapter-clear>Reset</button>
+          <button class="secondary" type="button" data-chapter-open-risky>Open risky</button>
+          <button class="secondary" type="button" data-chapter-collapse>Collapse all</button>
         </div>
       </div>
       <p class="field-note"><span data-chapter-visible-count>{{ chapter_review_cards|length }} chapters visible</span></p>
@@ -1251,6 +1369,7 @@
           data-chapter-current="{{ 'true' if run.current_chapter == chapter.chapter_number else 'false' }}"
           data-chapter-risk="{{ 'true' if card.has_risk else 'false' }}"
           data-chapter-has-content="{{ 'true' if chapter.content else 'false' }}"
+          data-chapter-final-edit="{{ 'true' if card.final_edit_completed else 'false' }}"
         >
           <div class="chapter-topline">
             <div class="chapter-heading">
