@@ -192,6 +192,28 @@ def _valid_outline_chunk_responses(total_chapters: int = 64) -> list[str]:
     ]
 
 
+def _smooth_outline_entry(index: int, total_chapters: int) -> dict[str, object]:
+    entry = _valid_outline_entry(index, total_chapters)
+    entry["title"] = f"Moon Canal Turn {index}"
+    entry["objective"] = f"Iris follows a specific generated route beat {index}."
+    entry["outcome_type"] = "compromise"
+    return entry
+
+
+def _smooth_outline_chunk_responses(total_chapters: int = 32) -> list[str]:
+    return [
+        json.dumps(
+            {
+                "chapters": [
+                    _smooth_outline_entry(index, total_chapters)
+                    for index in range(start_chapter, min(total_chapters, start_chapter + 7) + 1)
+                ]
+            }
+        )
+        for start_chapter in range(1, total_chapters + 1, 8)
+    ]
+
+
 def _story_turn_payload(index: int) -> dict[str, object]:
     turns: dict[int, dict[str, object]] = {
         1: {
@@ -437,7 +459,15 @@ class FakeOllamaClient:
         return response
 
 
-def _create_project(session, *, requested_chapters: int = 2, approved_canon: list[dict] | None = None):
+def _create_project(
+    session,
+    *,
+    requested_chapters: int = 2,
+    desired_word_count: int = 2000,
+    min_words_per_chapter: int = 900,
+    max_words_per_chapter: int = 1200,
+    approved_canon: list[dict] | None = None,
+):
     story_brief = {
         "setting": "A failing memory-city",
         "tone": "Tense luminous sci-fi",
@@ -452,10 +482,10 @@ def _create_project(session, *, requested_chapters: int = 2, approved_canon: lis
         ProjectCreate(
             title="The Glass Orchard",
             premise="A disgraced archivist finds a living map under a failing city.",
-            desired_word_count=2000,
+            desired_word_count=desired_word_count,
             requested_chapters=requested_chapters,
-            min_words_per_chapter=900,
-            max_words_per_chapter=1200,
+            min_words_per_chapter=min_words_per_chapter,
+            max_words_per_chapter=max_words_per_chapter,
             preferred_model="test-model",
             story_brief=story_brief,
         ),
@@ -662,6 +692,69 @@ def test_continuity_fallback_completes_run_when_continuity_provider_fails(config
         assert refreshed.chapters[0].continuity_update
 
 
+def test_under_length_chapter_expands_before_critique(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    short_draft = "Iris found the map. Tarin told her the corridor was closing."
+    expanded_draft = " ".join(["Iris widened the scene with concrete cost and dialogue."] * 220)
+    expanded_revision = " ".join(["Tarin challenged Iris while the living map exacted a visible cost."] * 220)
+    final_edit = " ".join(["Iris kept the expanded scene polished and specific."] * 220)
+
+    with session_factory() as session:
+        project = _create_project(
+            session,
+            requested_chapters=1,
+            desired_word_count=1800,
+            min_words_per_chapter=1500,
+            max_words_per_chapter=2200,
+        )
+        run = create_run(
+            session,
+            project,
+            RunCreate(
+                project_id=project.id,
+                model_name="test-model",
+                pause_after_outline=False,
+                developmental_rewrite_enabled=False,
+            ),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient(
+                [
+                    _story_bible_json(),
+                    _outline_json(1),
+                    _plan_json(1),
+                    short_draft,
+                    expanded_draft,
+                    _critique_json(revision_required=True),
+                    expanded_revision,
+                    _critique_json(revision_required=False),
+                    "Iris expands the route choice into a concrete cost.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                    final_edit,
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.COMPLETED
+        chapter = refreshed.chapters[0]
+        assert chapter.word_count >= refreshed.min_words_per_chapter
+        assert chapter.content == final_edit
+        assert any(event.event_type == "chapter_expansion_completed" for event in refreshed.events)
+        attempts = list_stage_attempts(session, refreshed.id)
+        assert any(attempt.stage == "chapter_expansion" and attempt.status == "success" for attempt in attempts)
+
+
 def test_large_run_generates_outline_in_chunks_and_pauses(configured_environment) -> None:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -687,6 +780,66 @@ def test_large_run_generates_outline_in_chunks_and_pauses(configured_environment
         assert [entry["chapter_number"] for entry in refreshed.outline] == list(range(1, 65))
         assert len(refreshed.chapters) == 64
         assert sum(event.event_type == "outline_chunk_completed" for event in refreshed.events) == 8
+
+
+def test_32_chapter_run_generates_outline_in_chunks_and_pauses(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=32)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient([_story_bible_json(), *_valid_outline_chunk_responses(total_chapters=32)]),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.AWAITING_APPROVAL
+        assert refreshed.current_step == "outline_review"
+        assert refreshed.outline is not None
+        assert len(refreshed.outline) == 32
+        assert [entry["chapter_number"] for entry in refreshed.outline] == list(range(1, 33))
+        assert len(refreshed.chapters) == 32
+        assert sum(event.event_type == "outline_chunk_completed" for event in refreshed.events) == 4
+        attempts = list_stage_attempts(session, refreshed.id)
+        assert {attempt.stage for attempt in attempts} == {"story_bible", "outline_chunk"}
+
+
+def test_chunked_outline_validation_repair_preserves_generated_chapters(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=32)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(
+            session,
+            run,
+            settings,
+            FakeOllamaClient([_story_bible_json(), *_smooth_outline_chunk_responses(total_chapters=32)]),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.AWAITING_APPROVAL
+        assert refreshed.outline is not None
+        assert refreshed.outline[0]["title"] == "Moon Canal Turn 1"
+        assert refreshed.outline[15]["title"] == "Moon Canal Turn 16"
+        assert sum(
+            1
+            for entry in refreshed.outline
+            if entry["outcome_type"].lower() in {"setback", "reversal"}
+        ) >= 10
+        assert any(event.event_type == "outline_validation_repaired" for event in refreshed.events)
+        assert not any(event.event_type == "outline_validation_fallback" for event in refreshed.events)
 
 
 def test_large_outline_chunk_fallback_prevents_short_outline_failure(configured_environment) -> None:

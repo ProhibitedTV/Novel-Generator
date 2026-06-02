@@ -321,6 +321,17 @@ def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch)
     assert "396 minimum" in response.text
 
 
+def test_project_detail_preflight_chunks_32_chapter_runs(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id = seed_project(requested_chapters=32, desired_word_count=32000)
+
+    response = client.get(f"/projects/{project_id}")
+
+    assert response.status_code == 200
+    assert "32 chapters will use 4 outline chunks" in response.text
+    assert "200 minimum" in response.text
+
+
 def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
 

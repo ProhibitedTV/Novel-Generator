@@ -414,6 +414,7 @@ def build_outline_chunk_messages(
     profile = _story_bible_genre_profile(bible)
     chapter_mode_options = _chapter_mode_options()
     chapter_count = end_chapter - start_chapter + 1
+    minimum_local_setbacks = max(1, math.ceil(chapter_count * 0.3))
     midpoint_start = max(2, math.ceil(run.requested_chapters * 0.4))
     midpoint_end = max(midpoint_start, math.floor(run.requested_chapters * 0.7))
     midpoint_rule = (
@@ -473,7 +474,8 @@ def build_outline_chunk_messages(
                 f"- return exactly chapters {start_chapter} through {end_chapter}, no missing chapters and no extra chapters\n"
                 "- continue the prior outline instead of repeating its inciting incident, discovery, midpoint, or climax\n"
                 "- each chapter must change the external situation and at least one character state\n"
-                "- use setback or reversal often enough that the full book does not become a clean-win chain\n"
+                f"- at least {minimum_local_setbacks} chapters in this chunk must have outcome_type set to setback or reversal\n"
+                "- distribute those setbacks/reversals across the chunk instead of clustering them all at the end\n"
                 f"{midpoint_rule}"
                 "- every local block of 4 chapters should include at least 1 chapter_mode of breather or aftermath when possible\n"
                 "- do not repeat any chapter_mode used by either of the previous 2 accepted chapters\n"
@@ -848,6 +850,62 @@ def build_chapter_revision_messages(
     ]
 
 
+def build_chapter_expansion_messages(
+    project: Project,
+    run: GenerationRun,
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+    plan: ChapterPlan | dict[str, Any],
+) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    chapter_plan = plan if isinstance(plan, dict) else plan.model_dump()
+    profile = _story_bible_genre_profile(bible)
+    style_profile = bible.get("style_profile") or {}
+    current_word_count = len((chapter.content or "").split())
+    target_floor = max(run.min_words_per_chapter, current_word_count + 250)
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You expand under-length fiction chapters into fuller finished scenes. "
+                "Return the complete revised chapter prose only, with no heading, markdown, or notes."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Expand chapter {chapter.chapter_number} of '{project.title}' from {current_word_count} words "
+                f"to at least {target_floor} words, staying within the target range "
+                f"{run.min_words_per_chapter}-{run.max_words_per_chapter} when possible.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prose style profile:\n{json.dumps(style_profile, indent=2)}\n\n"
+                f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
+                f"Current under-length chapter:\n{chapter.content or ''}\n\n"
+                "Expansion rules:\n"
+                "- return the full expanded chapter, not only added passages\n"
+                "- preserve the existing plot outcome, continuity facts, ending_state, and concrete ending hook\n"
+                "- add missing dramatized scene work: action, dialogue, sensory detail, emotional reaction, civilian texture, and consequence\n"
+                "- do not pad with recap, repeated exposition, abstract reflection, or summary of what will happen later\n"
+                "- make the chapter_plan.story_turn more visible through decisions, rejected alternatives, and fallout\n"
+                "- deepen side-character agency and ideological pressure through concrete behavior or dialogue\n"
+                "- preserve names, roles, systems, locations, and the canon registry\n"
+                "- obey the prose style profile and profile-specific drafting focus: "
+                + "; ".join(profile.drafting_focus)
+                + "\n"
+                "- keep the final beat concrete and consistent with the chapter's ending hook\n\n"
+                "Return complete expanded chapter prose only."
+            ),
+        },
+    ]
+
+
 def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutlineEntry | dict[str, Any]) -> list[dict[str, str]]:
     entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
     return [
@@ -1182,6 +1240,9 @@ def build_chapter_edit_messages(
                 f"Current continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Manuscript QA editing context:\n{json.dumps(_qa_editing_context(qa_report), indent=2)}\n\n"
                 f"Developmental action for this chapter:\n{json.dumps(developmental_action, indent=2)}\n\n"
+                f"Current word count: {chapter.word_count}. Target word range: "
+                f"{chapter.run.min_words_per_chapter if chapter.run else 'configured minimum'}-"
+                f"{chapter.run.max_words_per_chapter if chapter.run else 'configured maximum'}.\n\n"
                 f"Current chapter prose:\n{chapter.content or ''}\n\n"
                 "Final editing instructions:\n"
                 "- preserve the same plot events, order of events, POV, named entities, relationship state, and continuity outcome\n"
@@ -1193,7 +1254,8 @@ def build_chapter_edit_messages(
                 "- sharpen side-character agency without changing the continuity outcome\n"
                 "- keep the ending concrete: a visible action, irreversible choice, reveal, reversal, or state change, not a thesis about what comes next\n"
                 "- honor the style profile and selected genre profile without imitating any protected style reference\n"
-                "- keep roughly the same length unless trimming improves repetition or clarity\n\n"
+                "- preserve or gently increase the chapter length when it is near the lower target; do not compress it below the configured minimum word count\n"
+                "- keep roughly the same length unless trimming improves repetition or clarity and the chapter remains within the target range\n\n"
                 "Return final edited chapter prose only."
             ),
         },

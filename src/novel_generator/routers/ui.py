@@ -102,6 +102,13 @@ RUN_STAGES = [
         "result": "Quality signals and revision triggers should explain what the repair pass is trying to fix.",
     },
     {
+        "id": "chapter_expansion",
+        "label": "Expand chapter",
+        "description": "Filling out an under-length chapter before continuity is frozen.",
+        "why": "The worker is preserving the chapter outcome while adding dramatized scene work, dialogue, texture, and consequence to meet the requested book length.",
+        "result": "The chapter word count should move closer to the configured minimum before critique, summary, and continuity checkpoints continue.",
+    },
+    {
         "id": "chapter_summary",
         "label": "Update continuity",
         "description": "Saving the chapter summary and run-level continuity ledger.",
@@ -249,6 +256,7 @@ RUN_STAGE_PROGRESS_ORDER = [
     "outline_review",
     "chapter_plan",
     "chapter_draft",
+    "chapter_expansion",
     "chapter_revision",
     "chapter_summary",
     "manuscript_qa",
@@ -1462,7 +1470,7 @@ def _run_preflight_context(
 
     outline_chunks = (
         1
-        if requested_chapters <= PREFLIGHT_OUTLINE_CHUNK_THRESHOLD
+        if requested_chapters < PREFLIGHT_OUTLINE_CHUNK_THRESHOLD
         else max(1, (requested_chapters + PREFLIGHT_OUTLINE_CHUNK_SIZE - 1) // PREFLIGHT_OUTLINE_CHUNK_SIZE)
     )
     estimated_model_calls = 1 + outline_chunks + (requested_chapters * 5) + 1 + requested_chapters + 1
@@ -1487,7 +1495,7 @@ def _run_preflight_context(
     elif provider_status.available_models and model_name not in provider_status.available_models:
         warnings.append({"tone": "warning", "message": f"Model '{model_name}' is not in the detected model list."})
 
-    if requested_chapters > PREFLIGHT_OUTLINE_CHUNK_THRESHOLD:
+    if requested_chapters >= PREFLIGHT_OUTLINE_CHUNK_THRESHOLD:
         warnings.append(
             {
                 "tone": "warning",
