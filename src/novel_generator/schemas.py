@@ -10,7 +10,7 @@ from .models import ChapterStatus, RunStatus
 from .services.genre_profiles import DEFAULT_GENRE_PROFILE, GENRE_PROFILES
 
 
-QUALITY_PROFILE_VALUES = {"draft", "balanced", "strict"}
+QUALITY_PROFILE_VALUES = {"draft", "balanced", "strict", "publication"}
 
 ALLOWED_CHAPTER_MODES = {
     "investigation",
@@ -94,7 +94,7 @@ def _validate_genre_profile(value: Any) -> str:
 def _validate_quality_profile(value: Any) -> str:
     key = str(value or "balanced").strip().lower().replace("-", "_").replace(" ", "_")
     if key not in QUALITY_PROFILE_VALUES:
-        raise ValueError("Choose draft, balanced, or strict.")
+        raise ValueError("Choose draft, balanced, strict, or publication.")
     return key
 
 
@@ -612,6 +612,9 @@ class ManuscriptQaReport(BaseModel):
     genre_contract_notes: list[str] = Field(default_factory=list)
     continuity_bible_findings: list[str] = Field(default_factory=list)
     continuity_bible_table: list[ContinuityBibleRow] = Field(default_factory=list)
+    publication_readiness_scores: dict[str, int] = Field(default_factory=dict)
+    publication_readiness_label: str = ""
+    publication_readiness_summary: str = ""
 
     @field_validator("overall_verdict", mode="before")
     @classmethod
@@ -674,6 +677,30 @@ class ManuscriptQaReport(BaseModel):
                     rows.append({"item_type": "note", "name": rendered, "notes": rendered})
             return rows
         return []
+
+    @field_validator("publication_readiness_scores", mode="before")
+    @classmethod
+    def validate_publication_readiness_scores(cls, value: Any) -> dict[str, int]:
+        if not isinstance(value, dict):
+            return {}
+        scores: dict[str, int] = {}
+        for key, item in value.items():
+            name = str(key).strip()
+            if not name:
+                continue
+            try:
+                numeric = int(round(float(item)))
+            except (TypeError, ValueError):
+                continue
+            scores[name] = max(0, min(10, numeric))
+        return scores
+
+    @field_validator("publication_readiness_label", "publication_readiness_summary", mode="before")
+    @classmethod
+    def validate_publication_readiness_strings(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
 
 
 class DevelopmentalChapterAction(BaseModel):

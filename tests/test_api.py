@@ -186,6 +186,23 @@ def test_strict_quality_profile_enables_developmental_rewrite_by_default(client,
     assert response.json()["developmental_rewrite_enabled"] is True
 
 
+def test_publication_quality_profile_forces_outline_review_and_developmental_rewrite(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+
+    _, run_id = create_project_and_run(
+        client,
+        pause_after_outline=False,
+        developmental_rewrite_enabled=False,
+        quality_profile="publication",
+    )
+
+    response = client.get(f"/api/runs/{run_id}")
+    assert response.status_code == 200
+    assert response.json()["quality_profile"] == "publication"
+    assert response.json()["pause_after_outline"] is True
+    assert response.json()["developmental_rewrite_enabled"] is True
+
+
 def test_invalid_quality_profile_is_rejected_when_queueing_run(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
 

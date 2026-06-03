@@ -1280,8 +1280,8 @@
   <article class="panel" id="publication-export">
     <div class="section-header">
       <div class="section-header-copy">
-        <h2>Export For Publication</h2>
-        <p>Create an ebook or print-helper manuscript with front matter and profile-specific formatting.</p>
+        <h2>Export Layout Helper</h2>
+        <p>Create an ebook or print-helper manuscript with real front matter and profile-specific formatting.</p>
       </div>
       <p>Optional</p>
     </div>
@@ -1298,11 +1298,41 @@
           </label>
           <label class="checkbox-row">
             <input type="checkbox" name="include_ai_disclosure" value="1">
-            Include AI-assisted disclosure placeholder
+            Include AI-assisted disclosure
           </label>
         </div>
-        <p class="field-note">Print-ready exports are formatting helpers for review and cleanup, not a platform acceptance guarantee.</p>
-        <button type="submit">Create publication export</button>
+        <div class="field-grid two-column">
+          <label>
+            Author name
+            <input name="author_name" required>
+          </label>
+          <label>
+            Copyright year
+            <input name="copyright_year" required>
+          </label>
+          <label>
+            Publisher or imprint
+            <input name="publisher" required>
+          </label>
+          <label>
+            ISBN
+            <input name="isbn">
+          </label>
+        </div>
+        <label>
+          Dedication
+          <textarea name="dedication" rows="2" required></textarea>
+        </label>
+        <label>
+          Author note
+          <textarea name="author_note" rows="3" required></textarea>
+        </label>
+        <label>
+          AI-assisted disclosure text
+          <textarea name="ai_disclosure" rows="2"></textarea>
+        </label>
+        <p class="field-note">These are layout helpers for review and cleanup. Publication-profile runs include a readiness verdict in QA, but no export guarantees platform acceptance.</p>
+        <button type="submit">Create layout export</button>
       </form>
     {% else %}
       <p class="empty-state">Publication exports become available after the run completes.</p>

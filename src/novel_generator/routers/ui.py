@@ -130,11 +130,32 @@ RUN_STAGES = [
         "result": "Targeted chapters should gain safer before/after revision events while unchanged chapters pass through to final edit.",
     },
     {
+        "id": "chapter_humanization",
+        "label": "Humanize chapter",
+        "description": "Adding ordinary human friction and character texture for publication mode.",
+        "why": "The worker is reducing allegorical or discipline-only characterization while preserving the chapter's canon outcome.",
+        "result": "Targeted chapters should gain more private wants, subtext, and believable interpersonal pressure.",
+    },
+    {
+        "id": "chapter_compression",
+        "label": "Compress prose",
+        "description": "Cutting repeated motifs, filler explanation, and generated-feeling density.",
+        "why": "Publication mode drafts long enough to leave material for a later compression pass, then trims repeated atmosphere and over-explanation.",
+        "result": "Targeted chapters should move closer to the final word target with cleaner prose.",
+    },
+    {
         "id": "chapter_edit",
         "label": "Final edit",
         "description": "Polishing saved chapter prose before final QA and export.",
         "why": "The worker is line-editing each chapter for clarity, rhythm, concrete sensory detail, and cleaner transitions while preserving the story state.",
         "result": "Chapter text and word counts should update without changing the approved outline or continuity checkpoints.",
+    },
+    {
+        "id": "publication_readiness",
+        "label": "Readiness QA",
+        "description": "Scoring the manuscript against publication-readiness criteria.",
+        "why": "Publication mode distinguishes a reviewable manuscript from one that is actually ready for publication layout.",
+        "result": "The final QA report should show publication-readiness scores and whether more editorial work is needed.",
     },
     {
         "id": "export",
@@ -212,6 +233,12 @@ QUALITY_PROFILE_DEFS = [
         "summary": "Most editorial scrutiny",
         "description": "Use tighter revision thresholds with standard developmental planning and the final edit pass.",
     },
+    {
+        "value": "publication",
+        "label": "Publication",
+        "summary": "Highest-cost editorial path",
+        "description": "Draft long, force developmental actions, humanize characters, compress repeated prose, run final readiness QA, and require outline approval.",
+    },
 ]
 QUALITY_PROFILE_LOOKUP = {item["value"]: item for item in QUALITY_PROFILE_DEFS}
 RUN_STAGE_LOOKUP = {stage["id"]: stage for stage in RUN_STAGES}
@@ -227,7 +254,10 @@ RUN_STAGE_PROGRESS_ORDER = [
     "manuscript_qa",
     "developmental_rewrite",
     "developmental_revision",
+    "chapter_humanization",
+    "chapter_compression",
     "chapter_edit",
+    "publication_readiness",
     "export",
     "completed",
 ]
@@ -1424,7 +1454,7 @@ def _run_preflight_context(
     target_word_count = _positive_int(values.get("target_word_count"), 1)
     pause_after_outline = bool(values.get("pause_after_outline", True))
     profile = _quality_profile_context(values.get("quality_profile"))
-    developmental_rewrite_enabled = bool(values.get("developmental_rewrite_enabled")) or profile["value"] == "strict"
+    developmental_rewrite_enabled = bool(values.get("developmental_rewrite_enabled")) or profile["value"] in {"strict", "publication"}
     task_routing = _task_routing_payload(values)
     route_disclosure = _route_privacy_summary(provider_name, model_name, task_routing)
     config = configs_by_name.get(provider_name)
@@ -3436,6 +3466,13 @@ def publication_export_ui(
     run_id: str,
     profile_id: str = Form(...),
     include_ai_disclosure: str | None = Form(None),
+    author_name: str = Form(""),
+    copyright_year: str = Form(""),
+    publisher: str = Form(""),
+    dedication: str = Form(""),
+    author_note: str = Form(""),
+    isbn: str = Form(""),
+    ai_disclosure: str = Form(""),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -3469,6 +3506,15 @@ def publication_export_ui(
             chapters,
             profile_id,
             include_ai_disclosure=_coerce_checkbox(include_ai_disclosure),
+            front_matter={
+                "author_name": author_name,
+                "copyright_year": copyright_year,
+                "publisher": publisher,
+                "dedication": dedication,
+                "author_note": author_note,
+                "isbn": isbn,
+                "ai_disclosure": ai_disclosure,
+            },
         )
     except ValueError as exc:
         return _redirect(f"/runs/{run.id}", message=str(exc), message_tone="warning")

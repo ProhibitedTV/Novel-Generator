@@ -195,7 +195,7 @@ function setupQualityProfileControls(root) {
       if (note && selected) {
         note.textContent = selected.dataset.profileNote || "";
       }
-      if (rewriteToggle && selected?.value === "strict") {
+      if (rewriteToggle && (selected?.value === "strict" || selected?.value === "publication")) {
         rewriteToggle.checked = true;
       }
     };

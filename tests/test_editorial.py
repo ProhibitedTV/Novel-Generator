@@ -394,6 +394,45 @@ def test_lint_flags_adjacent_technical_emergency_repetition() -> None:
     assert any("same scene mode" in item.lower() for item in result.soft_warnings)
 
 
+def test_manuscript_diagnostics_flag_publication_repetition_patterns() -> None:
+    repeated_opening = (
+        "The damp pressure of memory settled over the wet stone while copper truth and structural resonance pressed down. "
+        "The damp pressure of memory settled over the wet stone while copper truth and structural resonance pressed down."
+    )
+    chapters = [
+        ChapterDraft(
+            chapter_number=1,
+            title="Signal",
+            outline_summary="Mode: systems_crisis",
+            content=(
+                repeated_opening
+                + '\n\n"The calculation of cartography and engineering theory proves the infrastructure system," Mara said. '
+                + " ".join(["memory pressure structural truth resonance"] * 20)
+            ),
+            status=ChapterStatus.COMPLETED,
+            summary="Mara finds the signal.",
+        ),
+        ChapterDraft(
+            chapter_number=2,
+            title="Echo",
+            outline_summary="Mode: systems_crisis",
+            content=repeated_opening + " " + " ".join(["control vulnerability agency consequence structure"] * 20),
+            status=ChapterStatus.COMPLETED,
+            summary="Mara follows the echo.",
+        ),
+    ]
+
+    lint_findings = lint_manuscript(chapters)
+    notes = manuscript_quality_notes(chapters, _story_bible())
+
+    assert any("Publication motif overuse" in finding for finding in lint_findings)
+    assert any("highly similar opening texture" in finding for finding in lint_findings)
+    assert any("abstract noun cluster" in finding for finding in lint_findings)
+    assert any("discipline labels" in finding for finding in lint_findings)
+    assert any("Publication motif overuse" in finding for finding in notes["atmospheric_repetition_findings"])
+    assert any("discipline labels" in finding for finding in notes["side_character_agency_notes"])
+
+
 def test_lint_flags_system_crisis_without_human_visible_consequence() -> None:
     chapter = ChapterDraft(
         chapter_number=2,
