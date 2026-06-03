@@ -53,6 +53,7 @@ from .prompts import (
     build_chapter_critique_messages,
     build_chapter_draft_messages,
     build_chapter_edit_messages,
+    build_chapter_expansion_messages,
     build_chapter_plan_messages,
     build_chapter_revision_messages,
     build_developmental_revision_messages,
@@ -911,6 +912,97 @@ def _fallback_outline_entries(
     return entries
 
 
+def _outline_payload(outline: list[dict[str, Any]]) -> str:
+    return json.dumps({"chapters": outline})
+
+
+def _set_outline_breather_fields(item: dict[str, Any], fallback: dict[str, Any], story_bible: StoryBible) -> None:
+    if item.get("chapter_mode", "").lower() not in {"breather", "aftermath"}:
+        return
+    item["civilian_life_detail"] = item.get("civilian_life_detail") or fallback["civilian_life_detail"]
+    item["emotional_reveal"] = item.get("emotional_reveal") or fallback["emotional_reveal"]
+    item["ideology_pressure"] = item.get("ideology_pressure") or story_bible.theme or fallback["ideology_pressure"]
+
+
+def _repair_outline_for_full_book_validation(
+    project: Any,
+    story_bible: StoryBible,
+    outline: list[dict[str, Any]],
+    requested_chapters: int,
+    *,
+    rebalance_modes: bool = False,
+) -> list[dict[str, Any]]:
+    entries = [StructuredOutlineEntry.model_validate(item) for item in outline]
+    if len(entries) != requested_chapters:
+        raise ValueError(f"Cannot repair outline with {len(entries)} chapters; expected {requested_chapters}.")
+    expected_numbers = list(range(1, requested_chapters + 1))
+    actual_numbers = [entry.chapter_number for entry in entries]
+    if actual_numbers != expected_numbers:
+        raise ValueError("Cannot repair outline whose chapter numbers are not sequential.")
+
+    fallback_entries = {
+        item["chapter_number"]: item
+        for item in _fallback_outline_entries(project, story_bible, 1, requested_chapters, requested_chapters)
+    }
+    repaired = [entry.model_dump() for entry in entries]
+
+    if rebalance_modes:
+        for item in repaired:
+            item["chapter_mode"] = _fallback_chapter_mode(item["chapter_number"])
+
+    for item in repaired:
+        fallback = fallback_entries[item["chapter_number"]]
+        _set_outline_breather_fields(item, fallback, story_bible)
+
+    midpoint_chapter: int | None = None
+    if requested_chapters >= 3:
+        midpoint_start = max(2, (requested_chapters * 2 + 4) // 5)
+        midpoint_end = max(midpoint_start, (requested_chapters * 7) // 10)
+        midpoint_chapter = max(midpoint_start, min(midpoint_end, (midpoint_start + midpoint_end) // 2))
+        repaired[midpoint_chapter - 1]["outcome_type"] = "reversal"
+
+    minimum_setbacks = max(1, (requested_chapters * 3 + 9) // 10)
+    candidate_numbers: list[int] = []
+    if midpoint_chapter is not None:
+        candidate_numbers.append(midpoint_chapter)
+    candidate_numbers.extend(range(2, requested_chapters + 1, 2))
+    candidate_numbers.extend(range(5, requested_chapters + 1, 5))
+    candidate_numbers.append(requested_chapters)
+    candidate_numbers.extend(range(1, requested_chapters + 1))
+
+    seen_candidates: set[int] = set()
+    for chapter_number in candidate_numbers:
+        if chapter_number in seen_candidates:
+            continue
+        seen_candidates.add(chapter_number)
+        setback_count = sum(
+            1 for item in repaired if item.get("outcome_type", "").lower() in {"setback", "reversal"}
+        )
+        if setback_count >= minimum_setbacks:
+            break
+        item = repaired[chapter_number - 1]
+        if item.get("outcome_type", "").lower() not in {"setback", "reversal"}:
+            item["outcome_type"] = (
+                "reversal"
+                if chapter_number == requested_chapters
+                or chapter_number == midpoint_chapter
+                or chapter_number % 5 == 0
+                else "setback"
+            )
+
+    clean_win_streak = 0
+    for item in repaired:
+        if item.get("outcome_type", "").lower() == "win":
+            clean_win_streak += 1
+        else:
+            clean_win_streak = 0
+        if clean_win_streak > 2:
+            item["outcome_type"] = "setback"
+            clean_win_streak = 0
+
+    return repaired
+
+
 def _fallback_chapter_plan(
     chapter: Any,
     outline_entry: StructuredOutlineEntry,
@@ -1035,8 +1127,49 @@ def _validated_outline_or_fallback(
     outline: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        return parse_outline(json.dumps({"chapters": outline}), run.requested_chapters)
+        return parse_outline(_outline_payload(outline), run.requested_chapters)
     except Exception as exc:
+        try:
+            repaired = _repair_outline_for_full_book_validation(
+                project,
+                story_bible,
+                outline,
+                run.requested_chapters,
+            )
+            parsed = parse_outline(_outline_payload(repaired), run.requested_chapters)
+            record_event(
+                session,
+                run,
+                "outline_validation_repaired",
+                {
+                    "message": "Combined outline failed full-book pacing validation; preserved generated chapters and repaired pacing fields.",
+                    "error": str(exc),
+                },
+            )
+            return parsed
+        except Exception as repair_exc:
+            try:
+                repaired = _repair_outline_for_full_book_validation(
+                    project,
+                    story_bible,
+                    outline,
+                    run.requested_chapters,
+                    rebalance_modes=True,
+                )
+                parsed = parse_outline(_outline_payload(repaired), run.requested_chapters)
+                record_event(
+                    session,
+                    run,
+                    "outline_validation_repaired",
+                    {
+                        "message": "Combined outline failed full-book pacing validation; preserved generated chapters and rebalanced pacing fields.",
+                        "error": str(exc),
+                        "repair_error": str(repair_exc),
+                    },
+                )
+                return parsed
+            except Exception as rebalance_exc:
+                fallback_error = rebalance_exc
         record_event(
             session,
             run,
@@ -1044,19 +1177,18 @@ def _validated_outline_or_fallback(
             {
                 "message": "Combined outline failed full-book validation; generated a deterministic outline.",
                 "error": str(exc),
+                "repair_error": str(fallback_error),
             },
         )
         return parse_outline(
-            json.dumps(
-                {
-                    "chapters": _fallback_outline_entries(
-                        project,
-                        story_bible,
-                        1,
-                        run.requested_chapters,
-                        run.requested_chapters,
-                    )
-                }
+            _outline_payload(
+                _fallback_outline_entries(
+                    project,
+                    story_bible,
+                    1,
+                    run.requested_chapters,
+                    run.requested_chapters,
+                )
             ),
             run.requested_chapters,
         )
@@ -1210,7 +1342,7 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
     )
     session.commit()
     try:
-        if run.requested_chapters > OUTLINE_CHUNK_THRESHOLD:
+        if run.requested_chapters >= OUTLINE_CHUNK_THRESHOLD:
             outline = _generate_outline_chunks(session, run, story_bible, client, provider_name, model_name)
         else:
             outline = _generate_structured_output(
@@ -1239,6 +1371,144 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
     create_chapters_from_outline(session, run)
     record_event(session, run, "outline_completed", {"chapters": len(run.outline or [])})
     session.commit()
+
+
+def _chapter_length_guard_enabled(run: GenerationRun) -> bool:
+    return run.min_words_per_chapter >= 1500 or run.target_word_count >= 10000
+
+
+def _expand_chapter_to_minimum(
+    session: Session,
+    run: GenerationRun,
+    chapter: Any,
+    outline_entry: StructuredOutlineEntry,
+    story_bible: StoryBible,
+    ledger: ContinuityLedger,
+    plan: ChapterPlan,
+    client: ProviderManager | OllamaClient,
+    *,
+    reason: str,
+) -> None:
+    chapter.word_count = len((chapter.content or "").split())
+    if (
+        not _chapter_length_guard_enabled(run)
+        or chapter.word_count >= run.min_words_per_chapter
+        or chapter.summary
+    ):
+        session.commit()
+        return
+
+    for pass_number in range(1, 3):
+        if chapter.word_count >= run.min_words_per_chapter:
+            break
+        _ensure_not_canceled(session, run)
+        provider_name, model_name = _resolve_stage_route(client, run, "chapter_revision")
+        before_word_count = chapter.word_count
+        run.current_step = "chapter_expansion"
+        run.current_chapter = chapter.chapter_number
+        record_event(
+            session,
+            run,
+            "chapter_expansion_started",
+            {
+                "message": f"Expanding chapter {chapter.chapter_number} toward the minimum word target.",
+                "chapter_number": chapter.chapter_number,
+                "before_word_count": before_word_count,
+                "target_min_words": run.min_words_per_chapter,
+                "target_max_words": run.max_words_per_chapter,
+                "pass_number": pass_number,
+                "reason": reason,
+                "provider_name": provider_name,
+                "model_name": model_name,
+            },
+        )
+        session.commit()
+        try:
+            expanded_content = sanitize_chapter_content(
+                _supervised_provider_chat(
+                    session,
+                    run,
+                    client,
+                    provider_name,
+                    model_name,
+                    build_chapter_expansion_messages(
+                        run.project,
+                        run,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        ledger,
+                        plan,
+                    ),
+                    stage="chapter_expansion",
+                    chapter_number=chapter.chapter_number,
+                    metadata={
+                        "label": f"chapter {chapter.chapter_number} expansion",
+                        "reason": reason,
+                        "pass_number": pass_number,
+                        "before_word_count": before_word_count,
+                        "target_min_words": run.min_words_per_chapter,
+                    },
+                )
+            )
+            expanded_word_count = len(expanded_content.split())
+            if not expanded_content.strip():
+                raise RuntimeError(f"Chapter {chapter.chapter_number} expansion was empty.")
+            if expanded_word_count < before_word_count:
+                raise RuntimeError(
+                    f"Chapter {chapter.chapter_number} expansion shortened the chapter from "
+                    f"{before_word_count} to {expanded_word_count} words."
+                )
+            chapter.content = expanded_content
+            chapter.word_count = expanded_word_count
+            record_event(
+                session,
+                run,
+                "chapter_expansion_completed",
+                {
+                    "message": f"Chapter {chapter.chapter_number} expansion saved.",
+                    "chapter_number": chapter.chapter_number,
+                    "before_word_count": before_word_count,
+                    "after_word_count": chapter.word_count,
+                    "target_min_words": run.min_words_per_chapter,
+                    "pass_number": pass_number,
+                    "reason": reason,
+                },
+            )
+            session.commit()
+        except Exception as exc:
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "chapter_expansion_fallback",
+                {
+                    "message": f"Chapter {chapter.chapter_number} expansion failed; keeping existing prose.",
+                    "chapter_number": chapter.chapter_number,
+                    "word_count": chapter.word_count,
+                    "target_min_words": run.min_words_per_chapter,
+                    "pass_number": pass_number,
+                    "reason": reason,
+                    "error": str(exc),
+                },
+            )
+            session.commit()
+            break
+
+    if chapter.word_count < run.min_words_per_chapter:
+        record_event(
+            session,
+            run,
+            "chapter_expansion_shortfall",
+            {
+                "message": f"Chapter {chapter.chapter_number} remains below the minimum word target.",
+                "chapter_number": chapter.chapter_number,
+                "word_count": chapter.word_count,
+                "target_min_words": run.min_words_per_chapter,
+                "reason": reason,
+            },
+        )
+        session.commit()
 
 
 def _pause_for_outline_review(session: Session, run: GenerationRun) -> None:
@@ -1378,6 +1648,18 @@ def _draft_chapter(
         )
         session.commit()
 
+    _expand_chapter_to_minimum(
+        session,
+        run,
+        chapter,
+        outline_entry,
+        story_bible,
+        ledger,
+        plan,
+        client,
+        reason="post_draft",
+    )
+
     _ensure_not_canceled(session, run)
     run.current_step = "chapter_revision"
     lint_result = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
@@ -1479,6 +1761,18 @@ def _draft_chapter(
             raise RuntimeError(f"Chapter {chapter.chapter_number} revision was empty.")
         chapter.word_count = len((chapter.content or "").split())
         session.commit()
+
+        _expand_chapter_to_minimum(
+            session,
+            run,
+            chapter,
+            outline_entry,
+            story_bible,
+            ledger,
+            plan,
+            client,
+            reason="post_revision",
+        )
 
         final_lint = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
         try:
