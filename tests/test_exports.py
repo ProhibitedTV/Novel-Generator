@@ -3,7 +3,26 @@ from __future__ import annotations
 from docx import Document
 
 from novel_generator.models import ChapterDraft, GenerationRun, Project
-from novel_generator.services.exports import export_publication_artifact, export_run_artifacts, publication_export_options
+from novel_generator.services.exports import (
+    PublicationFrontMatter,
+    export_publication_artifact,
+    export_run_artifacts,
+    publication_export_options,
+)
+
+
+def _front_matter(**overrides) -> PublicationFrontMatter:
+    values = {
+        "author_name": "Ada Writer",
+        "copyright_year": "2026",
+        "publisher": "Glass Orchard Press",
+        "dedication": "For the careful readers.",
+        "author_note": "A note about maps and memory.",
+        "isbn": "",
+        "ai_disclosure": "Drafting and editing used AI assistance under human direction.",
+    }
+    values.update(overrides)
+    return PublicationFrontMatter(**values)
 
 
 def test_export_run_artifacts_writes_manuscript_and_qa_report_without_duplicate_headings(tmp_path) -> None:
@@ -135,6 +154,7 @@ def test_publication_docx_profile_adds_front_matter_page_size_and_page_breaks(tm
         chapters,
         "print_6x9",
         include_ai_disclosure=True,
+        front_matter=_front_matter(isbn="978-1-23456-789-0"),
     )
 
     document = Document(tmp_path / artifact.relative_path)
@@ -145,10 +165,13 @@ def test_publication_docx_profile_adds_front_matter_page_size_and_page_breaks(tm
     assert artifact.filename == "publication-print-6x9.docx"
     assert round(document.sections[0].page_width.inches, 1) == 6.0
     assert round(document.sections[0].page_height.inches, 1) == 9.0
-    assert "Copyright (c) [Year] [Author Name]. All rights reserved." in text
+    assert "Copyright (c) 2026 Ada Writer. All rights reserved." in text
+    assert "Publisher: Glass Orchard Press" in text
+    assert "ISBN: 978-1-23456-789-0" in text
     assert "Dedication" in text
     assert "Author Note" in text
     assert "AI-Assisted Disclosure" in text
+    assert "[Author Name]" not in text
     assert "Chapter 1: Arrival" in text
     assert "Chapter 2: Descent" in text
     assert "**" not in text
@@ -182,7 +205,7 @@ def test_publication_markdown_profile_keeps_qa_separate_from_publication_artifac
     )
     chapter = ChapterDraft(chapter_number=1, title="Arrival", outline_summary="Wake the map.", content="A beginning.")
 
-    artifact = export_publication_artifact(tmp_path, project, run, [chapter], "ebook_markdown")
+    artifact = export_publication_artifact(tmp_path, project, run, [chapter], "ebook_markdown", front_matter=_front_matter())
     text = (tmp_path / artifact.relative_path).read_text(encoding="utf-8")
     profile_ids = {profile.id for profile in publication_export_options()}
 
@@ -191,4 +214,47 @@ def test_publication_markdown_profile_keeps_qa_separate_from_publication_artifac
     assert artifact.filename == "publication-ebook.md"
     assert "# QA Report" not in text
     assert "## Copyright" in text
+    assert "ISBN:" not in text
+    assert "[" not in text
     assert "## Chapter 1: Arrival" in text
+
+
+def test_publication_export_rejects_placeholder_front_matter(tmp_path) -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="A disgraced archivist finds a living map under a failing city.",
+        desired_word_count=1000,
+        requested_chapters=1,
+        min_words_per_chapter=800,
+        max_words_per_chapter=1200,
+        preferred_provider_name="ollama",
+        preferred_model="test-model",
+        task_routing={},
+    )
+    run = GenerationRun(
+        id="run-1",
+        project_id="project-1",
+        provider_name="ollama",
+        model_name="test-model",
+        target_word_count=1000,
+        requested_chapters=1,
+        min_words_per_chapter=800,
+        max_words_per_chapter=1200,
+        task_routing={},
+        current_step="completed",
+    )
+    chapter = ChapterDraft(chapter_number=1, title="Arrival", outline_summary="Wake the map.", content="A beginning.")
+
+    try:
+        export_publication_artifact(
+            tmp_path,
+            project,
+            run,
+            [chapter],
+            "ebook_markdown",
+            front_matter=_front_matter(author_name="[Author Name]"),
+        )
+    except ValueError as exc:
+        assert "bracketed placeholders" in str(exc)
+    else:
+        raise AssertionError("placeholder front matter should be rejected")

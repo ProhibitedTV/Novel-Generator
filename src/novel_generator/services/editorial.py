@@ -29,6 +29,45 @@ STOCK_PHRASES = [
     "mara stared",
 ]
 
+PUBLICATION_MOTIFS = {
+    "brine",
+    "copper",
+    "damp",
+    "guilt",
+    "memory",
+    "pressure",
+    "resonance",
+    "structural",
+    "truth",
+    "wet stone",
+}
+
+GENERATED_ABSTRACT_NOUNS = {
+    "agency",
+    "collapse",
+    "consequence",
+    "control",
+    "fracture",
+    "memory",
+    "pressure",
+    "resonance",
+    "stability",
+    "structure",
+    "truth",
+    "vulnerability",
+}
+
+DISCIPLINE_DIALOGUE_TERMS = {
+    "calculation",
+    "cartography",
+    "engineering",
+    "infrastructure",
+    "materials",
+    "procedure",
+    "system",
+    "theory",
+}
+
 BREATHER_MODES = {"breather", "aftermath"}
 
 TECHNICAL_SCENE_MODES = {"systems_crisis", "technical_operation"}
@@ -703,6 +742,96 @@ def _technical_fatigue_hits(text: str) -> Counter[str]:
         if count:
             hits[label] = count
     return hits
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"[A-Za-z][A-Za-z'-]*", text))
+
+
+def _motif_counts(text: str) -> Counter[str]:
+    lowered = text.lower()
+    counts: Counter[str] = Counter()
+    for motif in PUBLICATION_MOTIFS:
+        if " " in motif:
+            counts[motif] = lowered.count(motif)
+        else:
+            counts[motif] = len(re.findall(rf"\b{re.escape(motif)}\b", lowered))
+    return Counter({motif: count for motif, count in counts.items() if count})
+
+
+def _publication_motif_findings(chapters: list[ChapterDraft]) -> list[str]:
+    findings: list[str] = []
+    manuscript_text = "\n\n".join(chapter.content or "" for chapter in chapters)
+    total_words = max(1, _word_count(manuscript_text))
+    counts = _motif_counts(manuscript_text)
+    for motif, count in counts.most_common():
+        per_10k = count / total_words * 10000
+        if count >= 8 and per_10k >= 7:
+            findings.append(
+                f"Publication motif overuse: '{motif}' appears {count} times ({per_10k:.1f} per 10k words)."
+            )
+
+    for chapter in chapters:
+        chapter_counts = _motif_counts(chapter.content or "")
+        dense = [motif for motif, count in chapter_counts.items() if count >= 3]
+        if dense:
+            findings.append(
+                f"Chapter {chapter.chapter_number} repeats atmospheric motif(s) too often: "
+                + ", ".join(sorted(dense)[:5])
+                + "."
+            )
+    return findings
+
+
+def _chapter_opening_similarity_findings(chapters: list[ChapterDraft]) -> list[str]:
+    findings: list[str] = []
+    opening_terms = []
+    for chapter in chapters:
+        paragraphs = [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", chapter.content or "") if paragraph.strip()]
+        if not paragraphs:
+            continue
+        terms = set(sorted(_meaningful_terms(paragraphs[0]))[:40])
+        if terms:
+            opening_terms.append((chapter.chapter_number, terms))
+
+    for index, (left_number, left_terms) in enumerate(opening_terms):
+        for right_number, right_terms in opening_terms[index + 1 :]:
+            overlap = len(left_terms & right_terms) / max(1, min(len(left_terms), len(right_terms)))
+            if overlap >= 0.62:
+                findings.append(
+                    f"Chapters {left_number} and {right_number} have highly similar opening texture; vary the entry image and dramatic mode."
+                )
+                if len(findings) >= 6:
+                    return findings
+    return findings
+
+
+def _generated_abstract_cluster_findings(chapters: list[ChapterDraft]) -> list[str]:
+    findings: list[str] = []
+    for chapter in chapters:
+        text = (chapter.content or "").lower()
+        words = max(1, _word_count(text))
+        hits = sum(len(re.findall(rf"\b{re.escape(term)}\b", text)) for term in GENERATED_ABSTRACT_NOUNS)
+        if hits >= 18 and hits / words * 1000 >= 8:
+            findings.append(
+                f"Chapter {chapter.chapter_number} has a generated-feeling abstract noun cluster ({hits} theme/system terms)."
+            )
+    return findings
+
+
+def _dialogue_discipline_findings(chapters: list[ChapterDraft]) -> list[str]:
+    findings: list[str] = []
+    for chapter in chapters:
+        dialogue = " ".join(re.findall(r'"([^"]+)"', chapter.content or ""))
+        if not dialogue:
+            continue
+        lowered = dialogue.lower()
+        hits = [term for term in DISCIPLINE_DIALOGUE_TERMS if re.search(rf"\b{re.escape(term)}\b", lowered)]
+        if len(hits) >= 4:
+            findings.append(
+                f"Chapter {chapter.chapter_number} dialogue leans on discipline labels ({', '.join(sorted(hits)[:5])}) instead of private human friction."
+            )
+    return findings
 
 
 def _pattern_phrases(text: str, patterns: list[str], limit: int = 3) -> list[str]:
@@ -2015,6 +2144,10 @@ def lint_manuscript(chapters: list[ChapterDraft]) -> list[str]:
         count = manuscript_text.count(phrase)
         if count >= 4:
             findings.append(f"Repeated stock phrase '{phrase}' appears {count} times.")
+    findings.extend(_publication_motif_findings(chapters))
+    findings.extend(_chapter_opening_similarity_findings(chapters))
+    findings.extend(_generated_abstract_cluster_findings(chapters))
+    findings.extend(_dialogue_discipline_findings(chapters))
 
     for chapter in chapters:
         for hit in _meta_language_hits(chapter.content or ""):
@@ -2058,6 +2191,7 @@ def manuscript_quality_notes(
         "easy_win_warnings": [],
         "proper_noun_continuity_findings": [],
         "side_character_agency_notes": [],
+        "repetition_risks": [],
         "atmospheric_repetition_findings": [],
         "emotional_pacing_notes": [],
         "ideology_consistency_findings": [],
@@ -2227,6 +2361,12 @@ def manuscript_quality_notes(
             + "."
         )
 
+    notes["atmospheric_repetition_findings"].extend(_publication_motif_findings(sorted_chapters))
+    notes["atmospheric_repetition_findings"].extend(_chapter_opening_similarity_findings(sorted_chapters))
+    notes["repetition_risks"] = notes.get("repetition_risks", [])
+    notes["repetition_risks"].extend(_generated_abstract_cluster_findings(sorted_chapters))
+    notes["side_character_agency_notes"].extend(_dialogue_discipline_findings(sorted_chapters))
+
     if bible:
         side_decision_counts: Counter[str] = Counter()
         for chapter in chapters:
@@ -2277,6 +2417,7 @@ def manuscript_quality_notes(
     notes["proper_noun_continuity_findings"] = list(dict.fromkeys(notes["proper_noun_continuity_findings"]))
     notes["side_character_agency_notes"] = list(dict.fromkeys(notes["side_character_agency_notes"]))
     notes["atmospheric_repetition_findings"] = list(dict.fromkeys(notes["atmospheric_repetition_findings"]))
+    notes["repetition_risks"] = list(dict.fromkeys(notes.get("repetition_risks", [])))
     notes["emotional_pacing_notes"] = list(dict.fromkeys(notes["emotional_pacing_notes"]))
     notes["ideology_consistency_findings"] = list(dict.fromkeys(notes["ideology_consistency_findings"]))
     notes["civilian_texture_findings"] = list(dict.fromkeys(notes["civilian_texture_findings"]))
@@ -2296,10 +2437,36 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "",
         f"**Overall verdict:** {report.overall_verdict}",
         "",
-        "## Strengths",
-        "",
-        *([f"- {item}" for item in report.strengths] or ["- No strengths recorded."]),
-        "",
+    ]
+    if report.publication_readiness_scores or report.publication_readiness_label or report.publication_readiness_summary:
+        sections.extend(
+            [
+                "## Publication Readiness",
+                "",
+                f"**Status:** {report.publication_readiness_label or 'Not assessed'}",
+                "",
+                report.publication_readiness_summary or "No publication-readiness summary recorded.",
+                "",
+            ]
+        )
+        if report.publication_readiness_scores:
+            sections.extend(
+                [
+                    "| Area | Score |",
+                    "| --- | ---: |",
+                    *[
+                        f"| {label.replace('_', ' ').title()} | {score}/10 |"
+                        for label, score in report.publication_readiness_scores.items()
+                    ],
+                    "",
+                ]
+            )
+    sections.extend(
+        [
+            "## Strengths",
+            "",
+            *([f"- {item}" for item in report.strengths] or ["- No strengths recorded."]),
+            "",
         "## Warnings",
         "",
         *([f"- {item}" for item in report.warnings] or ["- No major warnings recorded."]),
@@ -2380,7 +2547,8 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "",
         *([f"- {item}" for item in report.lint_findings] or ["- No deterministic lint findings recorded."]),
         "",
-    ]
+        ]
+    )
     return "\n".join(sections).strip() + "\n"
 
 

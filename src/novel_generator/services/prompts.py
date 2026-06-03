@@ -57,6 +57,55 @@ def _genre_profile_block(profile: GenreProfile) -> str:
     return json.dumps(_genre_profile_payload(profile), indent=2)
 
 
+def _quality_profile_value(run: GenerationRun) -> str:
+    return str(getattr(run, "quality_profile", "balanced") or "balanced").strip().lower()
+
+
+def _is_publication_profile(run: GenerationRun) -> bool:
+    return _quality_profile_value(run) == "publication"
+
+
+def _publication_draft_range(run: GenerationRun) -> tuple[int, int]:
+    return (max(1, math.ceil(run.min_words_per_chapter * 1.15)), max(1, math.ceil(run.max_words_per_chapter * 1.15)))
+
+
+def _publication_story_bible_requirements(run: GenerationRun) -> str:
+    if not _is_publication_profile(run):
+        return ""
+    return (
+        "- publication profile: define private wants, fears, resentments, tenderness, irrational choices, ordinary relationship friction, and voice contrast for every major character\n"
+        "- publication profile: do not let characters function only as disciplines, ideologies, jobs, or exposition engines; each major character needs a non-thematic personal want\n"
+        "- publication profile: give the imagery palette a motif budget by naming overused motifs to ration and alternative textures to rotate in later chapters\n"
+    )
+
+
+def _publication_outline_requirements(run: GenerationRun) -> str:
+    if not _is_publication_profile(run):
+        return ""
+    long_book_note = (
+        "- publication profile for long books: across 32+ or 64+ chapters, force quiet relationship scenes, political/social scenes, civilian aftermath, and moments of beauty or absurdity between crisis chapters\n"
+        if run.requested_chapters >= 32
+        else ""
+    )
+    return (
+        "- publication profile: include scene variety as a structural requirement, not garnish; avoid repeating enter-location -> debate-system -> deeper-flaw -> authority-intervenes -> crisis -> breakthrough loops\n"
+        "- publication profile: no more than 2 of any 6 adjacent chapters may use the same infrastructure or system-crisis pattern\n"
+        "- publication profile: each act must include at least one chapter driven primarily by relationship friction, one by civic/political consequence, and one by aftermath or daily life texture when chapter count allows\n"
+        f"{long_book_note}"
+    )
+
+
+def _publication_draft_requirements(run: GenerationRun) -> str:
+    if not _is_publication_profile(run):
+        return ""
+    draft_min, draft_max = _publication_draft_range(run)
+    return (
+        f"- publication profile draft-long-then-cut target: draft about 115% of the final range now ({draft_min}-{draft_max} words) so a later compression pass can cut repeated explanation and filler back toward {run.min_words_per_chapter}-{run.max_words_per_chapter}\n"
+        "- publication profile motif budget: do not lean repeatedly on the same atmosphere words; ration damp, brine, pressure, resonance, structural, truth, memory, guilt, wet stone, copper, and similar signature motifs\n"
+        "- publication profile character rule: every major scene must include one ordinary human beat such as fear, jealousy, tenderness, shame, humor, fatigue, private desire, resentment, or contradiction that is not merely thematic exposition\n"
+    )
+
+
 def _chapter_continuity_payload(chapter: ChapterDraft) -> dict[str, Any]:
     payload = chapter.continuity_update or {}
     if isinstance(payload, dict):
@@ -254,7 +303,8 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 "- if a style reference is provided, infer durable craft guidance from it without copying its exact sentences, imagery, names, or distinctive phrasing\n"
                 "- character_voice_map must give each major character a distinct pressure behavior, dialogue texture, and default verbal rhythm\n"
                 "- style_profile.avoid must include the user's style avoid items plus any generic prose habits that would make the draft sound flat\n"
-                "- keep the tone and world rules specific enough to govern later chapters"
+                + _publication_story_bible_requirements(run)
+                + "- keep the tone and world rules specific enough to govern later chapters"
             ),
         },
     ]
@@ -344,7 +394,8 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 "- include profile-specific outline focus: "
                 + "; ".join(profile.outline_focus)
                 + "\n"
-                "- preserve one clean climax and one primary ending in the final chapter"
+                + _publication_outline_requirements(run)
+                + "- preserve one clean climax and one primary ending in the final chapter"
             ),
         },
     ]
@@ -432,7 +483,8 @@ def build_outline_chunk_messages(
                 "- cost_if_success must describe the price of progress, not just the risk of failure\n"
                 "- concrete_ending_hook must end on a specific actor, object, interruption, arrival, discovery, or reversal\n"
                 "- civilian_life_detail, emotional_reveal, ideology_pressure, genre_specific_beats, and genre_state_change must be filled for every chapter\n"
-                "- preserve one clean climax and one primary ending in the final chapter only"
+                + _publication_outline_requirements(run)
+                + "- preserve one clean climax and one primary ending in the final chapter only"
             ),
         },
     ]
@@ -538,7 +590,8 @@ def build_chapter_plan_messages(
                 "- include profile-specific planning focus: "
                 + "; ".join(profile.drafting_focus)
                 + "\n"
-                "- the ending_hook_delivery must describe the specific final beat that lands the outline's concrete_ending_hook"
+                + _publication_draft_requirements(run)
+                + "- the ending_hook_delivery must describe the specific final beat that lands the outline's concrete_ending_hook"
             ),
         },
     ]
@@ -610,7 +663,8 @@ def build_chapter_draft_messages(
                 "- honor profile-specific drafting focus: "
                 + "; ".join(profile.drafting_focus)
                 + "\n"
-                "- limit new system acronyms in breather or aftermath chapters unless absolutely necessary\n"
+                + _publication_draft_requirements(run)
+                + "- limit new system acronyms in breather or aftermath chapters unless absolutely necessary\n"
                 "- do not include meta-drafting or outline language in the prose, including phrases like 'The chapter ends on', 'This lays the groundwork for', 'pushing the story forward', or 'in the next chapter'\n"
                 "- do not introduce abstract chapter endings about destiny, choices, or the future hanging in the balance\n"
                 "- the final paragraph must include a concrete external action, visible consequence, irreversible decision, reveal, reversal, or state change\n"
@@ -1191,6 +1245,101 @@ def build_developmental_revision_messages(
                 "- keep continuity stable with the chapter continuity state and current ledger\n"
                 "- do not include an editorial memo, diff, heading, outline summary, or future-planning language\n\n"
                 "Return revised chapter prose only."
+            ),
+        },
+    ]
+
+
+def build_publication_humanization_messages(
+    project: Project,
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+    qa_report: ManuscriptQaReport,
+) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    profile = _story_bible_genre_profile(bible)
+    style_profile = bible.get("style_profile") or {}
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a fiction editor specializing in human character texture. "
+                "Return revised chapter prose only, with no heading, notes, JSON, or markdown fences."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Humanize chapter {chapter.chapter_number} of '{project.title}' for publication-quality fiction.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prose style profile:\n{json.dumps(style_profile, indent=2)}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Manuscript QA context:\n{json.dumps(_qa_editing_context(qa_report), indent=2)}\n\n"
+                f"Current chapter prose:\n{chapter.content or ''}\n\n"
+                "Humanization rules:\n"
+                "- preserve plot events, continuity outcome, chapter order, POV, and named canon\n"
+                "- keep the same basic scene but make characters sound like people, not embodiments of disciplines, job titles, or ideologies\n"
+                "- add or sharpen one ordinary human beat where the scene supports it: fear, jealousy, tenderness, humor, fatigue, shame, resentment, private desire, or contradiction\n"
+                "- replace neutral explanation with subtext, disagreement, evasion, memory, embarrassment, care, or irritation when it can carry the same information\n"
+                "- give any major side character on page one independent want or friction that is not only warning, calculating, validating, or explaining\n"
+                "- do not add a new subplot, new canon entity, new scene break, author note, or chapter heading\n"
+                "- avoid melodrama; the human beat should feel specific, small enough to believe, and consequential enough to change how the reader understands the character\n\n"
+                "Return revised chapter prose only."
+            ),
+        },
+    ]
+
+
+def build_publication_compression_messages(
+    project: Project,
+    chapter: ChapterDraft,
+    outline_entry: StructuredOutlineEntry | dict[str, Any],
+    story_bible: StoryBible | dict[str, Any],
+    continuity_ledger: ContinuityLedger | dict[str, Any],
+    qa_report: ManuscriptQaReport,
+) -> list[dict[str, str]]:
+    entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
+    profile = _story_bible_genre_profile(bible)
+    style_profile = bible.get("style_profile") or {}
+    target_min = chapter.run.min_words_per_chapter if chapter.run else "configured minimum"
+    target_max = chapter.run.max_words_per_chapter if chapter.run else "configured maximum"
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a publication line editor doing a ruthless but continuity-safe prose compression pass. "
+                "Return revised chapter prose only, with no heading, notes, JSON, or markdown fences."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Compress chapter {chapter.chapter_number} of '{project.title}' after the long-draft pass.\n\n"
+                f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
+                f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
+                f"Prose style profile:\n{json.dumps(style_profile, indent=2)}\n\n"
+                f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
+                f"Continuity ledger:\n{json.dumps(ledger, indent=2)}\n\n"
+                f"Manuscript QA context:\n{json.dumps(_qa_editing_context(qa_report), indent=2)}\n\n"
+                f"Current word count: {chapter.word_count}. Final target range: {target_min}-{target_max}.\n\n"
+                f"Current chapter prose:\n{chapter.content or ''}\n\n"
+                "Compression rules:\n"
+                "- preserve plot events, continuity outcome, chapter order, POV, named canon, and the final concrete story state\n"
+                "- trim 15-25% when the chapter is bloated, but do not cut below the final target range if the chapter is already short\n"
+                "- cut repeated explanation, thesis statements, duplicated emotional labeling, and repeated atmospheric setup before cutting action or dialogue\n"
+                "- reduce repeated motifs and generated-feeling clusters such as damp, brine, pressure, resonance, structural, truth, memory, guilt, wet stone, copper, and similar signature terms\n"
+                "- vary paragraph shape and keep only the sensory details that reveal character, conflict, or world state\n"
+                "- keep the ending concrete and visible; do not replace it with a summary of theme or future stakes\n"
+                "- do not add a new scene, new twist, new system rule, new character, chapter heading, author note, or outline summary\n\n"
+                "Return compressed chapter prose only."
             ),
         },
     ]

@@ -31,6 +31,17 @@ class ExportProfile:
     publication_ready: bool = False
 
 
+@dataclass(frozen=True)
+class PublicationFrontMatter:
+    author_name: str
+    copyright_year: str
+    publisher: str
+    dedication: str
+    author_note: str
+    isbn: str = ""
+    ai_disclosure: str = ""
+
+
 EXPORT_PROFILES = {
     "draft_markdown": ExportProfile(
         id="draft_markdown",
@@ -54,7 +65,7 @@ EXPORT_PROFILES = {
         output_format="markdown",
         filename="publication-ebook.md",
         kind="publication-markdown",
-        description="Markdown manuscript with publication front matter placeholders.",
+        description="Markdown manuscript layout helper with supplied front matter.",
         include_front_matter=True,
         publication_ready=True,
     ),
@@ -64,7 +75,7 @@ EXPORT_PROFILES = {
         output_format="docx",
         filename="publication-ebook.docx",
         kind="publication-docx",
-        description="DOCX manuscript with front matter and chapter page starts.",
+        description="DOCX manuscript layout helper with supplied front matter and chapter page starts.",
         include_front_matter=True,
         chapter_page_breaks=True,
         publication_ready=True,
@@ -75,7 +86,7 @@ EXPORT_PROFILES = {
         output_format="docx",
         filename="publication-print-5x8.docx",
         kind="publication-docx",
-        description='Print helper interior sized to 5" x 8".',
+        description='Print layout helper interior sized to 5" x 8".',
         page_width_inches=5,
         page_height_inches=8,
         inner_margin_inches=0.75,
@@ -90,7 +101,7 @@ EXPORT_PROFILES = {
         output_format="docx",
         filename="publication-print-5-5x8-5.docx",
         kind="publication-docx",
-        description='Print helper interior sized to 5.5" x 8.5".',
+        description='Print layout helper interior sized to 5.5" x 8.5".',
         page_width_inches=5.5,
         page_height_inches=8.5,
         include_front_matter=True,
@@ -103,7 +114,7 @@ EXPORT_PROFILES = {
         output_format="docx",
         filename="publication-print-6x9.docx",
         kind="publication-docx",
-        description='Print helper interior sized to 6" x 9".',
+        description='Print layout helper interior sized to 6" x 9".',
         page_width_inches=6,
         page_height_inches=9,
         top_margin_inches=0.8,
@@ -118,7 +129,7 @@ EXPORT_PROFILES = {
         output_format="docx",
         filename="publication-print-a5.docx",
         kind="publication-docx",
-        description='Print helper interior sized to A5 / 5.83" x 8.27".',
+        description='Print layout helper interior sized to A5 / 5.83" x 8.27".',
         page_width_inches=5.83,
         page_height_inches=8.27,
         include_front_matter=True,
@@ -140,6 +151,53 @@ def export_profile(profile_id: str) -> ExportProfile:
         return EXPORT_PROFILES[profile_id]
     except KeyError as exc:
         raise ValueError("Choose a supported export profile.") from exc
+
+
+def _normalize_front_matter(front_matter: PublicationFrontMatter | dict[str, str] | None) -> PublicationFrontMatter:
+    if front_matter is None:
+        raise ValueError("Publication front matter is required for publication exports.")
+    if isinstance(front_matter, PublicationFrontMatter):
+        payload = front_matter
+    elif isinstance(front_matter, dict):
+        payload = PublicationFrontMatter(
+            author_name=str(front_matter.get("author_name", "") or "").strip(),
+            copyright_year=str(front_matter.get("copyright_year", "") or "").strip(),
+            publisher=str(front_matter.get("publisher", "") or "").strip(),
+            dedication=str(front_matter.get("dedication", "") or "").strip(),
+            author_note=str(front_matter.get("author_note", "") or "").strip(),
+            isbn=str(front_matter.get("isbn", "") or "").strip(),
+            ai_disclosure=str(front_matter.get("ai_disclosure", "") or "").strip(),
+        )
+    else:
+        raise ValueError("Publication front matter must be a supported metadata object.")
+
+    required = {
+        "author name": payload.author_name,
+        "copyright year": payload.copyright_year,
+        "publisher or imprint": payload.publisher,
+        "dedication": payload.dedication,
+        "author note": payload.author_note,
+    }
+    missing = [label for label, value in required.items() if not value]
+    if missing:
+        raise ValueError("Publication front matter is missing: " + ", ".join(missing) + ".")
+
+    placeholder_values = {
+        label: value
+        for label, value in {
+            **required,
+            "isbn": payload.isbn,
+            "AI disclosure": payload.ai_disclosure,
+        }.items()
+        if re.search(r"\[[^\]]+\]", value)
+    }
+    if placeholder_values:
+        raise ValueError(
+            "Publication front matter cannot contain bracketed placeholders: "
+            + ", ".join(placeholder_values.keys())
+            + "."
+        )
+    return payload
 
 
 def export_run_artifacts(
@@ -236,10 +294,12 @@ def export_publication_artifact(
     profile_id: str,
     *,
     include_ai_disclosure: bool = False,
+    front_matter: PublicationFrontMatter | dict[str, str] | None = None,
 ) -> Artifact:
     profile = export_profile(profile_id)
     if not profile.publication_ready:
         raise ValueError("Choose a publication export profile.")
+    publication_front_matter = _normalize_front_matter(front_matter) if profile.include_front_matter else None
 
     run_dir = artifacts_dir / run.id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -247,12 +307,25 @@ def export_publication_artifact(
 
     if profile.output_format == "markdown":
         destination.write_text(
-            render_publication_markdown(project, chapters, profile, include_ai_disclosure=include_ai_disclosure),
+            render_publication_markdown(
+                project,
+                chapters,
+                profile,
+                include_ai_disclosure=include_ai_disclosure,
+                front_matter=publication_front_matter,
+            ),
             encoding="utf-8",
         )
         content_type = "text/markdown"
     elif profile.output_format == "docx":
-        render_publication_docx(project, chapters, destination, profile, include_ai_disclosure=include_ai_disclosure)
+        render_publication_docx(
+            project,
+            chapters,
+            destination,
+            profile,
+            include_ai_disclosure=include_ai_disclosure,
+            front_matter=publication_front_matter,
+        )
         content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
         raise ValueError("Unsupported export profile format.")
@@ -299,10 +372,13 @@ def render_publication_markdown(
     profile: ExportProfile,
     *,
     include_ai_disclosure: bool = False,
+    front_matter: PublicationFrontMatter | None = None,
 ) -> str:
     lines: list[str] = [f"# {project.title}", ""]
     if profile.include_front_matter:
-        lines.extend(_front_matter_markdown(project, include_ai_disclosure=include_ai_disclosure))
+        if front_matter is None:
+            raise ValueError("Publication front matter is required for publication exports.")
+        lines.extend(_front_matter_markdown(project, front_matter, include_ai_disclosure=include_ai_disclosure))
     for chapter in chapters:
         lines.extend(
             [
@@ -322,12 +398,15 @@ def render_publication_docx(
     profile: ExportProfile,
     *,
     include_ai_disclosure: bool = False,
+    front_matter: PublicationFrontMatter | None = None,
 ) -> None:
     document = Document()
     _configure_publication_document(document, profile)
-    _add_title_page(document, project)
+    _add_title_page(document, project, front_matter)
     if profile.include_front_matter:
-        _add_front_matter(document, project, include_ai_disclosure=include_ai_disclosure)
+        if front_matter is None:
+            raise ValueError("Publication front matter is required for publication exports.")
+        _add_front_matter(document, project, front_matter, include_ai_disclosure=include_ai_disclosure)
     for chapter in chapters:
         if profile.chapter_page_breaks:
             document.add_page_break()
@@ -365,7 +444,7 @@ def _configure_publication_document(document: Document, profile: ExportProfile) 
     heading.paragraph_format.first_line_indent = None
 
 
-def _add_title_page(document: Document, project: Project) -> None:
+def _add_title_page(document: Document, project: Project, front_matter: PublicationFrontMatter | None = None) -> None:
     title = document.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_before = Pt(180)
@@ -377,27 +456,35 @@ def _add_title_page(document: Document, project: Project) -> None:
     byline = document.add_paragraph()
     byline.alignment = WD_ALIGN_PARAGRAPH.CENTER
     byline.paragraph_format.first_line_indent = None
-    byline.add_run("by [Author Name]")
+    byline.add_run(f"by {front_matter.author_name if front_matter else 'Author'}")
 
 
-def _add_front_matter(document: Document, project: Project, *, include_ai_disclosure: bool) -> None:
-    _add_front_matter_page(
-        document,
-        "Copyright",
-        [
-            f"{project.title}",
-            "Copyright (c) [Year] [Author Name]. All rights reserved.",
-            "Publisher: [Publisher or imprint]",
-            "ISBN: [ISBN]",
-        ],
-    )
-    _add_front_matter_page(document, "Dedication", ["[Dedication]"])
-    _add_front_matter_page(document, "Author Note", ["[Author note]"])
+def _add_front_matter(
+    document: Document,
+    project: Project,
+    front_matter: PublicationFrontMatter,
+    *,
+    include_ai_disclosure: bool,
+) -> None:
+    copyright_lines = [
+        f"{project.title}",
+        f"Copyright (c) {front_matter.copyright_year} {front_matter.author_name}. All rights reserved.",
+        f"Publisher: {front_matter.publisher}",
+    ]
+    if front_matter.isbn:
+        copyright_lines.append(f"ISBN: {front_matter.isbn}")
+    _add_front_matter_page(document, "Copyright", copyright_lines)
+    _add_front_matter_page(document, "Dedication", [front_matter.dedication])
+    _add_front_matter_page(document, "Author Note", [front_matter.author_note])
     if include_ai_disclosure:
+        disclosure = (
+            front_matter.ai_disclosure
+            or "This manuscript was drafted and edited with AI assistance under human direction."
+        )
         _add_front_matter_page(
             document,
             "AI-Assisted Disclosure",
-            ["[Describe any AI-assisted drafting, editing, or production process you choose to disclose.]"],
+            [disclosure],
         )
 
 
@@ -413,33 +500,39 @@ def _add_front_matter_page(document: Document, heading_text: str, paragraphs: li
         paragraph.paragraph_format.first_line_indent = None
 
 
-def _front_matter_markdown(project: Project, *, include_ai_disclosure: bool) -> list[str]:
+def _front_matter_markdown(
+    project: Project,
+    front_matter: PublicationFrontMatter,
+    *,
+    include_ai_disclosure: bool,
+) -> list[str]:
     lines = [
         "## Copyright",
         "",
         f"{project.title}",
         "",
-        "Copyright (c) [Year] [Author Name]. All rights reserved.",
+        f"Copyright (c) {front_matter.copyright_year} {front_matter.author_name}. All rights reserved.",
         "",
-        "Publisher: [Publisher or imprint]",
-        "",
-        "ISBN: [ISBN]",
+        f"Publisher: {front_matter.publisher}",
         "",
         "## Dedication",
         "",
-        "[Dedication]",
+        front_matter.dedication,
         "",
         "## Author Note",
         "",
-        "[Author note]",
+        front_matter.author_note,
         "",
     ]
+    if front_matter.isbn:
+        lines[8:8] = [f"ISBN: {front_matter.isbn}", ""]
     if include_ai_disclosure:
         lines.extend(
             [
                 "## AI-Assisted Disclosure",
                 "",
-                "[Describe any AI-assisted drafting, editing, or production process you choose to disclose.]",
+                front_matter.ai_disclosure
+                or "This manuscript was drafted and edited with AI assistance under human direction.",
                 "",
             ]
         )

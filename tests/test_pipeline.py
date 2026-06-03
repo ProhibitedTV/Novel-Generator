@@ -409,6 +409,23 @@ def _developmental_rewrite_json() -> str:
     )
 
 
+def _empty_developmental_rewrite_json() -> str:
+    return json.dumps(
+        {
+            "overall_diagnosis": "The model sees risks but did not assign chapter actions.",
+            "act_structure_notes": [],
+            "chapter_actions": [],
+            "merge_candidates": [],
+            "cut_candidates": [],
+            "continuity_repairs": [],
+            "theme_arc_repairs": [],
+            "prose_pattern_repairs": [],
+            "pre_rewrite_risks": ["The prose repeats its atmosphere."],
+            "post_rewrite_risk_targets": [],
+        }
+    )
+
+
 class FakeOllamaClient:
     def __init__(self, responses: list[str | Exception]):
         self._responses = iter(responses)
@@ -1355,6 +1372,90 @@ def test_draft_quality_profile_defers_non_blocking_revision(configured_environme
         qa_notes = refreshed.chapters[0].qa_notes
         assert qa_notes["revision_required"] is False
         assert "Draft profile deferred non-blocking revision work" in " ".join(qa_notes["soft_warnings"])
+
+
+def test_publication_profile_supplements_empty_developmental_plan_and_runs_quality_gates(configured_environment) -> None:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(
+            session,
+            project,
+            RunCreate(
+                project_id=project.id,
+                model_name="test-model",
+                pause_after_outline=False,
+                developmental_rewrite_enabled=False,
+                quality_profile="publication",
+            ),
+        )
+        session.commit()
+
+        run = get_run(session, run.id)
+        assert run is not None
+        process_run_safe(session, run, settings, FakeOllamaClient([_story_bible_json(), _outline_json(1)]))
+        paused = get_run(session, run.id)
+        assert paused.status == RunStatus.AWAITING_APPROVAL
+        assert paused.pause_after_outline is True
+        approve_outline_review(session, paused)
+        session.commit()
+
+        long_draft = " ".join(
+            [
+                "Iris explained the structural memory pressure while Tarin explained the system and the alarm kept repeating."
+            ]
+            * 180
+        )
+        revised = " ".join(["Iris made the chapter carry a visible irreversible cost."] * 120)
+        developmental_revision = " ".join(["Iris paid for progress while Tarin chose his own risk."] * 110)
+        humanized = " ".join(["Tarin joked once, then admitted he was jealous of Iris's certainty."] * 95)
+        compressed = " ".join(["Tarin admitted jealousy while Iris chose the cost."] * 80)
+        final_edit = " ".join(["Tarin admitted jealousy; Iris chose the cost and kept moving."] * 82)
+
+        process_run_safe(
+            session,
+            paused,
+            settings,
+            FakeOllamaClient(
+                [
+                    _plan_json(1),
+                    long_draft,
+                    _critique_json(revision_required=False),
+                    revised,
+                    _critique_json(revision_required=False),
+                    "Iris chooses the costly route while Tarin acts from his own fear.",
+                    _continuity_json(1),
+                    _qa_report_json(),
+                    _empty_developmental_rewrite_json(),
+                    developmental_revision,
+                    humanized,
+                    compressed,
+                    final_edit,
+                    _qa_report_json(),
+                ]
+            ),
+        )
+
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.COMPLETED
+        assert refreshed.quality_profile == "publication"
+        assert refreshed.developmental_rewrite_enabled is True
+        assert refreshed.chapters[0].content == final_edit
+        event_types = [event.event_type for event in refreshed.events]
+        assert "publication_developmental_plan_supplemented" in event_types
+        assert "developmental_chapter_revision_completed" in event_types
+        assert "publication_chapter_humanization_completed" in event_types
+        compression_event = next(event for event in refreshed.events if event.event_type == "publication_chapter_compression_completed")
+        assert compression_event.payload["word_delta"] < 0
+        readiness_event = next(event for event in refreshed.events if event.event_type == "publication_readiness_completed")
+        assert readiness_event.payload["label"] == "needs editorial revision"
+        stages = {attempt.stage for attempt in refreshed.stage_attempts}
+        assert "chapter_humanization" in stages
+        assert "chapter_compression" in stages
+        qa_artifact = next(artifact for artifact in refreshed.artifacts if artifact.kind == "qa-report")
+        qa_text = (settings.artifacts_dir / qa_artifact.relative_path).read_text(encoding="utf-8")
+        assert "## Publication Readiness" in qa_text
 
 
 def test_canonical_entity_collision_hard_fails_run(configured_environment) -> None:

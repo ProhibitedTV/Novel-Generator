@@ -187,7 +187,9 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
     max_words_per_chapter = payload.max_words_per_chapter or project.max_words_per_chapter
     task_routing = _normalized_task_routing(payload.task_routing) if payload.task_routing is not None else deepcopy(project.task_routing or {})
     quality_profile = payload.quality_profile or "balanced"
-    developmental_rewrite_enabled = payload.developmental_rewrite_enabled or quality_profile == "strict"
+    is_publication_profile = quality_profile == "publication"
+    developmental_rewrite_enabled = payload.developmental_rewrite_enabled or quality_profile in {"strict", "publication"}
+    pause_after_outline = True if is_publication_profile else payload.pause_after_outline
 
     if not provider_name:
         raise ValueError("A provider name is required.")
@@ -205,7 +207,7 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
         min_words_per_chapter=min_words_per_chapter,
         max_words_per_chapter=max_words_per_chapter,
         pipeline_version=2,
-        pause_after_outline=payload.pause_after_outline,
+        pause_after_outline=pause_after_outline,
         developmental_rewrite_enabled=developmental_rewrite_enabled,
         quality_profile=quality_profile,
         task_routing=task_routing,

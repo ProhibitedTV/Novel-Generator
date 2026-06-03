@@ -9,8 +9,11 @@ from novel_generator.services.prompts import (
     build_chapter_revision_messages,
     build_continuity_update_messages,
     build_outline_chunk_messages,
+    build_outline_messages,
     build_developmental_rewrite_messages,
     build_manuscript_qa_messages,
+    build_publication_compression_messages,
+    build_publication_humanization_messages,
     build_story_bible_messages,
     parse_chapter_critique,
     parse_chapter_plan,
@@ -1172,6 +1175,99 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "add or sharpen the planned independent_side_character_move" in revision_prompt
     assert "voice_and_texture" in revision_prompt
     assert "do not copy exact language" in revision_prompt
+
+
+def test_publication_profile_prompts_include_character_variety_and_compression_controls() -> None:
+    project = Project(
+        title="The Glass Orchard",
+        premise="An archivist finds a living map under a failing city.",
+        desired_word_count=64000,
+        requested_chapters=32,
+        min_words_per_chapter=1800,
+        max_words_per_chapter=2400,
+        preferred_model="test-model",
+        story_brief={"tone": "wet civic fantasy", "style_avoid": ["repeated copper pressure"]},
+    )
+    run = GenerationRun(
+        model_name="test-model",
+        target_word_count=64000,
+        requested_chapters=32,
+        min_words_per_chapter=1800,
+        max_words_per_chapter=2400,
+        quality_profile="publication",
+    )
+    chapter = ChapterDraft(
+        chapter_number=1,
+        title="Signal",
+        outline_summary="Iris follows the map.",
+        content="Iris follows the map. Tarin explains the system.",
+        status=ChapterStatus.PENDING,
+    )
+    chapter.run = run
+    story_bible = {
+        "genre_profile": "sci_fi_thriller",
+        "logline": "Iris follows a living map.",
+        "theme": "Consent beats control.",
+        "act_plan": ["Discovery", "Descent", "Choice"],
+        "cast": [{"name": "Iris", "role": "Archivist", "desire": "Restore the city", "risk": "Losing herself"}],
+        "character_agendas": [],
+        "canon_registry": [],
+        "conflict_ladder": ["Map wakes"],
+        "world_rules": [],
+        "core_system_rules": [],
+        "prose_guardrails": [],
+        "genre_contract": [],
+        "style_profile": {"character_voice_map": {"Iris": "Precise, evasive"}, "avoid": ["copper pressure"]},
+        "ending_promise": "Iris chooses consent over order.",
+    }
+    outline_entry = {
+        "chapter_number": 1,
+        "act": "Act I",
+        "title": "Signal",
+        "objective": "Find the map.",
+        "conflict_turn": "The archive locks.",
+        "character_turn": "Iris admits fear.",
+        "reveal": "The map is alive.",
+        "ending_state": "Iris commits.",
+        "chapter_mode": "investigation",
+        "concrete_ending_hook": {"trigger": "door locks", "visible_object_or_actor": "map", "next_problem": "escape"},
+    }
+    plan = {
+        "chapter_mode": "investigation",
+        "scene_beats": ["Iris finds the map"],
+        "story_turn": {
+            "irreversible_change": "The map wakes.",
+            "protagonist_choice": "Iris follows it.",
+            "choice_alternatives": ["Leave"],
+            "permanent_consequence": "The archive marks her.",
+            "why_this_chapter_cannot_be_cut": "The map bond begins.",
+            "state_before": "No bond.",
+            "state_after": "Marked.",
+        },
+    }
+    qa_report = ManuscriptQaReport(
+        repetition_risks=["Repeated pressure language."],
+        side_character_agency_notes=["Tarin only explains."],
+    )
+    ledger = {}
+
+    story_prompt = build_story_bible_messages(project, run)[1]["content"]
+    outline_prompt = build_outline_messages(project, run, story_bible)[1]["content"]
+    draft_prompt = build_chapter_draft_messages(project, run, chapter, outline_entry, story_bible, ledger, "", plan)[1]["content"]
+    humanize_prompt = build_publication_humanization_messages(project, chapter, outline_entry, story_bible, ledger, qa_report)[1]["content"]
+    compression_prompt = build_publication_compression_messages(project, chapter, outline_entry, story_bible, ledger, qa_report)[1]["content"]
+
+    assert "private wants, fears, resentments, tenderness" in story_prompt
+    assert "motif budget" in story_prompt
+    assert "quiet relationship scenes" in outline_prompt
+    assert "avoid repeating enter-location -> debate-system" in outline_prompt
+    assert "draft-long-then-cut target" in draft_prompt
+    assert "2070-2760 words" in draft_prompt
+    assert "ordinary human beat" in draft_prompt
+    assert "not embodiments of disciplines" in humanize_prompt
+    assert "fear, jealousy, tenderness, humor" in humanize_prompt
+    assert "trim 15-25%" in compression_prompt
+    assert "damp, brine, pressure, resonance" in compression_prompt
 
 
 def test_rolling_context_uses_recent_completed_chapters() -> None:

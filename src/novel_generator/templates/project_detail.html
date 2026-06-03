@@ -584,7 +584,7 @@
 
       <label class="toggle-card run-mode-card">
         <span class="toggle-input">
-          <input data-developmental-rewrite-toggle type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled or run_values.quality_profile == "strict" %}checked{% endif %}>
+          <input data-developmental-rewrite-toggle type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled or run_values.quality_profile in ["strict", "publication"] %}checked{% endif %}>
           <strong>Include developmental rewrite planning</strong>
         </span>
         <span class="field-note">Standard for polished book runs. After manuscript QA, produce a structural rewrite report, revised outline, and QA comparison before the final chapter edit pass.</span>

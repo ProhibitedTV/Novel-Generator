@@ -62,6 +62,8 @@ from .prompts import (
     build_json_repair_messages,
     build_manuscript_qa_messages,
     build_outline_messages,
+    build_publication_compression_messages,
+    build_publication_humanization_messages,
     build_story_bible_messages,
     build_summary_messages,
     parse_chapter_critique,
@@ -84,6 +86,16 @@ class RunCanceled(Exception):
 
 OUTLINE_CHUNK_THRESHOLD = 32
 OUTLINE_CHUNK_SIZE = 8
+PUBLICATION_READINESS_THRESHOLD = 7
+PUBLICATION_HIGH_RISK_ACTIONS = {"rewrite", "bridge", "compress", "humanize", "vary_scene", "merge", "cut"}
+
+
+def _quality_profile_value(run: GenerationRun) -> str:
+    return str(getattr(run, "quality_profile", "balanced") or "balanced").strip().lower()
+
+
+def _is_publication_run(run: GenerationRun) -> bool:
+    return _quality_profile_value(run) == "publication"
 
 
 def _dedupe(items: list[str]) -> list[str]:
@@ -666,10 +678,24 @@ def _apply_quality_profile_to_critique(run: GenerationRun, critique: ChapterCrit
             }
         )
 
-    if profile != "strict":
+    if profile not in {"strict", "publication"}:
         return critique
 
     strict_warnings, scopes = _strict_quality_warnings(critique)
+    if profile == "publication":
+        publication_warnings = [
+            "Publication profile requires character texture beyond role or discipline.",
+            "Publication profile requires repeated atmosphere and crisis mechanics to be reduced before export.",
+        ]
+        if critique.repetition_risk_score >= 5:
+            publication_warnings.append(
+                f"Publication profile wants repetition reduced: repetition risk {critique.repetition_risk_score}/10."
+            )
+            scopes.append("voice_and_texture")
+        if critique.emotional_depth_score <= 6 or critique.dialogue_tension_score <= 6:
+            publication_warnings.append("Publication profile wants more ordinary human friction and subtext.")
+            scopes.append("voice_and_texture")
+        strict_warnings = _dedupe([*strict_warnings, *publication_warnings])
     if not strict_warnings:
         return critique
 
@@ -1640,6 +1666,9 @@ def _run_manuscript_qa(
     qa_report = qa_report.model_copy(
         update={
             "lint_findings": _dedupe([*qa_report.lint_findings, *lint_findings]),
+            "repetition_risks": _dedupe(
+                [*qa_report.repetition_risks, *deterministic_notes.get("repetition_risks", [])]
+            ),
             "chapter_ending_quality_notes": _dedupe(
                 [*qa_report.chapter_ending_quality_notes, *deterministic_notes["chapter_ending_quality_notes"]]
             ),
@@ -1751,6 +1780,425 @@ def _fallback_developmental_rewrite_plan(
     )
 
 
+def _publication_qa_risk_count(qa_report: ManuscriptQaReport) -> int:
+    risk_lists = [
+        qa_report.warnings,
+        qa_report.continuity_risks,
+        qa_report.repetition_risks,
+        qa_report.chapter_ending_quality_notes,
+        qa_report.easy_win_warnings,
+        qa_report.side_character_agency_notes,
+        qa_report.atmospheric_repetition_findings,
+        qa_report.emotional_pacing_notes,
+        qa_report.technical_escalation_fatigue_findings,
+        qa_report.crisis_loop_findings,
+        qa_report.scene_mode_distribution_notes,
+        qa_report.story_turn_quality_notes,
+        qa_report.continuity_bible_findings,
+    ]
+    return sum(len(items) for items in risk_lists)
+
+
+def _publication_action_for_chapter(chapter: Any, qa_report: ManuscriptQaReport) -> DevelopmentalChapterAction:
+    qa_notes = chapter.qa_notes or {}
+    repetition_risk = int(qa_notes.get("repetition_risk_score") or 0)
+    technical_fatigue = int(qa_notes.get("technical_escalation_fatigue_score") or 0)
+    side_character_score = int(qa_notes.get("side_character_independence_score") or 10)
+    emotional_score = int(qa_notes.get("emotional_depth_score") or 10)
+    dialogue_score = int(qa_notes.get("dialogue_tension_score") or 10)
+    cuttable_risk = int(qa_notes.get("cuttable_chapter_risk_score") or 0)
+    story_turn_score = int(qa_notes.get("irreversibility_score") or 10)
+    warning_text = " ".join(
+        [
+            *qa_notes.get("warnings", []),
+            *qa_notes.get("soft_warnings", []),
+            *qa_notes.get("blocking_issues", []),
+        ]
+    ).lower()
+
+    action = "keep"
+    reason = "Chapter has no high publication-specific deterministic risk."
+    if repetition_risk >= 6 or "repetition" in warning_text or chapter.word_count > (chapter.run.max_words_per_chapter if chapter.run else 999999):
+        action = "compress"
+        reason = "Reduce repeated motifs, explanation, and generated-feeling density."
+    if technical_fatigue >= 6 or "crisis-loop" in warning_text or "technical" in warning_text:
+        action = "vary_scene" if action == "keep" else action
+        reason = "Vary repeated crisis mechanics and translate system pressure into human consequence."
+    if side_character_score <= 5 or emotional_score <= 6 or dialogue_score <= 6:
+        action = "humanize" if action == "keep" else action
+        reason = "Sharpen ordinary human friction, private motive, subtext, and side-character agency."
+    if cuttable_risk >= 6 or story_turn_score <= 5:
+        action = "rewrite"
+        reason = "Make the chapter carry a concrete non-cuttable story turn."
+
+    global_risks = " ".join(
+        [
+            *qa_report.repetition_risks,
+            *qa_report.atmospheric_repetition_findings,
+            *qa_report.crisis_loop_findings,
+            *qa_report.side_character_agency_notes,
+        ]
+    ).lower()
+    if action == "keep" and str(chapter.chapter_number) in global_risks:
+        action = "compress"
+        reason = "Full-manuscript QA flagged this chapter in a publication-readiness risk."
+
+    story_turn = (chapter.continuity_update or {}).get("story_turn", {}) if isinstance(chapter.continuity_update, dict) else {}
+    return DevelopmentalChapterAction(
+        chapter_numbers=[chapter.chapter_number],
+        action=action,
+        reason=reason,
+        required_story_change=story_turn.get("why_this_chapter_cannot_be_cut") or chapter.outline_summary,
+        permanent_consequence=story_turn.get("permanent_consequence") or "Preserve the chapter's concrete before/after state change.",
+    )
+
+
+def _supplement_publication_developmental_plan(
+    run: GenerationRun,
+    chapters: list,
+    qa_report: ManuscriptQaReport,
+    plan: DevelopmentalRewritePlan,
+) -> DevelopmentalRewritePlan:
+    if not _is_publication_run(run):
+        return plan
+
+    existing_by_chapter = _developmental_actions_by_chapter(plan)
+    supplemented = list(plan.chapter_actions)
+    missing_actions: list[DevelopmentalChapterAction] = []
+    meaningful_risks = _publication_qa_risk_count(qa_report) > 0
+    for chapter in chapters:
+        existing = existing_by_chapter.get(chapter.chapter_number)
+        if existing and existing.action in PUBLICATION_HIGH_RISK_ACTIONS:
+            continue
+        fallback = _publication_action_for_chapter(chapter, qa_report)
+        if existing is None and (meaningful_risks or fallback.action != "keep"):
+            missing_actions.append(fallback)
+        elif existing and existing.action in {"", "keep", "none", "no_change"} and fallback.action != "keep":
+            missing_actions.append(fallback)
+
+    if not missing_actions:
+        return plan
+
+    return plan.model_copy(
+        update={
+            "overall_diagnosis": (
+                plan.overall_diagnosis
+                + " Publication profile supplemented the plan with deterministic chapter actions where QA risks needed stronger intervention."
+            ).strip(),
+            "chapter_actions": [*supplemented, *missing_actions],
+            "pre_rewrite_risks": _dedupe(
+                [*plan.pre_rewrite_risks, "Publication profile found QA risks that required deterministic fallback chapter actions."]
+            ),
+            "post_rewrite_risk_targets": _dedupe(
+                [
+                    *plan.post_rewrite_risk_targets,
+                    "Publication QA should show lower motif repetition, less crisis-loop sameness, and stronger character-specific human friction.",
+                ]
+            ),
+        }
+    )
+
+
+def _completed_event_chapters(run: GenerationRun, event_type: str) -> set[int]:
+    completed: set[int] = set()
+    for event in run.events:
+        if event.event_type != event_type:
+            continue
+        chapter_number = event.payload.get("chapter_number")
+        try:
+            completed.add(int(chapter_number))
+        except (TypeError, ValueError):
+            continue
+    return completed
+
+
+def _publication_humanization_targets(chapters: list, qa_report: ManuscriptQaReport) -> list:
+    global_humanization_risk = bool(qa_report.side_character_agency_notes or qa_report.emotional_pacing_notes)
+    targets = []
+    for chapter in chapters:
+        qa_notes = chapter.qa_notes or {}
+        if (
+            int(qa_notes.get("side_character_independence_score") or 10) <= 6
+            or int(qa_notes.get("emotional_depth_score") or 10) <= 6
+            or int(qa_notes.get("dialogue_tension_score") or 10) <= 6
+            or int(qa_notes.get("voice_distinctness_score") or 10) <= 6
+            or (global_humanization_risk and chapter.chapter_number <= 3)
+        ):
+            targets.append(chapter)
+    return targets
+
+
+def _publication_compression_targets(run: GenerationRun, chapters: list, qa_report: ManuscriptQaReport) -> list:
+    global_compression_risk = bool(
+        qa_report.repetition_risks
+        or qa_report.atmospheric_repetition_findings
+        or qa_report.technical_escalation_fatigue_findings
+        or qa_report.crisis_loop_findings
+    )
+    targets = []
+    for chapter in chapters:
+        qa_notes = chapter.qa_notes or {}
+        if (
+            chapter.word_count > run.max_words_per_chapter
+            or int(qa_notes.get("repetition_risk_score") or 0) >= 5
+            or int(qa_notes.get("technical_escalation_fatigue_score") or 0) >= 6
+            or (global_compression_risk and chapter.chapter_number <= 4)
+        ):
+            targets.append(chapter)
+    return targets
+
+
+def _run_publication_humanization_pass(
+    session: Session,
+    run: GenerationRun,
+    chapters: list,
+    qa_report: ManuscriptQaReport,
+    client: ProviderManager | OllamaClient,
+) -> None:
+    if not _is_publication_run(run):
+        return
+    story_bible = _story_bible_from_run(run)
+    continuity_ledger = _continuity_ledger_from_run(run)
+    provider_name, model_name = _resolve_stage_route(client, run, "chapter_revision")
+    completed = _completed_event_chapters(run, "publication_chapter_humanization_completed")
+    targets = [chapter for chapter in _publication_humanization_targets(chapters, qa_report) if chapter.chapter_number not in completed]
+    if not targets:
+        record_event(session, run, "publication_humanization_skipped", {"message": "No publication humanization targets were needed."})
+        session.commit()
+        return
+
+    run.current_step = "chapter_humanization"
+    run.current_chapter = None
+    record_event(
+        session,
+        run,
+        "publication_humanization_started",
+        {"message": "Running publication character humanization pass.", "chapters": len(targets)},
+    )
+    session.commit()
+
+    for chapter in targets:
+        _ensure_not_canceled(session, run)
+        run.current_step = "chapter_humanization"
+        run.current_chapter = chapter.chapter_number
+        before_word_count = chapter.word_count
+        try:
+            outline_entry = _outline_entry(run, chapter.chapter_number)
+            revised_content = sanitize_chapter_content(
+                _supervised_provider_chat(
+                    session,
+                    run,
+                    client,
+                    provider_name,
+                    model_name,
+                    build_publication_humanization_messages(
+                        run.project,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        continuity_ledger,
+                        qa_report,
+                    ),
+                    stage="chapter_humanization",
+                    chapter_number=chapter.chapter_number,
+                    metadata={"label": f"chapter {chapter.chapter_number} publication humanization"},
+                )
+            )
+            if not revised_content.strip():
+                raise RuntimeError(f"Chapter {chapter.chapter_number} publication humanization was empty.")
+            chapter.content = revised_content
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "publication_chapter_humanization_completed",
+                {
+                    "message": f"Publication humanization saved for chapter {chapter.chapter_number}.",
+                    "chapter_number": chapter.chapter_number,
+                    "before_word_count": before_word_count,
+                    "after_word_count": chapter.word_count,
+                },
+            )
+            session.commit()
+        except Exception as exc:
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "publication_chapter_humanization_fallback",
+                {
+                    "message": f"Publication humanization failed for chapter {chapter.chapter_number}; kept existing prose.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
+            session.commit()
+
+    run.current_chapter = None
+    record_event(session, run, "publication_humanization_completed", {"message": "Publication humanization pass completed.", "chapters": len(targets)})
+    session.commit()
+
+
+def _run_publication_compression_pass(
+    session: Session,
+    run: GenerationRun,
+    chapters: list,
+    qa_report: ManuscriptQaReport,
+    client: ProviderManager | OllamaClient,
+) -> None:
+    if not _is_publication_run(run):
+        return
+    story_bible = _story_bible_from_run(run)
+    continuity_ledger = _continuity_ledger_from_run(run)
+    provider_name, model_name = _resolve_stage_route(client, run, "chapter_revision")
+    completed = _completed_event_chapters(run, "publication_chapter_compression_completed")
+    targets = [chapter for chapter in _publication_compression_targets(run, chapters, qa_report) if chapter.chapter_number not in completed]
+    if not targets:
+        record_event(session, run, "publication_compression_skipped", {"message": "No publication compression targets were needed."})
+        session.commit()
+        return
+
+    run.current_step = "chapter_compression"
+    run.current_chapter = None
+    record_event(
+        session,
+        run,
+        "publication_compression_started",
+        {"message": "Running publication prose compression pass.", "chapters": len(targets)},
+    )
+    session.commit()
+
+    for chapter in targets:
+        _ensure_not_canceled(session, run)
+        run.current_step = "chapter_compression"
+        run.current_chapter = chapter.chapter_number
+        before_word_count = chapter.word_count
+        try:
+            outline_entry = _outline_entry(run, chapter.chapter_number)
+            revised_content = sanitize_chapter_content(
+                _supervised_provider_chat(
+                    session,
+                    run,
+                    client,
+                    provider_name,
+                    model_name,
+                    build_publication_compression_messages(
+                        run.project,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        continuity_ledger,
+                        qa_report,
+                    ),
+                    stage="chapter_compression",
+                    chapter_number=chapter.chapter_number,
+                    metadata={"label": f"chapter {chapter.chapter_number} publication compression"},
+                )
+            )
+            if not revised_content.strip():
+                raise RuntimeError(f"Chapter {chapter.chapter_number} publication compression was empty.")
+            chapter.content = revised_content
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "publication_chapter_compression_completed",
+                {
+                    "message": f"Publication compression saved for chapter {chapter.chapter_number}.",
+                    "chapter_number": chapter.chapter_number,
+                    "before_word_count": before_word_count,
+                    "after_word_count": chapter.word_count,
+                    "word_delta": chapter.word_count - before_word_count,
+                },
+            )
+            session.commit()
+        except Exception as exc:
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
+                session,
+                run,
+                "publication_chapter_compression_fallback",
+                {
+                    "message": f"Publication compression failed for chapter {chapter.chapter_number}; kept existing prose.",
+                    "chapter_number": chapter.chapter_number,
+                    "error": str(exc),
+                },
+            )
+            session.commit()
+
+    run.current_chapter = None
+    record_event(session, run, "publication_compression_completed", {"message": "Publication compression pass completed.", "chapters": len(targets)})
+    session.commit()
+
+
+def _bounded_publication_score(base: int, penalty: int) -> int:
+    return max(1, min(10, base - penalty))
+
+
+def _apply_publication_readiness_gate(
+    session: Session,
+    run: GenerationRun,
+    qa_report: ManuscriptQaReport,
+) -> ManuscriptQaReport:
+    if not _is_publication_run(run):
+        return qa_report
+
+    run.current_step = "publication_readiness"
+    run.current_chapter = None
+    repetition_penalty = min(5, (len(qa_report.repetition_risks) + len(qa_report.atmospheric_repetition_findings)) // 2)
+    technical_penalty = min(4, (len(qa_report.technical_escalation_fatigue_findings) + len(qa_report.crisis_loop_findings)) // 2)
+    continuity_penalty = min(4, (len(qa_report.continuity_risks) + len(qa_report.continuity_bible_findings)) // 3)
+    character_penalty = min(5, (len(qa_report.side_character_agency_notes) + len(qa_report.emotional_pacing_notes)) // 2)
+    prose_penalty = min(5, len(qa_report.lint_findings) // 3 + repetition_penalty)
+    scores = {
+        "concept_world": _bounded_publication_score(8, max(0, len(qa_report.genre_contract_notes) // 5)),
+        "atmosphere": _bounded_publication_score(8, repetition_penalty),
+        "thematic_ambition": _bounded_publication_score(8, max(0, len(qa_report.ideology_consistency_findings) // 4)),
+        "plot_coherence": _bounded_publication_score(8, continuity_penalty + min(2, len(qa_report.story_turn_quality_notes) // 4)),
+        "character_depth": _bounded_publication_score(8, character_penalty),
+        "prose_control": _bounded_publication_score(8, prose_penalty + min(2, technical_penalty)),
+        "repetition_control": _bounded_publication_score(8, repetition_penalty + technical_penalty),
+    }
+    publication_readiness = min(
+        scores["plot_coherence"],
+        scores["character_depth"],
+        scores["prose_control"],
+        scores["repetition_control"],
+    )
+    scores["publication_readiness"] = publication_readiness
+    label = "publication-ready" if publication_readiness >= PUBLICATION_READINESS_THRESHOLD else "needs editorial revision"
+    summary = (
+        "Final QA gate passed the publication-readiness threshold."
+        if label == "publication-ready"
+        else "Final QA completed, but this should be treated as a reviewable manuscript that still needs editorial revision before publication."
+    )
+    warnings = qa_report.warnings
+    if label != "publication-ready":
+        warnings = _dedupe([*warnings, "Publication readiness gate says this manuscript still needs editorial revision."])
+
+    gated = qa_report.model_copy(
+        update={
+            "warnings": warnings,
+            "publication_readiness_scores": scores,
+            "publication_readiness_label": label,
+            "publication_readiness_summary": summary,
+        }
+    )
+    record_event(
+        session,
+        run,
+        "publication_readiness_completed",
+        {
+            "message": summary,
+            "label": label,
+            "publication_readiness_score": publication_readiness,
+            "threshold": PUBLICATION_READINESS_THRESHOLD,
+        },
+    )
+    session.commit()
+    return gated
+
+
 def _run_developmental_rewrite(
     session: Session,
     run: GenerationRun,
@@ -1790,6 +2238,20 @@ def _run_developmental_rewrite(
         )
         session.commit()
         plan = _fallback_developmental_rewrite_plan(chapters, qa_report)
+
+    supplemented_plan = _supplement_publication_developmental_plan(run, chapters, qa_report, plan)
+    if supplemented_plan != plan:
+        plan = supplemented_plan
+        record_event(
+            session,
+            run,
+            "publication_developmental_plan_supplemented",
+            {
+                "message": "Publication profile supplemented the developmental plan with deterministic QA-driven actions.",
+                "chapter_action_count": len(plan.chapter_actions),
+            },
+        )
+        session.commit()
 
     rewrite_markdown = render_developmental_rewrite_report_markdown(plan, qa_report)
     revised_outline_markdown = render_revised_outline_markdown(run.project.title, plan, chapters)
@@ -2155,7 +2617,7 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
     rewrite_markdown = None
     revised_outline_markdown = None
     developmental_qa_markdown = None
-    if run.developmental_rewrite_enabled:
+    if run.developmental_rewrite_enabled or _is_publication_run(run):
         developmental_plan, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown = _run_developmental_rewrite(
             session,
             run,
@@ -2164,10 +2626,14 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
             client,
         )
         _run_developmental_revision_waves(session, run, completed_chapters, qa_report, developmental_plan, client)
+        _run_publication_humanization_pass(session, run, completed_chapters, qa_report, client)
+        _run_publication_compression_pass(session, run, completed_chapters, qa_report, client)
 
     _run_final_editing_pass(session, run, completed_chapters, qa_report, developmental_plan, client)
     completed_chapters = _require_requested_chapters(session, run)
     qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
+    qa_report = _apply_publication_readiness_gate(session, run, qa_report)
+    qa_markdown = render_qa_report_markdown(qa_report)
 
     run.current_step = "export"
     record_event(session, run, "artifact_export_started", {"message": "Rendering manuscript artifacts."})

@@ -287,6 +287,8 @@ def test_project_detail_renders_quality_profile_controls_and_preflight(client, m
     assert 'data-quality-profile-control' in response.text
     assert 'name="quality_profile"' in response.text
     assert 'value="balanced"' in response.text
+    assert 'value="publication"' in response.text
+    assert "Highest-cost editorial path" in response.text
     assert "Run preflight" in response.text
     assert 'data-run-preflight' in response.text
     assert 'href="#queue-run"' in response.text
@@ -820,12 +822,23 @@ def test_completed_run_can_create_publication_export(client, monkeypatch) -> Non
 
     detail_response = client.get(f"/runs/{run_id}")
     assert detail_response.status_code == 200
-    assert "Export For Publication" in detail_response.text
+    assert "Export Layout Helper" in detail_response.text
     assert 'value="print_5x8"' in detail_response.text
+    assert 'name="author_name"' in detail_response.text
+    assert 'name="dedication"' in detail_response.text
 
     response = client.post(
         f"/runs/{run_id}/publication-export",
-        data={"profile_id": "print_5x8", "include_ai_disclosure": "1"},
+        data={
+            "profile_id": "print_5x8",
+            "include_ai_disclosure": "1",
+            "author_name": "Nora Page",
+            "copyright_year": "2026",
+            "publisher": "Patchwork Press",
+            "dedication": "For readers who check the seams.",
+            "author_note": "This is a test note.",
+            "ai_disclosure": "AI assistance was used under human direction.",
+        },
         follow_redirects=False,
     )
 
