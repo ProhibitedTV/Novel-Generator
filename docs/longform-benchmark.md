@@ -8,7 +8,7 @@ Run it locally with:
 python -m novel_generator.services.longform_benchmark
 ```
 
-The command prints a JSON report and exits non-zero if any benchmark check fails.
+The command prints a JSON report and exits non-zero if any benchmark check fails. The same benchmark is also exercised by the pytest suite, so long-form architectural regressions fail CI rather than remaining an optional local check.
 
 ## What the benchmark stresses
 
