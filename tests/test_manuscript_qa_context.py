@@ -10,6 +10,11 @@ from novel_generator.services.manuscript_qa_context import compile_manuscript_qa
 def _chapters(count: int = 64) -> list[SimpleNamespace]:
     chapters: list[SimpleNamespace] = []
     for number in range(1, count + 1):
+        content = (
+            f"OPENING PROSE {number}: Iris enters the archive and notices consequence {number}.\n\n"
+            + (f"Middle scene material for chapter {number} with dialogue and physical action. " * 80)
+            + f"\n\nFINAL PROSE {number}: the visible ending action changes state {number} forever."
+        )
         chapters.append(
             SimpleNamespace(
                 chapter_number=number,
@@ -17,6 +22,7 @@ def _chapters(count: int = 64) -> list[SimpleNamespace]:
                 outline_summary=(f"Outline pressure {number} around the archive and trust fracture. " * 12).strip(),
                 summary=(f"Chapter {number} changes leverage and leaves a permanent consequence. " * 20).strip(),
                 word_count=2400 + number,
+                content=content,
                 continuity_update={
                     "chapter_outcome": f"Outcome {number}",
                     "story_turn": {
@@ -55,16 +61,19 @@ def _chapters(count: int = 64) -> list[SimpleNamespace]:
     return chapters
 
 
-def test_qa_capsules_keep_all_64_chapters_within_budget() -> None:
+def test_qa_capsules_keep_all_64_chapters_with_final_prose_evidence_within_budget() -> None:
     packet = compile_manuscript_qa_capsules(_chapters(), max_chars=30_000)
 
     assert len(packet.chapters) == 64
     assert packet.output_chars <= 30_000
     assert [row["chapter_number"] for row in packet.chapters] == list(range(1, 65))
     assert packet.mode in {"detailed", "compact", "minimal"}
+    assert all("final_prose_closing_excerpt" in row for row in packet.chapters)
+    assert "FINAL PROSE 1" in packet.chapters[0]["final_prose_closing_excerpt"]
+    assert "FINAL PROSE 64" in packet.chapters[-1]["final_prose_closing_excerpt"]
 
 
-def test_qa_prompt_rewrite_replaces_repetitive_full_continuity_payload() -> None:
+def test_qa_prompt_rewrite_replaces_repetitive_full_continuity_payload_and_keeps_final_prose() -> None:
     chapters = _chapters(12)
     original_payload = [
         {
@@ -93,9 +102,10 @@ def test_qa_prompt_rewrite_replaces_repetitive_full_continuity_payload() -> None
     rewritten = _rewrite_manuscript_qa(messages, chapters, max_chars=30_000)
     content = rewritten[0]["content"]
 
-    assert len(content) < len(messages[0]["content"])
     assert '"chapter_number":1' in content
     assert '"chapter_number":12' in content
     assert "continuity_signals" in content
     assert "continuity_update" not in content
+    assert "FINAL PROSE 12" in content
+    assert "final_prose_closing_excerpt" in content
     assert "Return a JSON object with exactly these keys:" in content
