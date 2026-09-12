@@ -9,6 +9,7 @@ import httpx
 
 from ..schemas import ProviderCapabilities
 from .provider_errors import ProviderError, ProviderTransportError
+from .structured_schema_runtime import extract_schema_marker
 
 
 class OpenAICompatibleError(ProviderError):
@@ -100,7 +101,7 @@ def extract_openai_chat_metrics(payload: str | bytes | dict) -> dict[str, Any]:
     return metrics
 
 
-def _requests_json_only(messages: list[dict[str, str]]) -> bool:
+def _requests_json_only(messages: list[dict[str, Any]]) -> bool:
     for message in messages:
         if str(message.get("role", "")).lower() != "system":
             continue
@@ -108,6 +109,16 @@ def _requests_json_only(messages: list[dict[str, str]]) -> bool:
         if "json only" in content or "valid json" in content:
             return True
     return False
+
+
+def _schema_response_format(name: str | None, schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name or "structured_output",
+            "schema": schema,
+        },
+    }
 
 
 class OpenAICompatibleClient:
@@ -207,14 +218,21 @@ class OpenAICompatibleClient:
             raise OpenAICompatibleError(f"Model '{model_name}' is not available in the configured OpenAI-compatible provider.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        structured = _requests_json_only(messages)
+        clean_messages, response_schema, schema_name = extract_schema_marker(messages)
+        structured = response_schema is not None or _requests_json_only(clean_messages)
         base_payload: dict = {
             "model": model_name,
-            "messages": messages,
+            "messages": clean_messages,
             "stream": stream,
         }
         payload = dict(base_payload)
-        if structured:
+        json_object_payload = dict(base_payload)
+        if response_schema is not None:
+            payload["response_format"] = _schema_response_format(schema_name, response_schema)
+            payload["temperature"] = self.structured_temperature
+            json_object_payload["response_format"] = {"type": "json_object"}
+            json_object_payload["temperature"] = self.structured_temperature
+        elif structured:
             payload["response_format"] = {"type": "json_object"}
             payload["temperature"] = self.structured_temperature
 
@@ -227,13 +245,23 @@ class OpenAICompatibleClient:
                         response = client.post("/chat/completions", json=payload)
                         response.raise_for_status()
                     except httpx.HTTPStatusError as exc:
-                        # Some local OpenAI-compatible servers do not implement response_format.
-                        # A schema-control optimization should never make an otherwise valid backend unusable.
-                        if structured and exc.response.status_code in {400, 422}:
+                        # Local servers vary in how much of response_format they implement. A schema
+                        # optimization must degrade to JSON-object mode, then ordinary chat, rather
+                        # than making an otherwise usable backend fail.
+                        if exc.response.status_code not in {400, 422} or not structured:
+                            raise
+                        if response_schema is not None:
+                            try:
+                                response = client.post("/chat/completions", json=json_object_payload)
+                                response.raise_for_status()
+                            except httpx.HTTPStatusError as json_exc:
+                                if json_exc.response.status_code not in {400, 422}:
+                                    raise
+                                response = client.post("/chat/completions", json=base_payload)
+                                response.raise_for_status()
+                        else:
                             response = client.post("/chat/completions", json=base_payload)
                             response.raise_for_status()
-                        else:
-                            raise
                     raw = response.text
                     output = parse_openai_chat_payload(raw)
                     self.last_chat_metrics = extract_openai_chat_metrics(raw)
