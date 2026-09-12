@@ -332,10 +332,12 @@ def _wrap_supervised_provider_chat(supervised: Callable[..., str]) -> Callable[.
                 configured_context_tokens=_configured_context_tokens(client),
             )
             bound.arguments["metadata"] = {**existing_metadata, **telemetry}
-            return supervised(*bound.args, **bound.kwargs)
         except Exception:
-            # Telemetry must never alter whether a provider call can execute.
+            # Telemetry preparation is optional. A malformed metadata object should not block a call.
             return supervised(*args, **kwargs)
+
+        # Provider exceptions must propagate through the existing supervised retry/attempt path exactly once.
+        return supervised(*bound.args, **bound.kwargs)
 
     setattr(wrapped, "_novel_telemetry_wrapped", True)
     return wrapped
