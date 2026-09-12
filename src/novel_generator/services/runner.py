@@ -15,6 +15,7 @@ from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
 from .recall_runtime import install_recall_runtime
+from .structured_schema_runtime import install_structured_schema_runtime
 from .truncation_runtime import install_truncation_runtime
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,11 @@ def recover_incomplete_runs(settings: Settings) -> None:
 
 
 def run_worker_loop(settings: Settings) -> None:
-    runtime_transforms = install_context_compiler()
+    # Install schema shaping before telemetry. The telemetry wrapper therefore measures the actual
+    # chat messages rather than counting the private JSON-schema marker that provider clients strip
+    # and translate into their native structured-output controls.
+    runtime_transforms = install_structured_schema_runtime()
+    runtime_transforms += install_context_compiler()
     runtime_transforms += install_longform_runtime()
     runtime_transforms += install_recall_runtime()
     runtime_transforms += install_adaptive_length_runtime()
@@ -44,7 +49,7 @@ def run_worker_loop(settings: Settings) -> None:
     runtime_transforms += install_truncation_runtime()
     if runtime_transforms:
         logger.info(
-            "Installed %s long-form context, pacing, continuity, telemetry, and truncation-recovery runtime transforms.",
+            "Installed %s long-form context, pacing, continuity, structured-output, telemetry, and truncation-recovery runtime transforms.",
             runtime_transforms,
         )
 
