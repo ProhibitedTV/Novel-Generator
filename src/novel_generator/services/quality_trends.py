@@ -7,23 +7,25 @@ from statistics import mean
 from typing import Any, Iterable
 
 
-_SCORE_FIELDS = (
-    "forward_motion_score",
-    "ending_concreteness_score",
-    "scene_turn_resolution_score",
-    "cost_consequence_realism_score",
-    "side_character_independence_score",
-    "proper_noun_continuity_score",
-    "repetition_risk_score",
-    "emotional_depth_score",
-    "ideology_clarity_score",
-    "civilian_texture_score",
-    "genre_contract_score",
-    "style_alignment_score",
-    "voice_distinctness_score",
-    "irreversibility_score",
-    "choice_clarity_score",
-)
+_SCORE_DIRECTIONS = {
+    "forward_motion_score": "higher_is_better",
+    "ending_concreteness_score": "higher_is_better",
+    "scene_turn_resolution_score": "higher_is_better",
+    "cost_consequence_realism_score": "higher_is_better",
+    "side_character_independence_score": "higher_is_better",
+    "proper_noun_continuity_score": "higher_is_better",
+    "repetition_risk_score": "lower_is_better",
+    "emotional_depth_score": "higher_is_better",
+    "ideology_clarity_score": "higher_is_better",
+    "civilian_texture_score": "higher_is_better",
+    "genre_contract_score": "higher_is_better",
+    "style_alignment_score": "higher_is_better",
+    "voice_distinctness_score": "higher_is_better",
+    "irreversibility_score": "higher_is_better",
+    "choice_clarity_score": "higher_is_better",
+    "technical_escalation_fatigue_score": "lower_is_better",
+    "cuttable_chapter_risk_score": "lower_is_better",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,21 +140,31 @@ def compile_quality_trend_audit(chapters: Iterable[Any]) -> QualityTrendAudit:
 
     score_trends: dict[str, Any] = {}
     risk_flags: list[str] = []
-    for key in _SCORE_FIELDS:
+    for key, direction in _SCORE_DIRECTIONS.items():
         first_avg = _segment_average(first, key)
         last_avg = _segment_average(last, key)
         overall = _segment_average(rows, key)
         if overall is None:
             continue
-        delta = round(last_avg - first_avg, 2) if first_avg is not None and last_avg is not None else None
+        raw_delta = round(last_avg - first_avg, 2) if first_avg is not None and last_avg is not None else None
+        quality_delta = None
+        if raw_delta is not None:
+            quality_delta = round(-raw_delta if direction == "lower_is_better" else raw_delta, 2)
         score_trends[key] = {
+            "direction": direction,
             "overall_average": overall,
             "first_third_average": first_avg,
             "last_third_average": last_avg,
-            "last_vs_first_delta": delta,
+            "last_vs_first_delta": raw_delta,
+            "quality_direction_delta": quality_delta,
         }
-        if delta is not None and delta <= -1.25:
-            risk_flags.append(f"{key} drops {abs(delta):.2f} points from the first third to the last third.")
+        if quality_delta is not None and quality_delta <= -1.25:
+            if direction == "lower_is_better":
+                risk_flags.append(
+                    f"{key} worsens by {abs(raw_delta):.2f} points from the first third to the last third (lower is better)."
+                )
+            else:
+                risk_flags.append(f"{key} drops {abs(raw_delta):.2f} points from the first third to the last third.")
 
     modes = [str(_plan(chapter).get("chapter_mode", "") or "").strip() for chapter in rows]
     hooks = [str(_as_dict(getattr(chapter, "qa_notes", None)).get("ending_hook_type", "") or "").strip() for chapter in rows]
@@ -206,6 +218,7 @@ def compile_quality_trend_audit(chapters: Iterable[Any]) -> QualityTrendAudit:
         "risk_flags": risk_flags,
         "editorial_rules": [
             "Treat a trend as a place to inspect, not proof that intentional late-book compression or tonal change is wrong.",
+            "Interpret score direction correctly: risk/fatigue scores are lower-is-better while craft/continuity scores are higher-is-better.",
             "Prioritize sustained multi-chapter degradation over one isolated low score.",
             "When repairing drift, preserve causal state and character consequences instead of normalizing every chapter to the same rhythm.",
         ],
