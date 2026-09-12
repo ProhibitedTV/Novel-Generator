@@ -30,7 +30,7 @@ def _outline_row(number: int, mode: str) -> dict:
     }
 
 
-def _completed_chapter(number: int, mode: str) -> SimpleNamespace:
+def _completed_chapter(number: int, mode: str, word_count: int) -> SimpleNamespace:
     plan = {
         "chapter_mode": mode,
         "conflict_turn": f"Planned conflict {number}",
@@ -53,6 +53,7 @@ def _completed_chapter(number: int, mode: str) -> SimpleNamespace:
         content=f"Draft prose {number}",
         summary=f"Summary {number}",
         continuity_update=continuity,
+        word_count=word_count,
     )
 
 
@@ -66,18 +67,29 @@ def _run() -> SimpleNamespace:
         "civic_fallout",
     ]
     return SimpleNamespace(
+        target_word_count=12_000,
         requested_chapters=6,
+        min_words_per_chapter=1_500,
+        max_words_per_chapter=2_500,
         outline=[_outline_row(index, modes[index - 1]) for index in range(1, 7)],
         chapters=[
-            _completed_chapter(1, modes[0]),
-            _completed_chapter(2, modes[1]),
-            _completed_chapter(3, modes[2]),
-            SimpleNamespace(chapter_number=4, title="Chapter 4", plan=None, content=None, summary=None, continuity_update=None),
+            _completed_chapter(1, modes[0], 1_500),
+            _completed_chapter(2, modes[1], 1_600),
+            _completed_chapter(3, modes[2], 1_700),
+            SimpleNamespace(
+                chapter_number=4,
+                title="Chapter 4",
+                plan=None,
+                content=None,
+                summary=None,
+                continuity_update=None,
+                word_count=0,
+            ),
         ],
     )
 
 
-def test_narrative_horizon_carries_previous_consequence_and_future_commitments() -> None:
+def test_narrative_horizon_carries_previous_consequence_future_commitments_and_word_budget() -> None:
     horizon = compile_narrative_horizon(_run(), 4, lookahead=2).payload
 
     assert horizon["_narrative_horizon"]["chapter_number"] == 4
@@ -87,7 +99,13 @@ def test_narrative_horizon_carries_previous_consequence_and_future_commitments()
     assert [item["chapter_number"] for item in horizon["upcoming_commitments"]] == [5, 6]
     assert horizon["upcoming_commitments"][0]["reveal"] == "Reveal 5"
     assert horizon["recent_pattern_history"][-1]["chapter_mode"] == "aftermath"
+    assert horizon["word_budget"]["completed_words_before_this_chapter"] == 4_800
+    assert horizon["word_budget"]["required_average_from_here"] == 2_400
+    assert horizon["word_budget"]["adaptive_target_this_chapter"] == 2_400
+    assert horizon["word_budget"]["pace_status"] == "behind"
+    assert horizon["word_budget"]["target_reachable_with_configured_max"] is True
     assert any("precondition" in rule for rule in horizon["causal_rules"])
+    assert any("adaptive_target_this_chapter" in rule for rule in horizon["causal_rules"])
 
 
 def test_chapter_prompt_wrapper_injects_narrative_horizon_even_when_ledger_is_small() -> None:
@@ -130,3 +148,4 @@ def test_chapter_prompt_wrapper_injects_narrative_horizon_even_when_ledger_is_sm
     assert '"chapter_number":4' in prompt
     assert '"chapter_number":5' in prompt
     assert '"state_after":"State after 3"' in prompt
+    assert '"adaptive_target_this_chapter":2400' in prompt
