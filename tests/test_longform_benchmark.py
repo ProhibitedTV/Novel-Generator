@@ -7,7 +7,7 @@ def test_longform_benchmark_passes_all_architecture_checks() -> None:
     report = run_longform_benchmark(32)
 
     assert report["passed"] is True
-    assert report["score"] == "8/8"
+    assert report["score"] == "9/9"
     assert all(report["checks"].values())
     assert 4 in report["observations"]["recall_chapters"]
     assert report["observations"]["tarin_last_touched_chapter"] == 5
@@ -17,3 +17,6 @@ def test_longform_benchmark_passes_all_architecture_checks() -> None:
     assert report["observations"]["memory_output_chars"] <= 6000
     assert report["observations"]["developmental_context_chars"] <= 30000
     assert report["observations"]["qa_context_chars"] <= 30000
+    assert report["observations"]["forward_motion_quality_delta"] <= -1.25
+    assert report["observations"]["late_book_length_delta_percent"] <= -25
+    assert report["observations"]["quality_risk_flags"]
