@@ -35,13 +35,25 @@ This is guidance, not destructive padding. Expansion still favors dramatized act
 
 ## Character and subplot arc audit
 
-Long books also fail when a supporting character, relationship fracture, emotional burden, or open promise disappears for so long that the model effectively forgets it. Novel Generator now derives a bounded story-arc audit from the existing story bible, continuity ledger, completed chapter checkpoints, and future outline.
+Long books also fail when a supporting character, relationship fracture, emotional burden, or open promise disappears for so long that the model effectively forgets it. Novel Generator derives a bounded story-arc audit from the existing story bible, continuity ledger, completed chapter checkpoints, and future outline.
 
 For each major character agenda the audit can surface the baseline want/fear/moral line, current character and ideology state, unresolved emotional loop, matching trust fractures, recent independent decisions, the last chapter that materially touched the character, how many chapters the arc has been dormant, and future outline chapters that appear to touch it again.
 
-The audit also treats open promises, unresolved threads, emotional loops, and trust fractures as subplot lanes. Lanes that remain unresolved beyond `NOVEL_ARC_DORMANT_AFTER_CHAPTERS` are marked `dormant_unresolved`. The model is explicitly told not to turn that into checklist writing: it should reactivate one or two relevant lanes, deliberately defer others, and never consume future outline reveals early merely to clear state.
+The audit also treats open promises, unresolved threads, emotional loops, and trust fractures as subplot lanes. Lanes that remain unresolved beyond `NOVEL_ARC_DORMANT_AFTER_CHAPTERS` are marked `dormant_unresolved`. Character presence requires the actual character name in persisted chapter state, while subplot matching ignores ubiquitous character-name tokens and prefers distinctive subplot vocabulary. This keeps generic themes such as trust, secrecy, or pressure from falsely resetting dormancy counters.
+
+The model is explicitly told not to turn the audit into checklist writing: it should reactivate one or two relevant lanes, deliberately defer others, and never consume future outline reveals early merely to clear state.
 
 This layer is read-only. It does not create a competing arc database or mutate the durable continuity ledger. `NOVEL_ARC_CONTEXT_MAX_CHARS` bounds the temporary arc packet, and the highest-risk dormant rows are retained first when the packet must shrink.
+
+## Long-range chapter recall
+
+A short rolling summary is good for scene-to-scene continuity but poor at callbacks. A clue, promise, object, lie, or relationship choice introduced in chapter 4 may become important again in chapter 29 after it has long since fallen outside the rolling window.
+
+The chapter-recall compiler searches completed chapter summaries, outline summaries, and irreversible story turns using the current outline/plan as its focus. It always preserves a small number of recent chapters and can additionally retrieve a few older `relevant_callback` chapters whose distinctive terms overlap the current task. The retrieved rows contain summaries and story-turn state rather than old raw prose.
+
+This is deliberately deterministic and local-first: no embedding service or extra model call is required. The model is told not to recap recalled material, not to rediscover facts the protagonist already knows, and to make callbacks create new leverage, emotion, meaning, or consequence rather than replaying the original beat.
+
+`NOVEL_CHAPTER_RECALL_MAX_CHARS` bounds this packet. `NOVEL_CHAPTER_RECALL_RECENT` controls guaranteed recent history and `NOVEL_CHAPTER_RECALL_RELEVANT` controls how many older callback candidates may be selected.
 
 ## Whole-manuscript developmental context
 
@@ -92,10 +104,14 @@ NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS=3
 NOVEL_ARC_CONTEXT_ENABLED=1
 NOVEL_ARC_CONTEXT_MAX_CHARS=12000
 NOVEL_ARC_DORMANT_AFTER_CHAPTERS=5
+NOVEL_CHAPTER_RECALL_ENABLED=1
+NOVEL_CHAPTER_RECALL_MAX_CHARS=9000
+NOVEL_CHAPTER_RECALL_RECENT=2
+NOVEL_CHAPTER_RECALL_RELEVANT=4
 ```
 
-`NOVEL_MEMORY_MAX_CHARS` is the compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls developmental rewrite capsules and is clamped to 30,000–160,000 characters. `NOVEL_MANUSCRIPT_QA_CONTEXT_MAX_CHARS` independently controls the whole-book QA map over the same range. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `NOVEL_ARC_CONTEXT_MAX_CHARS` controls the character/subplot audit and is clamped to 4,000–30,000 characters. `NOVEL_ARC_DORMANT_AFTER_CHAPTERS` determines when an unresolved lane becomes a dormancy warning and is clamped to 2–16 chapters. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens. `OLLAMA_STRUCTURED_TEMPERATURE` is validated from 0.0–2.0.
+`NOVEL_MEMORY_MAX_CHARS` is the compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls developmental rewrite capsules and is clamped to 30,000–160,000 characters. `NOVEL_MANUSCRIPT_QA_CONTEXT_MAX_CHARS` independently controls the whole-book QA map over the same range. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `NOVEL_ARC_CONTEXT_MAX_CHARS` controls the character/subplot audit and is clamped to 4,000–30,000 characters. `NOVEL_ARC_DORMANT_AFTER_CHAPTERS` determines when an unresolved lane becomes a dormancy warning and is clamped to 2–16 chapters. `NOVEL_CHAPTER_RECALL_MAX_CHARS` is clamped to 3,000–24,000 characters, while recent and relevant recall counts are capped at 4 and 8 respectively. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens. `OLLAMA_STRUCTURED_TEMPERATURE` is validated from 0.0–2.0.
 
 The runtime integrations are fail-open: if a future prompt builder changes serialization format and a compiler cannot safely replace or inject a context block, the original prompt is used instead of failing the generation run.
 
-For local 8B–20B models, the defaults intentionally leave most of the attention budget for the current scene and prose while retaining enough book-level state to prevent character, canon, timeline, unresolved-thread, subplot, and manuscript-length drift.
+For local 8B–20B models, the defaults intentionally leave most of the attention budget for the current scene and prose while retaining enough book-level state to prevent character, canon, timeline, unresolved-thread, subplot, callback, and manuscript-length drift.
