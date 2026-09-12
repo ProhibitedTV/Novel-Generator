@@ -92,3 +92,36 @@ def test_ollama_chat_sends_configured_context_window() -> None:
 
     assert client.chat("test-model", [{"role": "user", "content": "Hello"}]) == "ok"
     assert seen_payload["options"] == {"num_ctx": 32768}
+    assert "format" not in seen_payload
+
+
+def test_ollama_chat_uses_json_mode_and_low_temperature_for_structured_prompt() -> None:
+    seen_payload: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payload.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"message": {"content": '{"ok":true}'}, "done": True})
+
+    client = OllamaClient(
+        base_url="http://ollama.test",
+        timeout_seconds=1,
+        max_retries=0,
+        num_ctx=32768,
+        structured_temperature=0.15,
+        client_factory=lambda: httpx.Client(
+            transport=httpx.MockTransport(handler),
+            base_url="http://ollama.test",
+        ),
+    )
+
+    result = client.chat(
+        "test-model",
+        [
+            {"role": "system", "content": "Return valid JSON only with no markdown."},
+            {"role": "user", "content": "Create a plan."},
+        ],
+    )
+
+    assert result == '{"ok":true}'
+    assert seen_payload["format"] == "json"
+    assert seen_payload["options"] == {"num_ctx": 32768, "temperature": 0.15}
