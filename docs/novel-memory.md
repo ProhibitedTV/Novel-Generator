@@ -18,7 +18,8 @@ For chapter planning, drafting, critique, revision, and expansion, the worker de
 - the previous outline ending state and concrete hook;
 - a configurable lookahead over the next planned chapters, including objectives, reveals, ending states, costs, modes, and hooks;
 - a short recent-pattern history of chapter modes, obstacles, conflict turns, emotional anchors, side-character moves, and ending-hook mechanisms;
-- an adaptive whole-book word budget; and
+- an adaptive whole-book word budget;
+- a late-book ending-convergence contract; and
 - explicit causal rules telling the model to inherit prior consequences, create preconditions for the next chapter, preserve later reveals, avoid accidental structural repetition, and write toward the remaining manuscript length.
 
 The horizon does not invent new canon or alter the outline. It is a temporary causal contract generated from the existing outline, chapter plans, summaries, continuity checkpoints, and saved word counts. Future chapters are presented as commitments to prepare rather than scenes to consume early.
@@ -29,9 +30,19 @@ The horizon does not invent new canon or alter the outline. It is a temporary ca
 
 Fixed per-chapter minimums are not enough to guarantee a full-length manuscript. If early chapters consistently land near the minimum, the book can finish tens of thousands of words below its stated target even though every individual chapter passed validation.
 
-The narrative horizon therefore calculates the manuscript's live pace before each chapter: completed words, remaining words, remaining chapters, required average chapter length from this point forward, an adaptive target clamped to the configured chapter range, and whether the overall target is still reachable at the configured maximum. The model is instructed to aim near the adaptive target rather than treating the minimum as the default when the book is behind pace.
+The narrative horizon therefore calculates the manuscript's live pace before each chapter: completed words, remaining words, remaining chapters, required average chapter length from this point forward, an adaptive target clamped to the configured chapter range, and whether the overall target is still reachable at the configured maximum.
 
-This is guidance, not destructive padding. Expansion still favors dramatized action, dialogue, sensory detail, emotional reaction, civilian texture, and consequence rather than recap or filler.
+The worker also adds a bounded enforcement layer. The existing static-minimum expansion runs first. If that chapter still falls below the live adaptive target, one supplemental expansion pass is allowed by default. That pass explicitly asks for dramatized action, dialogue, sensory specificity, reaction, complication, and consequence, while forbidding recap and repeated explanation as padding. It never changes the persisted run's configured chapter minimum or maximum.
+
+`NOVEL_ADAPTIVE_LENGTH_ENFORCEMENT=0` disables the supplemental pass. `NOVEL_ADAPTIVE_LENGTH_MAX_EXTRA_PASSES` defaults to 1 and is capped at 2 so length recovery cannot create an uncontrolled rewrite loop.
+
+### Late-book convergence
+
+A different long-form failure appears near the end: local models often respond to rising stakes by inventing another faction, mystery, villain, system, relationship crisis, or fake climax. The novel becomes broader exactly when it should converge.
+
+Starting around 70% progress, the narrative horizon exposes a finite closure budget derived from the existing continuity ledger and ending promise. It counts and surfaces open promises, unresolved threads, emotional loops, and trust fractures. From 80% onward the model is told to stop creating major new story debt unless it is already seeded or can pay off within the remaining chapters. With two chapters remaining—or after roughly 90% progress—the phase becomes `resolution_priority`.
+
+Resolution priority protects one primary climax and one primary ending, encourages each remaining chapter to resolve or irreversibly transform existing story debt, reserves space for human/world-state aftermath, and explicitly prevents a sequel hook from substituting for closure of the current book.
 
 ## Character and subplot arc audit
 
@@ -108,10 +119,12 @@ NOVEL_CHAPTER_RECALL_ENABLED=1
 NOVEL_CHAPTER_RECALL_MAX_CHARS=9000
 NOVEL_CHAPTER_RECALL_RECENT=2
 NOVEL_CHAPTER_RECALL_RELEVANT=4
+NOVEL_ADAPTIVE_LENGTH_ENFORCEMENT=1
+NOVEL_ADAPTIVE_LENGTH_MAX_EXTRA_PASSES=1
 ```
 
-`NOVEL_MEMORY_MAX_CHARS` is the compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls developmental rewrite capsules and is clamped to 30,000–160,000 characters. `NOVEL_MANUSCRIPT_QA_CONTEXT_MAX_CHARS` independently controls the whole-book QA map over the same range. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `NOVEL_ARC_CONTEXT_MAX_CHARS` controls the character/subplot audit and is clamped to 4,000–30,000 characters. `NOVEL_ARC_DORMANT_AFTER_CHAPTERS` determines when an unresolved lane becomes a dormancy warning and is clamped to 2–16 chapters. `NOVEL_CHAPTER_RECALL_MAX_CHARS` is clamped to 3,000–24,000 characters, while recent and relevant recall counts are capped at 4 and 8 respectively. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens. `OLLAMA_STRUCTURED_TEMPERATURE` is validated from 0.0–2.0.
+`NOVEL_MEMORY_MAX_CHARS` is the compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls developmental rewrite capsules and is clamped to 30,000–160,000 characters. `NOVEL_MANUSCRIPT_QA_CONTEXT_MAX_CHARS` independently controls the whole-book QA map over the same range. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `NOVEL_ARC_CONTEXT_MAX_CHARS` controls the character/subplot audit and is clamped to 4,000–30,000 characters. `NOVEL_ARC_DORMANT_AFTER_CHAPTERS` determines when an unresolved lane becomes a dormancy warning and is clamped to 2–16 chapters. `NOVEL_CHAPTER_RECALL_MAX_CHARS` is clamped to 3,000–24,000 characters, while recent and relevant recall counts are capped at 4 and 8 respectively. `NOVEL_ADAPTIVE_LENGTH_MAX_EXTRA_PASSES` is capped at 2. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens. `OLLAMA_STRUCTURED_TEMPERATURE` is validated from 0.0–2.0.
 
 The runtime integrations are fail-open: if a future prompt builder changes serialization format and a compiler cannot safely replace or inject a context block, the original prompt is used instead of failing the generation run.
 
-For local 8B–20B models, the defaults intentionally leave most of the attention budget for the current scene and prose while retaining enough book-level state to prevent character, canon, timeline, unresolved-thread, subplot, callback, and manuscript-length drift.
+For local 8B–20B models, the defaults intentionally leave most of the attention budget for the current scene and prose while retaining enough book-level state to prevent character, canon, timeline, unresolved-thread, subplot, callback, ending-convergence, and manuscript-length drift.
