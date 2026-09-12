@@ -7,6 +7,9 @@ import math
 import os
 from typing import Any, Callable
 
+from sqlalchemy import select
+
+from ..models import RunStageAttempt
 from .context_memory import compile_memory_packet
 from .manuscript_context import compile_manuscript_capsules
 from .narrative_horizon import compile_narrative_horizon
@@ -280,13 +283,29 @@ def _wrap_developmental_rewrite(
     return wrapped
 
 
-def _configured_context_tokens(client: Any) -> int | None:
-    direct = getattr(client, "num_ctx", None)
+def _provider_client(client: Any, provider_name: str | None = None) -> Any:
+    resolver = getattr(client, "client_for", None)
+    if provider_name and callable(resolver):
+        try:
+            return resolver(provider_name)
+        except Exception:
+            return client
+    return client
+
+
+def _configured_context_tokens(client: Any, provider_name: str | None = None) -> int | None:
+    target = _provider_client(client, provider_name)
+    direct = getattr(target, "num_ctx", None)
     if direct:
         try:
             return int(direct)
         except (TypeError, ValueError):
             pass
+
+    # A ProviderManager also has Ollama settings, but those do not describe an OpenAI-compatible
+    # backend's context window. Only use the manager-level setting when the routed provider is Ollama.
+    if provider_name and provider_name != "ollama":
+        return None
     settings = getattr(client, "settings", None)
     configured = getattr(settings, "ollama_num_ctx", None) if settings is not None else None
     if configured:
@@ -317,6 +336,56 @@ def _message_telemetry(messages: Any, *, configured_context_tokens: int | None =
     return telemetry
 
 
+def _provider_metrics(client: Any, provider_name: str | None) -> dict[str, Any]:
+    target = _provider_client(client, provider_name)
+    raw = getattr(target, "last_chat_metrics", None)
+    if not isinstance(raw, dict) or not raw:
+        return {}
+    metrics = dict(raw)
+    context_tokens = _configured_context_tokens(client, provider_name)
+    prompt_tokens = metrics.get("prompt_eval_count", metrics.get("prompt_tokens"))
+    if (
+        context_tokens
+        and isinstance(prompt_tokens, int)
+        and not isinstance(prompt_tokens, bool)
+        and prompt_tokens >= 0
+    ):
+        metrics["actual_context_utilization_pct"] = round(prompt_tokens / context_tokens * 100, 1)
+    return metrics
+
+
+def _persist_provider_metrics(bound: inspect.BoundArguments, metrics: dict[str, Any]) -> None:
+    if not metrics:
+        return
+    session = bound.arguments.get("session")
+    run = bound.arguments.get("run")
+    stage = bound.arguments.get("stage")
+    chapter_number = bound.arguments.get("chapter_number")
+    provider_name = bound.arguments.get("provider_name")
+    model_name = bound.arguments.get("model_name")
+    if session is None or run is None or not stage:
+        return
+
+    stmt = select(RunStageAttempt).where(
+        RunStageAttempt.run_id == getattr(run, "id", None),
+        RunStageAttempt.stage == stage,
+        RunStageAttempt.provider_name == provider_name,
+        RunStageAttempt.model_name == model_name,
+        RunStageAttempt.status == "success",
+        RunStageAttempt.chapter_number.is_(None)
+        if chapter_number is None
+        else RunStageAttempt.chapter_number == chapter_number,
+    ).order_by(RunStageAttempt.id.desc()).limit(1)
+    attempt = session.scalar(stmt)
+    if attempt is None:
+        return
+    attempt.attempt_metadata = {
+        **dict(attempt.attempt_metadata or {}),
+        "provider_metrics": metrics,
+    }
+    session.commit()
+
+
 def _wrap_supervised_provider_chat(supervised: Callable[..., str]) -> Callable[..., str]:
     signature = inspect.signature(supervised)
 
@@ -326,10 +395,11 @@ def _wrap_supervised_provider_chat(supervised: Callable[..., str]) -> Callable[.
             bound = signature.bind_partial(*args, **kwargs)
             messages = bound.arguments.get("messages") or []
             client = bound.arguments.get("client")
+            provider_name = bound.arguments.get("provider_name")
             existing_metadata = dict(bound.arguments.get("metadata") or {})
             telemetry = _message_telemetry(
                 messages,
-                configured_context_tokens=_configured_context_tokens(client),
+                configured_context_tokens=_configured_context_tokens(client, provider_name),
             )
             bound.arguments["metadata"] = {**existing_metadata, **telemetry}
         except Exception:
@@ -337,14 +407,21 @@ def _wrap_supervised_provider_chat(supervised: Callable[..., str]) -> Callable[.
             return supervised(*args, **kwargs)
 
         # Provider exceptions must propagate through the existing supervised retry/attempt path exactly once.
-        return supervised(*bound.args, **bound.kwargs)
+        output = supervised(*bound.args, **bound.kwargs)
+        try:
+            metrics = _provider_metrics(bound.arguments.get("client"), bound.arguments.get("provider_name"))
+            _persist_provider_metrics(bound, metrics)
+        except Exception:
+            # Provider telemetry is observability only. Never convert a successful generation into a failure.
+            pass
+        return output
 
     setattr(wrapped, "_novel_telemetry_wrapped", True)
     return wrapped
 
 
 def install_context_compiler() -> int:
-    """Install bounded context views, causal pacing, and safe prompt-size telemetry.
+    """Install bounded context views, causal pacing, and safe prompt-size/provider telemetry.
 
     Returns the number of runtime transformations installed. Installation is process-wide and
     idempotent. The durable continuity ledger, outline, and saved chapter prose remain unchanged.
