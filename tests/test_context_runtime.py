@@ -7,6 +7,7 @@ import pytest
 from novel_generator.services.context_runtime import (
     _configured_context_tokens,
     _message_telemetry,
+    _persist_provider_metrics,
     _provider_metrics,
     _wrap_supervised_provider_chat,
 )
@@ -55,6 +56,46 @@ def test_provider_metrics_use_routed_ollama_context_but_not_for_openai_compatibl
     compatible_metrics = _provider_metrics(manager, "openai_compatible")
     assert compatible_metrics["prompt_tokens"] == 6000
     assert "actual_context_utilization_pct" not in compatible_metrics
+
+
+def test_provider_metrics_are_merged_into_successful_attempt_metadata() -> None:
+    attempt = SimpleNamespace(
+        attempt_metadata={"label": "chapter 7 draft", "input_chars": 12000},
+    )
+
+    class Session:
+        committed = False
+
+        def scalar(self, statement: object) -> object:
+            return attempt
+
+        def commit(self) -> None:
+            self.committed = True
+
+    session = Session()
+    bound = SimpleNamespace(
+        arguments={
+            "session": session,
+            "run": SimpleNamespace(id="run-1"),
+            "stage": "chapter_draft",
+            "chapter_number": 7,
+            "provider_name": "ollama",
+            "model_name": "local-model",
+        }
+    )
+    metrics = {
+        "prompt_eval_count": 3000,
+        "eval_count": 900,
+        "completion_tokens_per_second": 31.5,
+        "done_reason": "stop",
+    }
+
+    _persist_provider_metrics(bound, metrics)
+
+    assert session.committed is True
+    assert attempt.attempt_metadata["label"] == "chapter 7 draft"
+    assert attempt.attempt_metadata["input_chars"] == 12000
+    assert attempt.attempt_metadata["provider_metrics"] == metrics
 
 
 def test_supervised_wrapper_merges_telemetry_without_storing_prompt_content() -> None:
