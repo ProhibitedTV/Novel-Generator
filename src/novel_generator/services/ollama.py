@@ -9,6 +9,7 @@ import httpx
 
 from ..schemas import ProviderCapabilities
 from .provider_errors import ProviderError, ProviderTransportError
+from .structured_schema_runtime import extract_schema_marker
 
 
 class OllamaError(ProviderError):
@@ -115,7 +116,7 @@ def extract_ollama_chat_metrics(payload: str | bytes | dict) -> dict[str, Any]:
     return metrics
 
 
-def _requests_json_only(messages: list[dict[str, str]]) -> bool:
+def _requests_json_only(messages: list[dict[str, Any]]) -> bool:
     for message in messages:
         if str(message.get("role", "")).lower() != "system":
             continue
@@ -214,16 +215,20 @@ class OllamaClient:
             raise OllamaError(f"Model '{model_name}' is not available in Ollama.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        structured = _requests_json_only(messages)
+        clean_messages, response_schema, _ = extract_schema_marker(messages)
+        structured = response_schema is not None or _requests_json_only(clean_messages)
         payload: dict = {
             "model": model_name,
-            "messages": messages,
+            "messages": clean_messages,
             "stream": stream,
         }
         options: dict[str, int | float] = {}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
-        if structured:
+        if response_schema is not None:
+            payload["format"] = response_schema
+            options["temperature"] = self.structured_temperature
+        elif structured:
             payload["format"] = "json"
             options["temperature"] = self.structured_temperature
         if options:
