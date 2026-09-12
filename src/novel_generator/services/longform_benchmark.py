@@ -9,6 +9,7 @@ from .context_memory import compile_memory_packet
 from .manuscript_context import compile_manuscript_capsules
 from .manuscript_qa_context import compile_manuscript_qa_capsules
 from .narrative_horizon import compile_narrative_horizon
+from .quality_trends import compile_quality_trend_audit
 from .story_arc_context import compile_story_arc_audit
 
 
@@ -91,8 +92,9 @@ def _chapter(number: int, *, word_count: int = 2200) -> SimpleNamespace:
     }
     qa = {
         "forward_motion_score": 8,
-        "repetition_risk_score": 8,
+        "repetition_risk_score": 3,
         "emotional_depth_score": 8,
+        "ending_hook_type": f"hook_{number % 5}",
         "warnings": [] if number % 8 else [f"Synthetic warning {number}"],
         "focus": [f"Preserve consequence {number}"],
         "revision_required": False,
@@ -115,6 +117,25 @@ def build_synthetic_longform_run(chapter_count: int = 32) -> SimpleNamespace:
     total = max(12, int(chapter_count))
     chapters = [_chapter(number) for number in range(1, total)]
     outline = [_outline_row(number, total) for number in range(1, total + 1)]
+
+    # Introduce a gradual final-third quality/length decline. This lets the benchmark verify that
+    # whole-book QA sees a slope that no single catastrophic chapter would necessarily reveal.
+    late_cutoff = max(1, (total * 2) // 3)
+    for chapter in chapters:
+        if int(chapter.chapter_number) <= late_cutoff:
+            continue
+        chapter.word_count = 1600
+        chapter.qa_notes = {
+            **chapter.qa_notes,
+            "forward_motion_score": 6,
+            "emotional_depth_score": 6,
+            "repetition_risk_score": 7,
+            "ending_hook_type": "document_reveal",
+            "warnings": ["Late-book scenes are converging on repeated archive explanations."],
+        }
+        plan = json.loads(chapter.plan)
+        plan["chapter_mode"] = "investigation"
+        chapter.plan = json.dumps(plan)
 
     timeline = [
         f"Historical archive event {index}: district {index % 11} changes custody after evidence pressure {index}."
@@ -201,7 +222,7 @@ def run_longform_benchmark(chapter_count: int = 32) -> dict[str, Any]:
 
     This intentionally uses no model call. It answers a narrower but important question before live
     generation: when a book becomes large and messy, do the deterministic systems still retrieve,
-    bound, prioritize, and converge the correct story state?
+    bound, prioritize, converge, and diagnose the correct story state?
     """
 
     run = build_synthetic_longform_run(chapter_count)
@@ -232,6 +253,7 @@ def run_longform_benchmark(chapter_count: int = 32) -> dict[str, Any]:
     ending = compile_narrative_horizon(run, late_chapter, lookahead=1).payload
     manuscript = compile_manuscript_capsules(run.chapters, max_chars=30_000)
     manuscript_qa = compile_manuscript_qa_capsules(run.chapters, max_chars=30_000)
+    quality = compile_quality_trend_audit(run.chapters).payload
 
     recalled_rows = recall.payload.get("chapters", [])
     callback_found = any(
@@ -242,6 +264,8 @@ def run_longform_benchmark(chapter_count: int = 32) -> dict[str, Any]:
     tarin = tarin_rows[0] if tarin_rows else {}
     pacing = horizon.get("word_budget", {})
     convergence = ending.get("ending_convergence", {})
+    forward_trend = quality.get("score_trends", {}).get("forward_motion_score", {})
+    quality_flags = list(quality.get("risk_flags", []))
 
     checks = {
         "continuity_memory_compacts": bool(memory.compacted and memory.output_chars <= 6_000),
@@ -252,6 +276,11 @@ def run_longform_benchmark(chapter_count: int = 32) -> dict[str, Any]:
         "late_book_resolution_priority": convergence.get("phase") == "resolution_priority" and convergence.get("new_major_threads_allowed") == 0,
         "developmental_map_keeps_all_chapters": len(manuscript.chapters) == len(run.chapters) and manuscript.output_chars <= 30_000,
         "qa_map_keeps_all_chapters": len(manuscript_qa.chapters) == len(run.chapters) and manuscript_qa.output_chars <= 30_000,
+        "quality_drift_detected": bool(
+            forward_trend.get("quality_direction_delta", 0) <= -1.25
+            and quality.get("length_trend", {}).get("last_vs_first_percent", 0) <= -25
+            and quality_flags
+        ),
     }
     passed_count = sum(1 for passed in checks.values() if passed)
     return {
@@ -273,6 +302,9 @@ def run_longform_benchmark(chapter_count: int = 32) -> dict[str, Any]:
             "developmental_context_chars": manuscript.output_chars,
             "qa_context_mode": manuscript_qa.mode,
             "qa_context_chars": manuscript_qa.output_chars,
+            "forward_motion_quality_delta": forward_trend.get("quality_direction_delta"),
+            "late_book_length_delta_percent": quality.get("length_trend", {}).get("last_vs_first_percent"),
+            "quality_risk_flags": quality_flags,
         },
     }
 
