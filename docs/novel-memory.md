@@ -84,6 +84,14 @@ Whole-book QA also receives the final unresolved arc audit, making abandoned cha
 
 `NOVEL_MANUSCRIPT_QA_CONTEXT_MAX_CHARS` defaults to 70,000 characters independently from the developmental rewrite budget.
 
+### Whole-book quality trends
+
+Individually acceptable chapters can still form a declining manuscript. The whole-book QA prompt therefore receives a deterministic trend audit derived from persisted chapter QA/state.
+
+The audit compares the first and last thirds of the manuscript, tracks chapter-length drift, identifies sustained changes in quality scores, finds repeated chapter modes and ending-hook types, surfaces recurring QA warnings, and records chapters still marked revision-required. Score direction is explicit: craft/continuity measures are generally higher-is-better, while repetition risk, technical-escalation fatigue, and cuttable-chapter risk are lower-is-better. A normalized `quality_direction_delta` always uses negative values for degradation and positive values for improvement.
+
+Trend signals are advisory. They tell the manuscript editor where to inspect sustained drift rather than forcing every act into identical pacing or tone.
+
 ## Ollama context and structured output
 
 The native Ollama chat API accepts model runtime options including `num_ctx` and also supports JSON response formatting. Novel Generator sends an explicit context size on Ollama generation calls instead of depending on the server or model default. The default is 32,768 tokens, which is large enough for the bounded chapter and developmental contexts used by this pipeline while remaining configurable for machines with tighter RAM or VRAM limits.
@@ -96,11 +104,25 @@ The default structured temperature is `0.2`. It is intentionally lower than norm
 
 If a selected model supports less context than the configured value, or the machine cannot comfortably run that context size, lower `OLLAMA_NUM_CTX`. If the model and hardware support substantially more context, it can be raised up to the application validation limit.
 
-## Prompt-size telemetry
+## Prompt and provider telemetry
 
-Every supervised provider attempt records safe input-size telemetry alongside the existing provider/model/stage timing data. The attempt metadata includes total input characters, a deliberately rough character-based token estimate, message count, largest message size, configured context size when known, and estimated context utilization percentage.
+Every supervised provider attempt records safe input-size telemetry alongside the existing provider/model/stage timing data. Before the request, metadata includes total input characters, a deliberately rough character-based token estimate, message count, largest message size, configured context size when known, and estimated context utilization percentage.
 
-The manuscript text itself is not copied into telemetry. These measurements are intended to make local-model tuning empirical: a slow or weak stage can be correlated with context pressure without persisting another copy of the author's prose.
+When a provider exposes actual generation metrics, the successful attempt is then enriched under `metadata.provider_metrics` without replacing the pre-request telemetry. Ollama can supply actual prompt/eval token counts, prompt/eval/load/total durations, prompt/completion throughput, stop reason, and actual context-window utilization. OpenAI-compatible servers can supply prompt/completion/total tokens, cached and reasoning-token details when reported, finish reason, and the response model identifier.
+
+The manuscript text itself is not copied into telemetry. Metric extraction and persistence are fail-open: observability can never turn a successful model call into a failed generation run.
+
+## Deterministic long-form benchmark
+
+Run:
+
+```bash
+python -m novel_generator.services.longform_benchmark
+```
+
+The benchmark builds a deliberately difficult synthetic 32-chapter book and currently checks nine cross-cutting properties in one run: continuity compaction, buried callback recall, dormant unresolved character detection, visibility of future arc touches, adaptive pacing, late-book resolution priority, bounded all-chapter developmental coverage, bounded all-chapter QA coverage, and detection of deliberate final-third quality/length drift.
+
+It makes no model call and requires no embeddings or hosted service. A failure indicates a long-form architecture regression even when isolated helper tests still pass. See `docs/longform-benchmark.md` for the report fields and interpretation guidance.
 
 ## Configuration
 
@@ -127,4 +149,4 @@ NOVEL_ADAPTIVE_LENGTH_MAX_EXTRA_PASSES=1
 
 The runtime integrations are fail-open: if a future prompt builder changes serialization format and a compiler cannot safely replace or inject a context block, the original prompt is used instead of failing the generation run.
 
-For local 8B–20B models, the defaults intentionally leave most of the attention budget for the current scene and prose while retaining enough book-level state to prevent character, canon, timeline, unresolved-thread, subplot, callback, ending-convergence, and manuscript-length drift.
+For local 8B–20B models, the defaults intentionally leave most of the attention budget for the current scene and prose while retaining enough book-level state to prevent character, canon, timeline, unresolved-thread, subplot, callback, ending-convergence, quality-drift, and manuscript-length drift.
