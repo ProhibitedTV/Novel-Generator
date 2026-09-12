@@ -8,6 +8,22 @@ The compiler prioritizes current world state, chapter-relevant character state, 
 
 The continuity-update stage intentionally still receives the complete ledger. This preserves the cumulative state machine and prevents a compact prompt view from accidentally becoming the persisted source of truth.
 
+## Causal narrative horizon
+
+A rolling summary tells the model what just happened, but that alone does not protect long-range causality. Local models can still softly reset the story, accidentally resolve a later reveal too early, reuse the same obstacle shape, or arrive at the next planned chapter without having established the conditions that chapter needs.
+
+For chapter planning, drafting, critique, revision, and expansion, the worker now derives a small narrative-horizon packet from already persisted run state. It contains:
+
+- the previous completed chapter's irreversible change, protagonist choice, permanent consequence, and resulting state;
+- the previous outline ending state and concrete hook;
+- a configurable lookahead over the next planned chapters, including objectives, reveals, ending states, costs, modes, and hooks;
+- a short recent-pattern history of chapter modes, obstacles, conflict turns, emotional anchors, side-character moves, and ending-hook mechanisms; and
+- explicit causal rules telling the model to inherit prior consequences, create preconditions for the next chapter, preserve later reveals, and avoid accidental structural repetition.
+
+The horizon does not invent new canon or alter the outline. It is a temporary causal contract generated from the existing outline, chapter plans, summaries, and continuity checkpoints. Future chapters are presented as commitments to prepare rather than scenes to consume early.
+
+`NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` defaults to 3 and is clamped from 1 to 6. Three chapters is intentionally modest: it gives the writer enough future pressure to plant setup and preserve causality without flooding a local model with distant material that should not dominate the current scene.
+
 ## Whole-manuscript developmental context
 
 Developmental rewrite planning has a different scaling problem: it needs a view of every chapter, but it does not need every sentence of every chapter. Passing a complete 80,000–150,000-word draft through one local-model request can overwhelm useful attention even when the model technically accepts the context length.
@@ -29,9 +45,10 @@ OLLAMA_NUM_CTX=32768
 NOVEL_MEMORY_ENABLED=1
 NOVEL_MEMORY_MAX_CHARS=14000
 NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS=70000
+NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS=3
 ```
 
-`NOVEL_MEMORY_ENABLED=0` disables the runtime context compiler. `NOVEL_MEMORY_MAX_CHARS` is the approximate compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls the whole-book chapter-capsule payload used for developmental rewrite planning and is clamped to 30,000–160,000 characters. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens.
+`NOVEL_MEMORY_ENABLED=0` disables the runtime context compiler. `NOVEL_MEMORY_MAX_CHARS` is the approximate compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls the whole-book chapter-capsule payload used for developmental rewrite planning and is clamped to 30,000–160,000 characters. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens.
 
 Small continuity ledgers pass through unchanged. Compaction starts only after the ledger exceeds the configured budget. The runtime integration is fail-open: if a future prompt builder changes serialization format and the compiler cannot safely replace a context block, the original prompt is used instead of failing the generation run.
 
