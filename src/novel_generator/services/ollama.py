@@ -57,6 +57,7 @@ class OllamaClient:
         max_retries: int,
         chat_timeout_seconds: float | None = None,
         retry_backoff_seconds: float = 0.0,
+        num_ctx: int | None = None,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -64,6 +65,7 @@ class OllamaClient:
         self.max_retries = max_retries
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
+        self.num_ctx = num_ctx
         self._client_factory = client_factory
 
     def _default_timeout(self) -> httpx.Timeout:
@@ -133,11 +135,13 @@ class OllamaClient:
             raise OllamaError(f"Model '{model_name}' is not available in Ollama.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        payload = {
+        payload: dict = {
             "model": model_name,
             "messages": messages,
             "stream": stream,
         }
+        if self.num_ctx:
+            payload["options"] = {"num_ctx": self.num_ctx}
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
