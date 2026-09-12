@@ -8,6 +8,7 @@ from typing import Any, Callable
 
 from .context_memory import compile_memory_packet
 from .manuscript_context import compile_manuscript_capsules
+from .narrative_horizon import compile_narrative_horizon
 
 
 _INSTALLED = False
@@ -23,6 +24,13 @@ _TARGET_BUILDERS = (
     "build_publication_humanization_messages",
     "build_publication_compression_messages",
 )
+_HORIZON_BUILDERS = {
+    "build_chapter_plan_messages",
+    "build_chapter_draft_messages",
+    "build_chapter_critique_messages",
+    "build_chapter_revision_messages",
+    "build_chapter_expansion_messages",
+}
 
 
 def _enabled() -> bool:
@@ -46,6 +54,15 @@ def _manuscript_budget_chars() -> int:
     except ValueError:
         parsed = 70_000
     return min(160_000, max(30_000, parsed))
+
+
+def _horizon_lookahead() -> int:
+    raw = os.getenv("NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS", "3").strip()
+    try:
+        parsed = int(raw)
+    except ValueError:
+        parsed = 3
+    return min(6, max(1, parsed))
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -140,8 +157,75 @@ def _rewrite_manuscript_chapters(
     return rewritten if replaced else messages
 
 
-def _wrap_builder(builder: Callable[..., list[dict[str, str]]], *, budget_chars: int) -> Callable[..., list[dict[str, str]]]:
+def _run_for_bound(bound: inspect.BoundArguments) -> Any:
+    run = bound.arguments.get("run")
+    if run is not None:
+        return run
+    chapter = bound.arguments.get("chapter")
+    return getattr(chapter, "run", None) if chapter is not None else None
+
+
+def _chapter_number_for_bound(bound: inspect.BoundArguments) -> int:
+    chapter = bound.arguments.get("chapter")
+    if chapter is None:
+        return 0
+    try:
+        return int(getattr(chapter, "chapter_number", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _inject_narrative_horizon(
+    messages: list[dict[str, str]],
+    *,
+    run: Any,
+    chapter_number: int,
+    lookahead: int,
+) -> list[dict[str, str]]:
+    if run is None or chapter_number <= 0:
+        return messages
+    horizon = compile_narrative_horizon(run, chapter_number, lookahead=lookahead).payload
+    if not horizon:
+        return messages
+
+    block = (
+        "Narrative horizon (causal contract; use it to preserve long-range structure and do not quote it in prose):\n"
+        + json.dumps(horizon, ensure_ascii=False, separators=(",", ":"))
+        + "\n\n"
+    )
+    preferred_markers = (
+        "Current chapter outline:\n",
+        "Chapter outline:\n",
+        "Deterministic lint findings:\n",
+    )
+    rewritten: list[dict[str, str]] = []
+    injected = False
+    for message in messages:
+        item = dict(message)
+        content = item.get("content", "")
+        if not injected and item.get("role") == "user":
+            insertion = -1
+            for marker in preferred_markers:
+                insertion = content.find(marker)
+                if insertion >= 0:
+                    break
+            if insertion >= 0:
+                item["content"] = content[:insertion] + block + content[insertion:]
+            else:
+                item["content"] = block + content
+            injected = True
+        rewritten.append(item)
+    return rewritten if injected else messages
+
+
+def _wrap_builder(
+    builder: Callable[..., list[dict[str, str]]],
+    *,
+    budget_chars: int,
+    horizon_lookahead: int,
+) -> Callable[..., list[dict[str, str]]]:
     signature = inspect.signature(builder)
+    builder_name = getattr(builder, "__name__", "")
 
     @functools.wraps(builder)
     def wrapped(*args: Any, **kwargs: Any) -> list[dict[str, str]]:
@@ -149,18 +233,25 @@ def _wrap_builder(builder: Callable[..., list[dict[str, str]]], *, budget_chars:
         try:
             bound = signature.bind_partial(*args, **kwargs)
             ledger = bound.arguments.get("continuity_ledger")
-            if ledger is None:
-                return messages
-            packet = compile_memory_packet(
-                ledger,
-                focus=_focus_payload(bound),
-                max_chars=budget_chars,
-            )
-            if not packet.compacted:
-                return messages
-            return _rewrite_messages(messages, ledger, packet.payload)
+            if ledger is not None:
+                packet = compile_memory_packet(
+                    ledger,
+                    focus=_focus_payload(bound),
+                    max_chars=budget_chars,
+                )
+                if packet.compacted:
+                    messages = _rewrite_messages(messages, ledger, packet.payload)
+
+            if builder_name in _HORIZON_BUILDERS:
+                messages = _inject_narrative_horizon(
+                    messages,
+                    run=_run_for_bound(bound),
+                    chapter_number=_chapter_number_for_bound(bound),
+                    lookahead=horizon_lookahead,
+                )
+            return messages
         except Exception:
-            # Prompt compaction is an optimization, never a reason to fail a generation run.
+            # Context shaping is an optimization, never a reason to fail a generation run.
             return messages
 
     setattr(wrapped, "_novel_memory_wrapped", True)
@@ -189,10 +280,10 @@ def _wrap_developmental_rewrite(
 
 
 def install_context_compiler() -> int:
-    """Install bounded continuity and whole-manuscript views into generation prompts.
+    """Install bounded continuity, narrative-horizon, and whole-manuscript prompt views.
 
     Returns the number of prompt transformations installed. Installation is process-wide and
-    idempotent. The durable continuity ledger and saved chapter prose remain unchanged.
+    idempotent. The durable continuity ledger, outline, and saved chapter prose remain unchanged.
     """
 
     global _INSTALLED
@@ -202,12 +293,21 @@ def install_context_compiler() -> int:
     from . import pipeline
 
     budget = _budget_chars()
+    horizon_lookahead = _horizon_lookahead()
     patched = 0
     for name in _TARGET_BUILDERS:
         builder = getattr(pipeline, name, None)
         if builder is None or getattr(builder, "_novel_memory_wrapped", False):
             continue
-        setattr(pipeline, name, _wrap_builder(builder, budget_chars=budget))
+        setattr(
+            pipeline,
+            name,
+            _wrap_builder(
+                builder,
+                budget_chars=budget,
+                horizon_lookahead=horizon_lookahead,
+            ),
+        )
         patched += 1
 
     developmental_builder = getattr(pipeline, "build_developmental_rewrite_messages", None)
