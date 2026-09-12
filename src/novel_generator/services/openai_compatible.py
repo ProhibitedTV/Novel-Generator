@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 import json
 import time
 
@@ -52,6 +53,53 @@ def parse_openai_chat_payload(payload: str | bytes | dict) -> str:
     raise OpenAICompatibleError("OpenAI-compatible response did not include message content.")
 
 
+def extract_openai_chat_metrics(payload: str | bytes | dict) -> dict[str, Any]:
+    """Extract provider-neutral usage/stop telemetry without retaining generated text."""
+
+    data: Any = payload
+    if isinstance(payload, (str, bytes)):
+        raw = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+        raw = raw.strip()
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    if not isinstance(data, dict):
+        return {}
+
+    metrics: dict[str, Any] = {}
+    usage = data.get("usage") or {}
+    if isinstance(usage, dict):
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = usage.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                metrics[key] = value
+
+        prompt_details = usage.get("prompt_tokens_details") or {}
+        if isinstance(prompt_details, dict):
+            cached = prompt_details.get("cached_tokens")
+            if isinstance(cached, int) and not isinstance(cached, bool) and cached >= 0:
+                metrics["cached_prompt_tokens"] = cached
+
+        completion_details = usage.get("completion_tokens_details") or {}
+        if isinstance(completion_details, dict):
+            reasoning = completion_details.get("reasoning_tokens")
+            if isinstance(reasoning, int) and not isinstance(reasoning, bool) and reasoning >= 0:
+                metrics["reasoning_tokens"] = reasoning
+
+    choices = data.get("choices") or []
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        finish_reason = choices[0].get("finish_reason")
+        if finish_reason:
+            metrics["finish_reason"] = str(finish_reason)
+    response_model = data.get("model")
+    if response_model:
+        metrics["response_model"] = str(response_model)
+    return metrics
+
+
 def _requests_json_only(messages: list[dict[str, str]]) -> bool:
     for message in messages:
         if str(message.get("role", "")).lower() != "system":
@@ -81,6 +129,7 @@ class OpenAICompatibleClient:
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
         self.structured_temperature = structured_temperature
+        self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
 
     def _headers(self) -> dict[str, str]:
@@ -169,6 +218,7 @@ class OpenAICompatibleClient:
             payload["response_format"] = {"type": "json_object"}
             payload["temperature"] = self.structured_temperature
 
+        self.last_chat_metrics = {}
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -184,7 +234,10 @@ class OpenAICompatibleClient:
                             response.raise_for_status()
                         else:
                             raise
-                    return parse_openai_chat_payload(response.text)
+                    raw = response.text
+                    output = parse_openai_chat_payload(raw)
+                    self.last_chat_metrics = extract_openai_chat_metrics(raw)
+                    return output
             except (
                 httpx.TimeoutException,
                 httpx.RequestError,
