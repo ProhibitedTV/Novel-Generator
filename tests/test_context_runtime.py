@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from novel_generator.services.context_runtime import _message_telemetry, _wrap_supervised_provider_chat
 
 
@@ -64,3 +66,39 @@ def test_supervised_wrapper_merges_telemetry_without_storing_prompt_content() ->
     assert seen["estimated_input_tokens"] > 0
     assert seen["configured_context_tokens"] == 32768
     assert "SECRET STORY CONTENT" not in str(seen)
+
+
+def test_supervised_wrapper_propagates_provider_failure_without_duplicate_call() -> None:
+    calls = 0
+
+    def supervised(
+        session: object,
+        run: object,
+        client: object,
+        provider_name: str,
+        model_name: str,
+        messages: list[dict[str, str]],
+        *,
+        stage: str,
+        chapter_number: int | None = None,
+        metadata: dict | None = None,
+        stream: bool = False,
+    ) -> str:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("provider failed")
+
+    wrapped = _wrap_supervised_provider_chat(supervised)
+
+    with pytest.raises(RuntimeError, match="provider failed"):
+        wrapped(
+            object(),
+            object(),
+            SimpleNamespace(num_ctx=32768),
+            "ollama",
+            "model",
+            [{"role": "user", "content": "Hello"}],
+            stage="chapter_draft",
+        )
+
+    assert calls == 1
