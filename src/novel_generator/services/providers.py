@@ -98,6 +98,7 @@ class ProviderManager:
                 max_retries=self.settings.ollama_max_retries,
                 chat_timeout_seconds=self.settings.provider_chat_timeout_seconds,
                 retry_backoff_seconds=self.settings.provider_retry_backoff_seconds,
+                num_ctx=self.settings.ollama_num_ctx,
             )
         elif key == "openai_compatible":
             client = OpenAICompatibleClient(
