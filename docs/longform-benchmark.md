@@ -46,7 +46,7 @@ The audit is advisory. It tells the manuscript editor where sustained drift dese
 
 ## Actual provider telemetry
 
-Prompt-size telemetry uses a deliberately rough character-based token estimate before a request. When the provider exposes real usage metrics, Novel Generator now captures those as well and stores them under the successful stage attempt's `provider_metrics` metadata.
+Prompt-size telemetry uses a deliberately rough character-based token estimate before a request. When the provider exposes real usage metrics, Novel Generator captures those as well and merges them under the successful `RunStageAttempt` row's `metadata.provider_metrics`. That means the numbers remain available through the existing stage-attempt API and attempt ledger after the in-memory provider response is gone.
 
 For Ollama, the stored metrics can include:
 
@@ -76,6 +76,8 @@ Provider telemetry never stores the prompt or generated manuscript text. It is m
 - Does a different local model provide materially better completion throughput on the same hardware?
 
 The pre-request estimate and post-request actual count are both useful. Their difference also gives a rough signal for how inaccurate the simple character-based estimate is for the selected model/tokenizer.
+
+Provider metrics are observability only. Extraction or persistence failure is fail-open and cannot turn a successful generation call into a failed novel run.
 
 ## Interpreting failures
 
