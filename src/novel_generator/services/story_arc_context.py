@@ -99,8 +99,12 @@ def _last_touch(run: Any, chapter_number: int, terms: set[str], *, exact_phrase:
         if number >= chapter_number:
             continue
         text = _chapter_search_text(chapter)
-        if phrase and phrase in text:
-            return number
+        if phrase:
+            if phrase in text:
+                return number
+            # Character presence should not be inferred from generic thematic overlap. If a named
+            # character is the tracked subject, require the actual name to appear in saved state.
+            continue
         overlap = terms & _terms(text)
         minimum = 1 if len(terms) <= 2 else 2
         if len(overlap) >= minimum:
@@ -116,9 +120,13 @@ def _future_touches(run: Any, chapter_number: int, terms: set[str], *, exact_phr
         if number <= chapter_number:
             continue
         text = _outline_search_text(item)
-        overlap = terms & _terms(text)
-        minimum = 1 if len(terms) <= 2 else 2
-        if (phrase and phrase in text) or len(overlap) >= minimum:
+        if phrase:
+            matched = phrase in text
+        else:
+            overlap = terms & _terms(text)
+            minimum = 1 if len(terms) <= 2 else 2
+            matched = len(overlap) >= minimum
+        if matched:
             matches.append(number)
             if len(matches) >= limit:
                 break
@@ -211,9 +219,10 @@ def _subplot_rows(run: Any, chapter_number: int, dormant_after: int) -> list[dic
     ledger = _as_dict(getattr(run, "continuity_ledger", None))
     rows: list[dict[str, Any]] = []
     for lane_type, label, description in _subplot_sources(ledger):
+        # Subplots are often referred to by natural-language state rather than their internal key,
+        # so use semantic term overlap instead of requiring the bookkeeping label to appear verbatim.
         terms = _terms({"label": label, "description": description})
-        exact = label if lane_type != "thread" and len(label) >= 4 else ""
-        last = _last_touch(run, chapter_number, terms, exact_phrase=exact)
+        last = _last_touch(run, chapter_number, terms)
         dormant_for = max(0, chapter_number - (last or 0) - 1) if chapter_number > 1 else 0
         rows.append(
             {
@@ -222,7 +231,7 @@ def _subplot_rows(run: Any, chapter_number: int, dormant_after: int) -> list[dic
                 "state": _clip(description, 420),
                 "last_touched_chapter": last,
                 "dormant_for_chapters": dormant_for,
-                "upcoming_planned_touches": _future_touches(run, chapter_number, terms, exact_phrase=exact),
+                "upcoming_planned_touches": _future_touches(run, chapter_number, terms),
                 "attention": "dormant_unresolved" if dormant_for >= dormant_after else "active",
             }
         )
