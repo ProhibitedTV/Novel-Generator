@@ -23,6 +23,13 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _clip(value: Any, limit: int = 420) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: max(1, limit - 1)].rstrip() + "…"
+
+
 def _safe_json_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -168,10 +175,7 @@ def _previous_chapter_state(run: Any, chapter_number: int) -> dict[str, Any]:
 
 
 def _recent_patterns(run: Any, chapter_number: int, *, window: int = 4) -> list[dict[str, Any]]:
-    outline_by_number = {
-        int(item["chapter_number"]): item
-        for item in _outline_rows(run)
-    }
+    outline_by_number = {int(item["chapter_number"]): item for item in _outline_rows(run)}
     prior = [
         chapter
         for chapter in _chapters(run)
@@ -200,17 +204,89 @@ def _recent_patterns(run: Any, chapter_number: int, *, window: int = 4) -> list[
     return rows
 
 
+def _selected_mapping(value: Any, limit: int) -> dict[str, str]:
+    mapping = value if isinstance(value, dict) else {}
+    return {
+        str(key): _clip(item)
+        for key, item in list(mapping.items())[-max(0, limit):]
+        if str(key).strip() and str(item).strip()
+    }
+
+
+def _selected_list(value: Any, limit: int) -> list[str]:
+    items = list(value) if isinstance(value, list) else []
+    return [_clip(item) for item in items[-max(0, limit):] if str(item).strip()]
+
+
+def _ending_convergence(run: Any, chapter_number: int, total: int, progress: float) -> dict[str, Any]:
+    """Create late-book closure pressure without inventing new plot state."""
+
+    if progress < 0.70 or total <= 0:
+        return {}
+
+    ledger = _as_dict(getattr(run, "continuity_ledger", None))
+    bible = _as_dict(getattr(run, "story_bible", None))
+    promises = ledger.get("open_promises_by_name") if isinstance(ledger.get("open_promises_by_name"), dict) else {}
+    threads = ledger.get("open_threads") if isinstance(ledger.get("open_threads"), list) else []
+    emotions = ledger.get("emotional_open_loops") if isinstance(ledger.get("emotional_open_loops"), dict) else {}
+    trust = ledger.get("trust_fractures") if isinstance(ledger.get("trust_fractures"), dict) else {}
+    remaining = max(1, total - chapter_number + 1)
+
+    if progress >= 0.90 or remaining <= 2:
+        phase = "resolution_priority"
+        new_major_threads_allowed = 0
+    elif progress >= 0.80:
+        phase = "convergence"
+        new_major_threads_allowed = 0
+    else:
+        phase = "prepare_convergence"
+        new_major_threads_allowed = 1
+
+    rules = [
+        "Treat unresolved promises and threads as a finite closure budget: advance, transform, or resolve existing lanes before inventing new major ones.",
+        "Do not add a new major faction, mystery, system, conspiracy, villain, quest, or relationship crisis unless it is already seeded or can pay off inside the remaining chapters.",
+        "Use late revelations to reinterpret established material rather than replace the book's central conflict with a new one.",
+        "Protect one primary climax and one primary ending; do not manufacture serial fake endings or a second unrelated climax.",
+        "Preserve enough aftermath after the decisive turn to show human, relational, civic, and world-state consequences.",
+    ]
+    if phase == "resolution_priority":
+        rules.extend(
+            [
+                "No new major unresolved thread should survive this chapter unless the existing outline explicitly requires it for the ending.",
+                "Prefer resolving or irreversibly transforming at least one open promise, trust fracture, or emotional loop in each remaining chapter.",
+                "A sequel hook may remain only after the current book's central emotional and external promises receive closure.",
+            ]
+        )
+
+    return {
+        "phase": phase,
+        "remaining_chapters_including_this_chapter": remaining,
+        "new_major_threads_allowed": new_major_threads_allowed,
+        "ending_promise": _clip(bible.get("ending_promise", ""), 700),
+        "open_promise_count": len(promises),
+        "open_thread_count": len(threads),
+        "emotional_open_loop_count": len(emotions),
+        "trust_fracture_count": len(trust),
+        "priority_open_promises": _selected_mapping(promises, 6),
+        "priority_open_threads": _selected_list(threads, 6),
+        "priority_emotional_loops": _selected_mapping(emotions, 4),
+        "priority_trust_fractures": _selected_mapping(trust, 4),
+        "rules": rules,
+    }
+
+
 def compile_narrative_horizon(
     run: Any,
     chapter_number: int,
     *,
     lookahead: int = 3,
 ) -> NarrativeHorizon:
-    """Compile a compact causal and pacing contract for one chapter.
+    """Compile a compact causal, pacing, and convergence contract for one chapter.
 
     The packet is derived only from persisted run state. It creates no new canon. It gives a local
-    model the previous permanent consequence, near-future commitments, recent pattern history, and
-    the remaining novel word budget without forcing the model to infer those constraints itself.
+    model the previous permanent consequence, near-future commitments, recent pattern history,
+    remaining novel word budget, and late-book closure pressure without asking the model to infer
+    those constraints from an entire manuscript.
     """
 
     outline = _outline_rows(run)
@@ -245,6 +321,7 @@ def compile_narrative_horizon(
             "lookahead_chapters": len(upcoming),
         },
         "word_budget": _word_budget(run, chapter_number, total),
+        "ending_convergence": _ending_convergence(run, chapter_number, total, progress),
         "causal_inheritance": causal_inheritance,
         "upcoming_commitments": [_compact_outline(item) for item in upcoming],
         "recent_pattern_history": _recent_patterns(run, chapter_number),
@@ -255,6 +332,7 @@ def compile_narrative_horizon(
             "Avoid reusing the same obstacle shape, dramatic mode, emotional beat, side-character function, or ending-hook mechanism visible in recent_pattern_history unless repetition is itself the point.",
             "Treat upcoming_commitments as promises to prepare, not scenes to steal from future chapters.",
             "When word_budget is present, aim near adaptive_target_this_chapter while staying inside configured_chapter_range; do not intentionally hug the minimum when the novel is behind pace.",
+            "When ending_convergence is present, obey its closure phase and spend existing unresolved story debt before creating new major story debt.",
         ],
     }
     return NarrativeHorizon(payload=payload)
