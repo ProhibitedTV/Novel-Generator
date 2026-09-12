@@ -49,6 +49,16 @@ def parse_ollama_chat_payload(payload: str | bytes | dict) -> str:
     return "".join(chunks).strip()
 
 
+def _requests_json_only(messages: list[dict[str, str]]) -> bool:
+    for message in messages:
+        if str(message.get("role", "")).lower() != "system":
+            continue
+        content = str(message.get("content", "")).lower()
+        if "json only" in content or "valid json" in content:
+            return True
+    return False
+
+
 class OllamaClient:
     def __init__(
         self,
@@ -58,6 +68,7 @@ class OllamaClient:
         chat_timeout_seconds: float | None = None,
         retry_backoff_seconds: float = 0.0,
         num_ctx: int | None = None,
+        structured_temperature: float = 0.2,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -66,6 +77,7 @@ class OllamaClient:
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
         self.num_ctx = num_ctx
+        self.structured_temperature = structured_temperature
         self._client_factory = client_factory
 
     def _default_timeout(self) -> httpx.Timeout:
@@ -135,13 +147,21 @@ class OllamaClient:
             raise OllamaError(f"Model '{model_name}' is not available in Ollama.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
+        structured = _requests_json_only(messages)
         payload: dict = {
             "model": model_name,
             "messages": messages,
             "stream": stream,
         }
+        options: dict[str, int | float] = {}
         if self.num_ctx:
-            payload["options"] = {"num_ctx": self.num_ctx}
+            options["num_ctx"] = self.num_ctx
+        if structured:
+            payload["format"] = "json"
+            options["temperature"] = self.structured_temperature
+        if options:
+            payload["options"] = options
+
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
