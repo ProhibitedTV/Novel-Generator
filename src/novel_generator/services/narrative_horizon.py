@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,6 +54,69 @@ def _chapters(run: Any) -> list[Any]:
     chapters = list(getattr(run, "chapters", None) or [])
     chapters.sort(key=lambda item: int(getattr(item, "chapter_number", 0) or 0))
     return chapters
+
+
+def _chapter_word_count(chapter: Any) -> int:
+    try:
+        stored = int(getattr(chapter, "word_count", 0) or 0)
+    except (TypeError, ValueError):
+        stored = 0
+    if stored > 0:
+        return stored
+    content = str(getattr(chapter, "content", "") or "").strip()
+    return len(content.split()) if content else 0
+
+
+def _word_budget(run: Any, chapter_number: int, total_chapters: int) -> dict[str, Any]:
+    try:
+        target = int(getattr(run, "target_word_count", 0) or 0)
+        configured_min = int(getattr(run, "min_words_per_chapter", 0) or 0)
+        configured_max = int(getattr(run, "max_words_per_chapter", 0) or 0)
+    except (TypeError, ValueError):
+        return {}
+    if target <= 0 or total_chapters <= 0:
+        return {}
+
+    if configured_min <= 0:
+        configured_min = max(1, math.floor(target / total_chapters * 0.8))
+    if configured_max < configured_min:
+        configured_max = max(configured_min, math.ceil(target / total_chapters * 1.2))
+
+    completed_words = sum(
+        _chapter_word_count(chapter)
+        for chapter in _chapters(run)
+        if int(getattr(chapter, "chapter_number", 0) or 0) < chapter_number
+    )
+    remaining_chapters = max(1, total_chapters - chapter_number + 1)
+    remaining_words = max(0, target - completed_words)
+    required_average = math.ceil(remaining_words / remaining_chapters) if remaining_words else configured_min
+    adaptive_target = min(configured_max, max(configured_min, required_average))
+
+    expected_before_current = target * max(0, chapter_number - 1) / total_chapters
+    pace_delta = completed_words - expected_before_current
+    tolerance = max(250, target / total_chapters * 0.15)
+    if pace_delta < -tolerance:
+        pace_status = "behind"
+    elif pace_delta > tolerance:
+        pace_status = "ahead"
+    else:
+        pace_status = "on_pace"
+
+    maximum_reachable = completed_words + configured_max * remaining_chapters
+    minimum_reachable = completed_words + configured_min * remaining_chapters
+    return {
+        "novel_target_words": target,
+        "completed_words_before_this_chapter": completed_words,
+        "remaining_words_including_this_chapter": remaining_words,
+        "remaining_chapters_including_this_chapter": remaining_chapters,
+        "configured_chapter_range": [configured_min, configured_max],
+        "required_average_from_here": required_average,
+        "adaptive_target_this_chapter": adaptive_target,
+        "pace_status": pace_status,
+        "pace_delta_words": round(pace_delta),
+        "target_reachable_with_configured_max": maximum_reachable >= target,
+        "would_overshoot_if_every_remaining_chapter_hit_min": minimum_reachable > target,
+    }
 
 
 def _compact_outline(item: dict[str, Any]) -> dict[str, Any]:
@@ -142,12 +206,11 @@ def compile_narrative_horizon(
     *,
     lookahead: int = 3,
 ) -> NarrativeHorizon:
-    """Compile a small causal look-behind/look-ahead packet for one chapter.
+    """Compile a compact causal and pacing contract for one chapter.
 
-    This packet is deliberately derived from already persisted outline/chapter state. It does not
-    create new canon. Its job is to make a local model respect the previous permanent consequence,
-    preserve upcoming commitments, and avoid repeating the same dramatic machinery chapter after
-    chapter.
+    The packet is derived only from persisted run state. It creates no new canon. It gives a local
+    model the previous permanent consequence, near-future commitments, recent pattern history, and
+    the remaining novel word budget without forcing the model to infer those constraints itself.
     """
 
     outline = _outline_rows(run)
@@ -181,6 +244,7 @@ def compile_narrative_horizon(
             "current_act": current.get("act", ""),
             "lookahead_chapters": len(upcoming),
         },
+        "word_budget": _word_budget(run, chapter_number, total),
         "causal_inheritance": causal_inheritance,
         "upcoming_commitments": [_compact_outline(item) for item in upcoming],
         "recent_pattern_history": _recent_patterns(run, chapter_number),
@@ -190,6 +254,7 @@ def compile_narrative_horizon(
             "Do not resolve a later reveal, reversal, or ending hook early merely because it appears in lookahead context.",
             "Avoid reusing the same obstacle shape, dramatic mode, emotional beat, side-character function, or ending-hook mechanism visible in recent_pattern_history unless repetition is itself the point.",
             "Treat upcoming_commitments as promises to prepare, not scenes to steal from future chapters.",
+            "When word_budget is present, aim near adaptive_target_this_chapter while staying inside configured_chapter_range; do not intentionally hug the minimum when the novel is behind pace.",
         ],
     }
     return NarrativeHorizon(payload=payload)
