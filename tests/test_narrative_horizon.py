@@ -128,13 +128,15 @@ def test_late_book_horizon_spends_open_story_debt_instead_of_multiplying_it() ->
 
     convergence = compile_narrative_horizon(run, 5, lookahead=1).payload["ending_convergence"]
 
-    assert convergence["phase"] == "convergence"
+    # With only two chapters remaining, closure pressure overrides the percentage-only phase.
+    assert convergence["phase"] == "resolution_priority"
     assert convergence["remaining_chapters_including_this_chapter"] == 2
     assert convergence["new_major_threads_allowed"] == 0
     assert convergence["open_promise_count"] == 2
     assert "tarin_betrayal" in convergence["priority_open_promises"]
     assert "archive conspiracy" in convergence["ending_promise"]
     assert any("new major faction" in rule for rule in convergence["rules"])
+    assert any("sequel hook" in rule.lower() for rule in convergence["rules"])
 
     final_convergence = compile_narrative_horizon(run, 6, lookahead=0).payload["ending_convergence"]
     assert final_convergence["phase"] == "resolution_priority"
