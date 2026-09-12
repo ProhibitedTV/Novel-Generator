@@ -71,7 +71,7 @@ def _focus_payload(bound: inspect.BoundArguments) -> dict[str, Any]:
 def _rewrite_messages(messages: list[dict[str, str]], ledger: Any, packet: dict[str, Any]) -> list[dict[str, str]]:
     ledger_payload = _as_dict(ledger)
     full_json = json.dumps(ledger_payload, indent=2)
-    compact_json = json.dumps(packet, indent=2)
+    compact_json = json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
     rewritten: list[dict[str, str]] = []
     replaced = False
     for message in messages:
