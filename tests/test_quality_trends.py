@@ -53,11 +53,16 @@ def test_quality_trend_audit_detects_gradual_late_book_drift() -> None:
     assert audit["length_trend"]["last_third_mean_words"] == 1600.0
     assert audit["length_trend"]["last_vs_first_percent"] == -33.3
     assert audit["score_trends"]["forward_motion_score"]["last_vs_first_delta"] == -2.5
+    assert audit["score_trends"]["forward_motion_score"]["quality_direction_delta"] == -2.5
+    assert audit["score_trends"]["repetition_risk_score"]["direction"] == "lower_is_better"
+    assert audit["score_trends"]["repetition_risk_score"]["last_vs_first_delta"] == -2.5
+    assert audit["score_trends"]["repetition_risk_score"]["quality_direction_delta"] == 2.5
     assert audit["structural_variety"]["longest_same_mode_run"] == {"mode": "investigation", "chapters": 3}
     assert audit["structural_variety"]["longest_same_ending_hook_run"] == {"type": "document_reveal", "chapters": 3}
     assert audit["revision_required_chapters"] == [9]
     assert audit["repeated_warnings"][0]["count"] == 3
     assert any("forward_motion_score drops" in flag for flag in audit["risk_flags"])
+    assert not any("repetition_risk_score" in flag for flag in audit["risk_flags"])
     assert any("Average chapter length falls" in flag for flag in audit["risk_flags"])
     assert any("recur across multiple chapters" in flag for flag in audit["risk_flags"])
 
@@ -74,3 +79,4 @@ def test_quality_trend_audit_is_injected_into_manuscript_qa_prompt() -> None:
     assert prompt.startswith("Whole-book quality trend audit")
     assert '"last_vs_first_percent":-33.3' in prompt
     assert '"revision_required_chapters":[9]' in prompt
+    assert '"direction":"lower_is_better"' in prompt
