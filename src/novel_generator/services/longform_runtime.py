@@ -7,6 +7,7 @@ import os
 from typing import Any, Callable
 
 from .manuscript_qa_context import compile_manuscript_qa_capsules
+from .quality_trends import compile_quality_trend_audit
 from .story_arc_context import compile_story_arc_audit
 
 
@@ -131,6 +132,29 @@ def _inject_arc_audit(
     return rewritten if injected else messages
 
 
+def _inject_quality_trend_audit(
+    messages: list[dict[str, str]],
+    chapters: list[Any],
+) -> list[dict[str, str]]:
+    audit = compile_quality_trend_audit(chapters).payload
+    if not audit:
+        return messages
+    block = (
+        "Whole-book quality trend audit (deterministic signals; inspect sustained drift rather than treating every flag as a mandatory rewrite):\n"
+        + json.dumps(audit, ensure_ascii=False, separators=(",", ":"))
+        + "\n\n"
+    )
+    rewritten: list[dict[str, str]] = []
+    injected = False
+    for message in messages:
+        item = dict(message)
+        if not injected and item.get("role") == "user":
+            item["content"] = block + item.get("content", "")
+            injected = True
+        rewritten.append(item)
+    return rewritten if injected else messages
+
+
 def _wrap_arc_builder(
     builder: Callable[..., list[dict[str, str]]],
     *,
@@ -211,6 +235,7 @@ def _wrap_manuscript_qa(
                     dormant_after=dormant_after,
                     label="Whole-book unresolved arc audit",
                 )
+            messages = _inject_quality_trend_audit(messages, chapters)
             return messages
         except Exception:
             return messages
@@ -220,7 +245,7 @@ def _wrap_manuscript_qa(
 
 
 def install_longform_runtime() -> int:
-    """Install derived arc/subplot awareness and bounded whole-manuscript QA context."""
+    """Install derived arc/subplot awareness, trend analysis, and bounded manuscript QA context."""
 
     global _INSTALLED
     if _INSTALLED or not _enabled():
