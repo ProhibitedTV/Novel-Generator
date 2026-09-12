@@ -52,6 +52,16 @@ def parse_openai_chat_payload(payload: str | bytes | dict) -> str:
     raise OpenAICompatibleError("OpenAI-compatible response did not include message content.")
 
 
+def _requests_json_only(messages: list[dict[str, str]]) -> bool:
+    for message in messages:
+        if str(message.get("role", "")).lower() != "system":
+            continue
+        content = str(message.get("content", "")).lower()
+        if "json only" in content or "valid json" in content:
+            return True
+    return False
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -61,6 +71,7 @@ class OpenAICompatibleClient:
         api_key: str | None = None,
         chat_timeout_seconds: float | None = None,
         retry_backoff_seconds: float = 0.0,
+        structured_temperature: float = 0.2,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -69,6 +80,7 @@ class OpenAICompatibleClient:
         self.api_key = (api_key or "").strip()
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
+        self.structured_temperature = structured_temperature
         self._client_factory = client_factory
 
     def _headers(self) -> dict[str, str]:
@@ -146,17 +158,32 @@ class OpenAICompatibleClient:
             raise OpenAICompatibleError(f"Model '{model_name}' is not available in the configured OpenAI-compatible provider.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        payload = {
+        structured = _requests_json_only(messages)
+        base_payload: dict = {
             "model": model_name,
             "messages": messages,
             "stream": stream,
         }
+        payload = dict(base_payload)
+        if structured:
+            payload["response_format"] = {"type": "json_object"}
+            payload["temperature"] = self.structured_temperature
+
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
                 with self._make_client(for_chat=True) as client:
-                    response = client.post("/chat/completions", json=payload)
-                    response.raise_for_status()
+                    try:
+                        response = client.post("/chat/completions", json=payload)
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as exc:
+                        # Some local OpenAI-compatible servers do not implement response_format.
+                        # A schema-control optimization should never make an otherwise valid backend unusable.
+                        if structured and exc.response.status_code in {400, 422}:
+                            response = client.post("/chat/completions", json=base_payload)
+                            response.raise_for_status()
+                        else:
+                            raise
                     return parse_openai_chat_payload(response.text)
             except (
                 httpx.TimeoutException,
