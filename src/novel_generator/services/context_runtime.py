@@ -7,6 +7,7 @@ import os
 from typing import Any, Callable
 
 from .context_memory import compile_memory_packet
+from .manuscript_context import compile_manuscript_capsules
 
 
 _INSTALLED = False
@@ -17,6 +18,7 @@ _TARGET_BUILDERS = (
     "build_chapter_revision_messages",
     "build_chapter_expansion_messages",
     "build_chapter_edit_messages",
+    "build_developmental_rewrite_messages",
     "build_developmental_revision_messages",
     "build_publication_humanization_messages",
     "build_publication_compression_messages",
@@ -35,6 +37,15 @@ def _budget_chars() -> int:
     except ValueError:
         parsed = 14_000
     return min(50_000, max(4_000, parsed))
+
+
+def _manuscript_budget_chars() -> int:
+    raw = os.getenv("NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS", "70000").strip()
+    try:
+        parsed = int(raw)
+    except ValueError:
+        parsed = 70_000
+    return min(160_000, max(30_000, parsed))
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -59,11 +70,23 @@ def _focus_payload(bound: inspect.BoundArguments) -> dict[str, Any]:
             "outline_summary": getattr(chapter, "outline_summary", ""),
             "summary": getattr(chapter, "summary", ""),
         }
+    chapters = bound.arguments.get("chapters") or []
+    manuscript_focus = [
+        {
+            "chapter_number": getattr(item, "chapter_number", None),
+            "title": getattr(item, "title", ""),
+            "outline_summary": getattr(item, "outline_summary", ""),
+            "summary": getattr(item, "summary", ""),
+        }
+        for item in chapters
+    ]
     return {
         "chapter": chapter_payload,
+        "chapters": manuscript_focus,
         "outline": _as_dict(bound.arguments.get("outline_entry")),
         "plan": _as_dict(bound.arguments.get("plan")),
         "developmental_action": _as_dict(bound.arguments.get("developmental_action")),
+        "qa_report": _as_dict(bound.arguments.get("qa_report")),
         "prior_context": bound.arguments.get("prior_context", ""),
     }
 
@@ -87,6 +110,34 @@ def _rewrite_messages(messages: list[dict[str, str]], ledger: Any, packet: dict[
         # If that changes later, preserve the original prompt rather than risking a malformed rewrite.
         return messages
     return rewritten
+
+
+def _rewrite_manuscript_chapters(
+    messages: list[dict[str, str]],
+    chapters: Any,
+    *,
+    max_chars: int,
+) -> list[dict[str, str]]:
+    packet = compile_manuscript_capsules(chapters or [], max_chars=max_chars)
+    compact_json = json.dumps(packet.chapters, ensure_ascii=False, separators=(",", ":"))
+    label = "Full manuscript chapters:\n"
+    marker = "\n\nReturn a JSON object with exactly these keys:"
+    rewritten: list[dict[str, str]] = []
+    replaced = False
+
+    for message in messages:
+        item = dict(message)
+        content = item.get("content", "")
+        start = content.find(label)
+        if start >= 0:
+            data_start = start + len(label)
+            end = content.find(marker, data_start)
+            if end >= 0:
+                item["content"] = content[:data_start] + compact_json + content[end:]
+                replaced = True
+        rewritten.append(item)
+
+    return rewritten if replaced else messages
 
 
 def _wrap_builder(builder: Callable[..., list[dict[str, str]]], *, budget_chars: int) -> Callable[..., list[dict[str, str]]]:
@@ -116,10 +167,32 @@ def _wrap_builder(builder: Callable[..., list[dict[str, str]]], *, budget_chars:
     return wrapped
 
 
-def install_context_compiler() -> int:
-    """Install bounded continuity-memory views into chapter-level pipeline prompt builders.
+def _wrap_developmental_rewrite(
+    builder: Callable[..., list[dict[str, str]]],
+    *,
+    max_chars: int,
+) -> Callable[..., list[dict[str, str]]]:
+    signature = inspect.signature(builder)
 
-    Returns the number of builders patched. Installation is process-wide and idempotent.
+    @functools.wraps(builder)
+    def wrapped(*args: Any, **kwargs: Any) -> list[dict[str, str]]:
+        messages = builder(*args, **kwargs)
+        try:
+            bound = signature.bind_partial(*args, **kwargs)
+            chapters = bound.arguments.get("chapters") or []
+            return _rewrite_manuscript_chapters(messages, chapters, max_chars=max_chars)
+        except Exception:
+            return messages
+
+    setattr(wrapped, "_manuscript_capsules_wrapped", True)
+    return wrapped
+
+
+def install_context_compiler() -> int:
+    """Install bounded continuity and whole-manuscript views into generation prompts.
+
+    Returns the number of prompt transformations installed. Installation is process-wide and
+    idempotent. The durable continuity ledger and saved chapter prose remain unchanged.
     """
 
     global _INSTALLED
@@ -135,6 +208,18 @@ def install_context_compiler() -> int:
         if builder is None or getattr(builder, "_novel_memory_wrapped", False):
             continue
         setattr(pipeline, name, _wrap_builder(builder, budget_chars=budget))
+        patched += 1
+
+    developmental_builder = getattr(pipeline, "build_developmental_rewrite_messages", None)
+    if developmental_builder is not None and not getattr(developmental_builder, "_manuscript_capsules_wrapped", False):
+        setattr(
+            pipeline,
+            "build_developmental_rewrite_messages",
+            _wrap_developmental_rewrite(
+                developmental_builder,
+                max_chars=_manuscript_budget_chars(),
+            ),
+        )
         patched += 1
 
     _INSTALLED = True
