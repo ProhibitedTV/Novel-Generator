@@ -9,6 +9,7 @@ from ..db import build_session_factory
 from ..repositories import claim_next_queued_run, ensure_provider_configs, get_run_for_processing, recover_running_runs
 from ..settings import Settings
 from .context_runtime import install_context_compiler
+from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
 
@@ -30,6 +31,7 @@ def recover_incomplete_runs(settings: Settings) -> None:
 
 def run_worker_loop(settings: Settings) -> None:
     runtime_transforms = install_context_compiler()
+    runtime_transforms += install_longform_runtime()
     if runtime_transforms:
         logger.info("Installed %s long-form context and telemetry runtime transforms.", runtime_transforms)
 
