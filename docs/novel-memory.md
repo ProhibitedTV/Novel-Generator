@@ -32,9 +32,13 @@ For that stage, the worker builds a bounded chapter-capsule map. Every chapter r
 
 Saved chapter prose is never changed by this process. The capsules are a temporary prompt view only.
 
-## Ollama context window
+## Ollama context and structured output
 
-The native Ollama chat API accepts model runtime options including `num_ctx`. Novel Generator now sends an explicit context size on Ollama generation calls instead of depending on the server or model default. The default is 32,768 tokens, which is large enough for the bounded chapter and developmental contexts used by this pipeline while remaining configurable for machines with tighter RAM or VRAM limits.
+The native Ollama chat API accepts model runtime options including `num_ctx` and also supports JSON response formatting. Novel Generator now sends an explicit context size on Ollama generation calls instead of depending on the server or model default. The default is 32,768 tokens, which is large enough for the bounded chapter and developmental contexts used by this pipeline while remaining configurable for machines with tighter RAM or VRAM limits.
+
+Structured pipeline prompts such as story bibles, outlines, chapter plans, critiques, continuity updates, manuscript QA, and JSON repair requests are also detected automatically from their system instructions. Those calls now use Ollama's native `format: "json"` mode and a lower structured-generation temperature. This reduces the chance that a local model wraps JSON in commentary, markdown, or malformed free-form text before the application's existing validation and repair layer sees it.
+
+The default structured temperature is `0.2`. It is intentionally lower than normal prose generation because these stages are schema-following control work rather than creative drafting. Prose calls keep the model's normal generation temperature.
 
 If a selected model supports less context than the configured value, or the machine cannot comfortably run that context size, lower `OLLAMA_NUM_CTX`. If the model and hardware support substantially more context, it can be raised up to the application validation limit.
 
@@ -42,13 +46,14 @@ If a selected model supports less context than the configured value, or the mach
 
 ```env
 OLLAMA_NUM_CTX=32768
+OLLAMA_STRUCTURED_TEMPERATURE=0.2
 NOVEL_MEMORY_ENABLED=1
 NOVEL_MEMORY_MAX_CHARS=14000
 NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS=70000
 NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS=3
 ```
 
-`NOVEL_MEMORY_ENABLED=0` disables the runtime context compiler. `NOVEL_MEMORY_MAX_CHARS` is the approximate compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls the whole-book chapter-capsule payload used for developmental rewrite planning and is clamped to 30,000–160,000 characters. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens.
+`NOVEL_MEMORY_ENABLED=0` disables the runtime context compiler. `NOVEL_MEMORY_MAX_CHARS` is the approximate compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls the whole-book chapter-capsule payload used for developmental rewrite planning and is clamped to 30,000–160,000 characters. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens. `OLLAMA_STRUCTURED_TEMPERATURE` is validated from 0.0–2.0.
 
 Small continuity ledgers pass through unchanged. Compaction starts only after the ledger exceeds the configured budget. The runtime integration is fail-open: if a future prompt builder changes serialization format and the compiler cannot safely replace a context block, the original prompt is used instead of failing the generation run.
 
