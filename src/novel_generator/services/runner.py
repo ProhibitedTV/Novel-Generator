@@ -8,6 +8,7 @@ import time
 from ..db import build_session_factory
 from ..repositories import claim_next_queued_run, ensure_provider_configs, get_run_for_processing, recover_running_runs
 from ..settings import Settings
+from .adaptive_length_runtime import install_adaptive_length_runtime
 from .context_runtime import install_context_compiler
 from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
@@ -34,8 +35,9 @@ def run_worker_loop(settings: Settings) -> None:
     runtime_transforms = install_context_compiler()
     runtime_transforms += install_longform_runtime()
     runtime_transforms += install_recall_runtime()
+    runtime_transforms += install_adaptive_length_runtime()
     if runtime_transforms:
-        logger.info("Installed %s long-form context and telemetry runtime transforms.", runtime_transforms)
+        logger.info("Installed %s long-form context, pacing, and telemetry runtime transforms.", runtime_transforms)
 
     session_factory = build_session_factory(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
