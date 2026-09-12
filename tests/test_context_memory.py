@@ -27,7 +27,7 @@ def _large_ledger() -> dict:
             "Chapter 61: Tarin admits the vault map was coerced from him.",
         ],
         "active_entities": [
-            *( {"name": f"Entity {index}", "kind": "location", "role": "background"} for index in range(25) ),
+            *({"name": f"Entity {index}", "kind": "location", "role": "background"} for index in range(25)),
             {"name": "Black Vault", "kind": "location", "role": "source of the archive evidence"},
         ],
         "entity_state_changes": {
@@ -109,7 +109,7 @@ def test_prompt_wrapper_replaces_only_the_read_view() -> None:
             }
         ]
 
-    wrapped = _wrap_builder(builder, budget_chars=4_000)
+    wrapped = _wrap_builder(builder, budget_chars=4_000, horizon_lookahead=3)
     messages = wrapped(
         ledger,
         {"objective": "Iris confronts Tarin over the Black Vault betrayal."},
