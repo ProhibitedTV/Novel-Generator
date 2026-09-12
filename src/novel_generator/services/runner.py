@@ -29,9 +29,9 @@ def recover_incomplete_runs(settings: Settings) -> None:
 
 
 def run_worker_loop(settings: Settings) -> None:
-    patched_builders = install_context_compiler()
-    if patched_builders:
-        logger.info("Installed bounded novel-memory context for %s chapter prompt builders.", patched_builders)
+    runtime_transforms = install_context_compiler()
+    if runtime_transforms:
+        logger.info("Installed %s long-form context and telemetry runtime transforms.", runtime_transforms)
 
     session_factory = build_session_factory(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
