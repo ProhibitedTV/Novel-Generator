@@ -215,13 +215,43 @@ def _subplot_sources(ledger: dict[str, Any]) -> list[tuple[str, str, str]]:
     return rows
 
 
+def _character_name_terms(run: Any) -> set[str]:
+    """Tokens from recurring character names; too common to prove a subplot was advanced."""
+
+    bible = _as_dict(getattr(run, "story_bible", None))
+    names: list[str] = []
+    for raw in bible.get("character_agendas") or []:
+        name = str(_as_dict(raw).get("name", "") or "").strip()
+        if name:
+            names.append(name)
+    for raw in bible.get("cast") or []:
+        name = str(_as_dict(raw).get("name", "") or "").strip()
+        if name:
+            names.append(name)
+    return _terms(names)
+
+
+def _subplot_focus_terms(run: Any, label: str, description: str) -> set[str]:
+    """Prefer distinctive subplot vocabulary over ubiquitous character names.
+
+    Character names are useful for character-arc presence, but they are poor evidence that a promise
+    or unresolved thread actually advanced. Removing them prevents every Iris/Tarin scene from
+    looking like movement on every Iris/Tarin-related promise.
+    """
+
+    original = _terms({"label": label, "description": description})
+    distinctive = original - _character_name_terms(run)
+    return distinctive if distinctive else original
+
+
 def _subplot_rows(run: Any, chapter_number: int, dormant_after: int) -> list[dict[str, Any]]:
     ledger = _as_dict(getattr(run, "continuity_ledger", None))
     rows: list[dict[str, Any]] = []
     for lane_type, label, description in _subplot_sources(ledger):
         # Subplots are often referred to by natural-language state rather than their internal key,
-        # so use semantic term overlap instead of requiring the bookkeeping label to appear verbatim.
-        terms = _terms({"label": label, "description": description})
+        # so use semantic term overlap, but exclude recurring character names that would otherwise
+        # make almost every scene look like movement on every character-linked subplot.
+        terms = _subplot_focus_terms(run, label, description)
         last = _last_touch(run, chapter_number, terms)
         dormant_for = max(0, chapter_number - (last or 0) - 1) if chapter_number > 1 else 0
         rows.append(
