@@ -31,6 +31,19 @@ def _clip(value: Any, limit: int) -> str:
     return text[: max(1, limit - 1)].rstrip() + "…"
 
 
+def _excerpt(value: Any, limit: int, *, tail: bool = False) -> str:
+    """Keep a small literal prose window so manuscript QA sees the final text, not only metadata."""
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= limit:
+        return text
+    if tail:
+        return "…" + text[-max(1, limit - 1):].lstrip()
+    return text[: max(1, limit - 1)].rstrip() + "…"
+
+
 def _clip_mapping(value: Any, limit: int, item_limit: int) -> dict[str, Any]:
     mapping = value if isinstance(value, dict) else {}
     result: dict[str, Any] = {}
@@ -134,12 +147,30 @@ def _continuity_signals(value: Any, *, compact: bool) -> dict[str, Any]:
 def _capsule(chapter: Any, *, mode: str) -> dict[str, Any]:
     compact = mode != "detailed"
     minimal = mode == "minimal"
+    content = str(getattr(chapter, "content", "") or "")
     payload: dict[str, Any] = {
         "chapter_number": int(getattr(chapter, "chapter_number", 0) or 0),
         "title": _clip(getattr(chapter, "title", ""), 160),
         "summary": _clip(getattr(chapter, "summary", ""), 360 if minimal else (700 if compact else 1200)),
         "word_count": int(getattr(chapter, "word_count", 0) or 0),
     }
+
+    # Final QA must see some literal final prose from every chapter. Metadata-only QA can miss a
+    # line edit that introduces repetition, an abrupt/truncated ending, or prose/continuity drift.
+    if mode == "detailed":
+        opening = _excerpt(content, 600)
+        closing = _excerpt(content, 900, tail=True)
+    elif mode == "compact":
+        opening = _excerpt(content, 240)
+        closing = _excerpt(content, 420, tail=True)
+    else:
+        opening = _excerpt(content, 100)
+        closing = _excerpt(content, 180, tail=True)
+    if opening:
+        payload["final_prose_opening_excerpt"] = opening
+    if closing:
+        payload["final_prose_closing_excerpt"] = closing
+
     continuity = _continuity_signals(getattr(chapter, "continuity_update", None), compact=compact)
     if continuity:
         payload["continuity_signals"] = continuity
@@ -162,7 +193,7 @@ def compile_manuscript_qa_capsules(
     *,
     max_chars: int = 70_000,
 ) -> ManuscriptQaCapsules:
-    """Bound the whole-book QA view while retaining one structural record per chapter."""
+    """Bound the whole-book QA view while retaining one structural/prose record per chapter."""
 
     rows = list(chapters)
     budget = max(30_000, int(max_chars))
@@ -175,15 +206,20 @@ def compile_manuscript_qa_capsules(
         if size <= budget:
             return ManuscriptQaCapsules(chapters=payload, output_chars=size, mode=mode)
 
-    # Final fallback still preserves chapter number/title/summary/word count for every chapter.
-    per_chapter = max(80, min(220, budget // max(1, len(rows)) - 120))
-    payload = [
-        {
+    # Extreme fallback still preserves a tiny literal closing window for every chapter. Ending
+    # evidence is more valuable to final QA than another few summary characters once budgets pinch.
+    per_chapter = max(60, min(160, budget // max(1, len(rows)) - 220))
+    payload = []
+    for chapter in rows:
+        content = str(getattr(chapter, "content", "") or "")
+        row = {
             "chapter_number": int(getattr(chapter, "chapter_number", 0) or 0),
-            "title": _clip(getattr(chapter, "title", ""), 100),
+            "title": _clip(getattr(chapter, "title", ""), 90),
             "summary": _clip(getattr(chapter, "summary", ""), per_chapter),
             "word_count": int(getattr(chapter, "word_count", 0) or 0),
         }
-        for chapter in rows
-    ]
+        closing = _excerpt(content, 100, tail=True)
+        if closing:
+            row["final_prose_closing_excerpt"] = closing
+        payload.append(row)
     return ManuscriptQaCapsules(chapters=payload, output_chars=_json_chars(payload), mode="minimal")
