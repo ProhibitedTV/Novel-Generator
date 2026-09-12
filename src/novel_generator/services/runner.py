@@ -15,6 +15,7 @@ from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
 from .recall_runtime import install_recall_runtime
+from .truncation_runtime import install_truncation_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +39,14 @@ def run_worker_loop(settings: Settings) -> None:
     runtime_transforms += install_recall_runtime()
     runtime_transforms += install_adaptive_length_runtime()
     runtime_transforms += install_continuity_lifecycle()
+    # Install after telemetry so continuation attempts inherit the same safe attempt metadata and
+    # provider-metric persistence as ordinary calls.
+    runtime_transforms += install_truncation_runtime()
     if runtime_transforms:
-        logger.info("Installed %s long-form context, pacing, continuity, and telemetry runtime transforms.", runtime_transforms)
+        logger.info(
+            "Installed %s long-form context, pacing, continuity, telemetry, and truncation-recovery runtime transforms.",
+            runtime_transforms,
+        )
 
     session_factory = build_session_factory(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
