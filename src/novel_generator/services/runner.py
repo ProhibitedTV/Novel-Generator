@@ -10,6 +10,7 @@ from ..repositories import claim_next_queued_run, ensure_provider_configs, get_r
 from ..settings import Settings
 from .adaptive_length_runtime import install_adaptive_length_runtime
 from .context_runtime import install_context_compiler
+from .continuity_lifecycle import install_continuity_lifecycle
 from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
@@ -36,8 +37,9 @@ def run_worker_loop(settings: Settings) -> None:
     runtime_transforms += install_longform_runtime()
     runtime_transforms += install_recall_runtime()
     runtime_transforms += install_adaptive_length_runtime()
+    runtime_transforms += install_continuity_lifecycle()
     if runtime_transforms:
-        logger.info("Installed %s long-form context, pacing, and telemetry runtime transforms.", runtime_transforms)
+        logger.info("Installed %s long-form context, pacing, continuity, and telemetry runtime transforms.", runtime_transforms)
 
     session_factory = build_session_factory(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
