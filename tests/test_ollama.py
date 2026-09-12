@@ -70,3 +70,25 @@ def test_ollama_chat_client_uses_long_read_timeout() -> None:
     with client._make_client(for_chat=True) as http_client:
         assert http_client.timeout.connect == 120
         assert http_client.timeout.read == 1800
+
+
+def test_ollama_chat_sends_configured_context_window() -> None:
+    seen_payload: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen_payload.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"message": {"content": "ok"}, "done": True})
+
+    client = OllamaClient(
+        base_url="http://ollama.test",
+        timeout_seconds=1,
+        max_retries=0,
+        num_ctx=32768,
+        client_factory=lambda: httpx.Client(
+            transport=httpx.MockTransport(handler),
+            base_url="http://ollama.test",
+        ),
+    )
+
+    assert client.chat("test-model", [{"role": "user", "content": "Hello"}]) == "ok"
+    assert seen_payload["options"] == {"num_ctx": 32768}
