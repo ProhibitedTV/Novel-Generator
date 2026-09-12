@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import inspect
 import json
+import math
 import os
 from typing import Any, Callable
 
@@ -279,10 +280,71 @@ def _wrap_developmental_rewrite(
     return wrapped
 
 
-def install_context_compiler() -> int:
-    """Install bounded continuity, narrative-horizon, and whole-manuscript prompt views.
+def _configured_context_tokens(client: Any) -> int | None:
+    direct = getattr(client, "num_ctx", None)
+    if direct:
+        try:
+            return int(direct)
+        except (TypeError, ValueError):
+            pass
+    settings = getattr(client, "settings", None)
+    configured = getattr(settings, "ollama_num_ctx", None) if settings is not None else None
+    if configured:
+        try:
+            return int(configured)
+        except (TypeError, ValueError):
+            return None
+    return None
 
-    Returns the number of prompt transformations installed. Installation is process-wide and
+
+def _message_telemetry(messages: Any, *, configured_context_tokens: int | None = None) -> dict[str, Any]:
+    rows = list(messages or [])
+    lengths = [len(str(item.get("content", ""))) for item in rows if isinstance(item, dict)]
+    input_chars = sum(lengths)
+    estimated_tokens = math.ceil(input_chars / 4) if input_chars else 0
+    telemetry: dict[str, Any] = {
+        "input_chars": input_chars,
+        "estimated_input_tokens": estimated_tokens,
+        "message_count": len(rows),
+        "largest_message_chars": max(lengths, default=0),
+    }
+    if configured_context_tokens and configured_context_tokens > 0:
+        telemetry["configured_context_tokens"] = configured_context_tokens
+        telemetry["estimated_context_utilization_pct"] = round(
+            estimated_tokens / configured_context_tokens * 100,
+            1,
+        )
+    return telemetry
+
+
+def _wrap_supervised_provider_chat(supervised: Callable[..., str]) -> Callable[..., str]:
+    signature = inspect.signature(supervised)
+
+    @functools.wraps(supervised)
+    def wrapped(*args: Any, **kwargs: Any) -> str:
+        try:
+            bound = signature.bind_partial(*args, **kwargs)
+            messages = bound.arguments.get("messages") or []
+            client = bound.arguments.get("client")
+            existing_metadata = dict(bound.arguments.get("metadata") or {})
+            telemetry = _message_telemetry(
+                messages,
+                configured_context_tokens=_configured_context_tokens(client),
+            )
+            bound.arguments["metadata"] = {**existing_metadata, **telemetry}
+            return supervised(*bound.args, **bound.kwargs)
+        except Exception:
+            # Telemetry must never alter whether a provider call can execute.
+            return supervised(*args, **kwargs)
+
+    setattr(wrapped, "_novel_telemetry_wrapped", True)
+    return wrapped
+
+
+def install_context_compiler() -> int:
+    """Install bounded context views, causal pacing, and safe prompt-size telemetry.
+
+    Returns the number of runtime transformations installed. Installation is process-wide and
     idempotent. The durable continuity ledger, outline, and saved chapter prose remain unchanged.
     """
 
@@ -320,6 +382,11 @@ def install_context_compiler() -> int:
                 max_chars=_manuscript_budget_chars(),
             ),
         )
+        patched += 1
+
+    supervised = getattr(pipeline, "_supervised_provider_chat", None)
+    if supervised is not None and not getattr(supervised, "_novel_telemetry_wrapped", False):
+        setattr(pipeline, "_supervised_provider_chat", _wrap_supervised_provider_chat(supervised))
         patched += 1
 
     _INSTALLED = True
