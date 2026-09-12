@@ -17,12 +17,21 @@ For chapter planning, drafting, critique, revision, and expansion, the worker no
 - the previous completed chapter's irreversible change, protagonist choice, permanent consequence, and resulting state;
 - the previous outline ending state and concrete hook;
 - a configurable lookahead over the next planned chapters, including objectives, reveals, ending states, costs, modes, and hooks;
-- a short recent-pattern history of chapter modes, obstacles, conflict turns, emotional anchors, side-character moves, and ending-hook mechanisms; and
-- explicit causal rules telling the model to inherit prior consequences, create preconditions for the next chapter, preserve later reveals, and avoid accidental structural repetition.
+- a short recent-pattern history of chapter modes, obstacles, conflict turns, emotional anchors, side-character moves, and ending-hook mechanisms;
+- an adaptive whole-book word budget; and
+- explicit causal rules telling the model to inherit prior consequences, create preconditions for the next chapter, preserve later reveals, avoid accidental structural repetition, and write toward the remaining manuscript length.
 
-The horizon does not invent new canon or alter the outline. It is a temporary causal contract generated from the existing outline, chapter plans, summaries, and continuity checkpoints. Future chapters are presented as commitments to prepare rather than scenes to consume early.
+The horizon does not invent new canon or alter the outline. It is a temporary causal contract generated from the existing outline, chapter plans, summaries, continuity checkpoints, and saved word counts. Future chapters are presented as commitments to prepare rather than scenes to consume early.
 
 `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` defaults to 3 and is clamped from 1 to 6. Three chapters is intentionally modest: it gives the writer enough future pressure to plant setup and preserve causality without flooding a local model with distant material that should not dominate the current scene.
+
+### Adaptive novel-length pacing
+
+Fixed per-chapter minimums are not enough to guarantee a full-length manuscript. If early chapters consistently land near the minimum, the book can finish tens of thousands of words below its stated target even though every individual chapter passed validation.
+
+The narrative horizon therefore calculates the manuscript's live pace before each chapter: completed words, remaining words, remaining chapters, required average chapter length from this point forward, an adaptive target clamped to the configured chapter range, and whether the overall target is still reachable at the configured maximum. The model is instructed to aim near the adaptive target rather than treating the minimum as the default when the book is behind pace.
+
+This is guidance, not destructive padding. Expansion still favors dramatized action, dialogue, sensory detail, emotional reaction, civilian texture, and consequence rather than recap or filler.
 
 ## Whole-manuscript developmental context
 
@@ -41,6 +50,12 @@ Structured pipeline prompts such as story bibles, outlines, chapter plans, criti
 The default structured temperature is `0.2`. It is intentionally lower than normal prose generation because these stages are schema-following control work rather than creative drafting. Prose calls keep the model's normal generation temperature.
 
 If a selected model supports less context than the configured value, or the machine cannot comfortably run that context size, lower `OLLAMA_NUM_CTX`. If the model and hardware support substantially more context, it can be raised up to the application validation limit.
+
+## Prompt-size telemetry
+
+Every supervised provider attempt now records safe input-size telemetry alongside the existing provider/model/stage timing data. The attempt metadata includes total input characters, a deliberately rough character-based token estimate, message count, largest message size, configured context size when known, and estimated context utilization percentage.
+
+The manuscript text itself is not copied into telemetry. These measurements are intended to make local-model tuning empirical: a slow or weak stage can be correlated with context pressure without persisting another copy of the author's prose.
 
 ## Configuration
 
