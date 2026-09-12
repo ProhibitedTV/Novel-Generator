@@ -86,6 +86,8 @@ def _run() -> SimpleNamespace:
                 word_count=0,
             ),
         ],
+        story_bible={},
+        continuity_ledger={},
     )
 
 
@@ -104,8 +106,39 @@ def test_narrative_horizon_carries_previous_consequence_future_commitments_and_w
     assert horizon["word_budget"]["adaptive_target_this_chapter"] == 2_400
     assert horizon["word_budget"]["pace_status"] == "behind"
     assert horizon["word_budget"]["target_reachable_with_configured_max"] is True
+    assert horizon["ending_convergence"] == {}
     assert any("precondition" in rule for rule in horizon["causal_rules"])
     assert any("adaptive_target_this_chapter" in rule for rule in horizon["causal_rules"])
+
+
+def test_late_book_horizon_spends_open_story_debt_instead_of_multiplying_it() -> None:
+    run = _run()
+    run.story_bible = {
+        "ending_promise": "Iris exposes the archive conspiracy and decides whether Tarin can be trusted again."
+    }
+    run.continuity_ledger = {
+        "open_promises_by_name": {
+            "vault_witness": "Resolve why the witness was hidden.",
+            "tarin_betrayal": "Resolve whether Tarin betrayed Iris voluntarily.",
+        },
+        "open_threads": ["The archive evidence still has no safe public custodian."],
+        "emotional_open_loops": {"Iris": "She has not decided whether Tarin deserves forgiveness."},
+        "trust_fractures": {"Iris/Tarin": "The apparent betrayal remains unresolved."},
+    }
+
+    convergence = compile_narrative_horizon(run, 5, lookahead=1).payload["ending_convergence"]
+
+    assert convergence["phase"] == "convergence"
+    assert convergence["remaining_chapters_including_this_chapter"] == 2
+    assert convergence["new_major_threads_allowed"] == 0
+    assert convergence["open_promise_count"] == 2
+    assert "tarin_betrayal" in convergence["priority_open_promises"]
+    assert "archive conspiracy" in convergence["ending_promise"]
+    assert any("new major faction" in rule for rule in convergence["rules"])
+
+    final_convergence = compile_narrative_horizon(run, 6, lookahead=0).payload["ending_convergence"]
+    assert final_convergence["phase"] == "resolution_priority"
+    assert any("sequel hook" in rule.lower() for rule in final_convergence["rules"])
 
 
 def test_chapter_prompt_wrapper_injects_narrative_horizon_even_when_ledger_is_small() -> None:
