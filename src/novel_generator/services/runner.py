@@ -11,6 +11,7 @@ from ..settings import Settings
 from .adaptive_length_runtime import install_adaptive_length_runtime
 from .context_runtime import install_context_compiler
 from .continuity_lifecycle import install_continuity_lifecycle
+from .editorial_reconciliation_runtime import install_editorial_reconciliation_runtime
 from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
@@ -44,12 +45,15 @@ def run_worker_loop(settings: Settings) -> None:
     runtime_transforms += install_recall_runtime()
     runtime_transforms += install_adaptive_length_runtime()
     runtime_transforms += install_continuity_lifecycle()
+    # Reconciliation is installed after live continuity lifecycle semantics so its ledger replay
+    # can genuinely retire resolved promises/threads instead of resurrecting append-only ghost debt.
+    runtime_transforms += install_editorial_reconciliation_runtime()
     # Install after telemetry so continuation attempts inherit the same safe attempt metadata and
     # provider-metric persistence as ordinary calls.
     runtime_transforms += install_truncation_runtime()
     if runtime_transforms:
         logger.info(
-            "Installed %s long-form context, pacing, continuity, structured-output, telemetry, and truncation-recovery runtime transforms.",
+            "Installed %s long-form context, pacing, continuity, editorial-reconciliation, structured-output, telemetry, and truncation-recovery runtime transforms.",
             runtime_transforms,
         )
 
