@@ -160,9 +160,13 @@ def _looks_like_restart(existing: str, continuation: str) -> bool:
         return False
     existing_words = _normalized_words(existing)
     continuation_words = _normalized_words(continuation)
-    if len(existing_words) < 16 or len(continuation_words) < 16:
+    # A legitimate continuation can echo the final sentence, but it should never reproduce the
+    # chapter's opening. Ten matching opening tokens is strong evidence of a full restart while
+    # still catching short, title-less openings before the model diverges into newly generated text.
+    prefix_words = min(10, len(existing_words), len(continuation_words))
+    if prefix_words < 8:
         return False
-    return existing_words[:16] == continuation_words[:16]
+    return existing_words[:prefix_words] == continuation_words[:prefix_words]
 
 
 def merge_truncation_continuation(existing: str, continuation: str) -> str:
