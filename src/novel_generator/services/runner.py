@@ -8,6 +8,7 @@ import time
 from ..db import build_session_factory
 from ..repositories import claim_next_queued_run, ensure_provider_configs, get_run_for_processing, recover_running_runs
 from ..settings import Settings
+from .context_runtime import install_context_compiler
 from .pipeline import process_run_safe
 from .providers import ProviderManager
 
@@ -28,6 +29,10 @@ def recover_incomplete_runs(settings: Settings) -> None:
 
 
 def run_worker_loop(settings: Settings) -> None:
+    patched_builders = install_context_compiler()
+    if patched_builders:
+        logger.info("Installed bounded novel-memory context for %s chapter prompt builders.", patched_builders)
+
     session_factory = build_session_factory(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     while True:
