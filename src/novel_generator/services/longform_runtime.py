@@ -6,6 +6,7 @@ import json
 import os
 from typing import Any, Callable
 
+from .ending_debt import compile_ending_debt_audit, ending_debt_note
 from .manuscript_qa_context import compile_manuscript_qa_capsules
 from .quality_trends import compile_quality_trend_audit
 from .story_arc_context import compile_story_arc_audit
@@ -155,6 +156,31 @@ def _inject_quality_trend_audit(
     return rewritten if injected else messages
 
 
+def _inject_ending_debt_audit(
+    messages: list[dict[str, str]],
+    *,
+    run: Any,
+    chapters: list[Any],
+) -> list[dict[str, str]]:
+    audit = compile_ending_debt_audit(run, chapters).payload
+    if not audit:
+        return messages
+    block = (
+        "End-of-book story-debt audit (deterministic checkpoint; explicitly decide what is resolved, intentional aftermath/sequel residue, or accidentally abandoned):\n"
+        + json.dumps(audit, ensure_ascii=False, separators=(",", ":"))
+        + "\n\n"
+    )
+    rewritten: list[dict[str, str]] = []
+    injected = False
+    for message in messages:
+        item = dict(message)
+        if not injected and item.get("role") == "user":
+            item["content"] = block + item.get("content", "")
+            injected = True
+        rewritten.append(item)
+    return rewritten if injected else messages
+
+
 def _wrap_arc_builder(
     builder: Callable[..., list[dict[str, str]]],
     *,
@@ -235,6 +261,7 @@ def _wrap_manuscript_qa(
                     dormant_after=dormant_after,
                     label="Whole-book unresolved arc audit",
                 )
+                messages = _inject_ending_debt_audit(messages, run=run, chapters=chapters)
             messages = _inject_quality_trend_audit(messages, chapters)
             return messages
         except Exception:
@@ -244,8 +271,59 @@ def _wrap_manuscript_qa(
     return wrapped
 
 
+def _wrap_manuscript_qa_runner(
+    runner: Callable[..., Any],
+    *,
+    render_report: Callable[[Any], str],
+) -> Callable[..., Any]:
+    """Persist deterministic ending-debt evidence even when model QA falls back or overlooks it."""
+
+    signature = inspect.signature(runner)
+
+    @functools.wraps(runner)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        result = runner(*args, **kwargs)
+        try:
+            bound = signature.bind_partial(*args, **kwargs)
+            run = bound.arguments.get("run")
+            chapters = list(bound.arguments.get("chapters") or [])
+            if run is None:
+                return result
+            report, _ = result
+            audit = compile_ending_debt_audit(run, chapters)
+            if not audit.payload:
+                return result
+            meta = audit.payload.get("_ending_debt_audit") or {}
+            note = ending_debt_note(audit)
+            ending_notes = list(getattr(report, "ending_coherence_notes", []) or [])
+            if note not in ending_notes:
+                ending_notes.append(note)
+            warnings = list(getattr(report, "warnings", []) or [])
+            central_count = int(meta.get("central_candidate_count", 0) or 0)
+            if central_count > 0:
+                warning = (
+                    f"Ending-debt audit found {central_count} unresolved live item(s) with strong lexical overlap to the story-bible ending promise; "
+                    "final editorial review must confirm these are intentional residue rather than abandoned central obligations."
+                )
+                if warning not in warnings:
+                    warnings.append(warning)
+            updated = report.model_copy(
+                update={
+                    "ending_coherence_notes": ending_notes,
+                    "warnings": warnings,
+                }
+            )
+            return updated, render_report(updated)
+        except Exception:
+            # This audit is additive safety evidence. It must not turn a successful QA call into a failed run.
+            return result
+
+    setattr(wrapped, "_novel_ending_debt_wrapped", True)
+    return wrapped
+
+
 def install_longform_runtime() -> int:
-    """Install derived arc/subplot awareness, trend analysis, and bounded manuscript QA context."""
+    """Install derived arc/subplot awareness, trend analysis, ending debt, and bounded manuscript QA context."""
 
     global _INSTALLED
     if _INSTALLED or not _enabled():
@@ -282,6 +360,20 @@ def install_longform_runtime() -> int:
                 arc_max_chars=arc_budget,
                 dormant_after=dormant_after,
             ),
+        )
+        patched += 1
+
+    qa_runner = getattr(pipeline, "_run_manuscript_qa", None)
+    render_report = getattr(pipeline, "render_qa_report_markdown", None)
+    if (
+        qa_runner is not None
+        and callable(render_report)
+        and not getattr(qa_runner, "_novel_ending_debt_wrapped", False)
+    ):
+        setattr(
+            pipeline,
+            "_run_manuscript_qa",
+            _wrap_manuscript_qa_runner(qa_runner, render_report=render_report),
         )
         patched += 1
 
