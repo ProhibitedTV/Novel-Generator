@@ -12,6 +12,7 @@ from .context_runtime import install_context_compiler
 from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
+from .recall_runtime import install_recall_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ def recover_incomplete_runs(settings: Settings) -> None:
 def run_worker_loop(settings: Settings) -> None:
     runtime_transforms = install_context_compiler()
     runtime_transforms += install_longform_runtime()
+    runtime_transforms += install_recall_runtime()
     if runtime_transforms:
         logger.info("Installed %s long-form context and telemetry runtime transforms.", runtime_transforms)
 
