@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     openai_compatible_base_url: str = "http://127.0.0.1:1234/v1"
     openai_compatible_default_model: str = "local-model"
     openai_compatible_api_key: str = ""
+    # App-side context-window knowledge for LM Studio/vLLM/etc. Zero means unknown. This value is
+    # used only for prompt headroom/telemetry; it is not sent as an OpenAI API parameter.
+    openai_compatible_context_tokens: int = Field(default=0, ge=0, le=1_048_576)
     openai_compatible_max_tokens: int = Field(default=8192, ge=256, le=65536)
     max_concurrent_runs: int = Field(default=1, ge=1, le=4)
     worker_poll_interval_seconds: float = Field(default=2.0, ge=0.5, le=30.0)
