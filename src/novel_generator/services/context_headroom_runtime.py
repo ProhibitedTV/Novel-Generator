@@ -6,7 +6,8 @@ import math
 import os
 from typing import Any, Callable
 
-from .context_runtime import _configured_context_tokens
+from .context_runtime import _configured_context_tokens, _provider_client
+from .provider_controls import make_output_budget_marker
 
 
 _INSTALLED = False
@@ -25,7 +26,9 @@ _MEDIUM_OUTPUT_STAGES = frozenset(
     {
         "story_bible",
         "outline",
+        "outline_chunk",
         "manuscript_qa",
+        "publication_readiness",
         "developmental_rewrite",
     }
 )
@@ -76,6 +79,20 @@ def _stage_reserve_tokens(stage: str, default_reserve: int) -> int:
     if normalized == "chapter_summary":
         return min(base, 2_048)
     return min(base, 4_096)
+
+
+def _configured_output_tokens(client: Any, provider_name: str | None) -> int | None:
+    target = _provider_client(client, provider_name)
+    for attribute in ("num_predict", "max_tokens"):
+        raw = getattr(target, attribute, None)
+        if raw:
+            try:
+                value = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                return value
+    return None
 
 
 def _estimated_tokens(messages: Any) -> int:
@@ -158,28 +175,44 @@ def _wrap_supervised_provider_chat(
             bound = signature.bind_partial(*args, **kwargs)
             client = bound.arguments.get("client")
             provider_name = bound.arguments.get("provider_name")
-            context_tokens = _configured_context_tokens(client, provider_name)
-            if not context_tokens:
-                return supervised(*args, **kwargs)
-
             stage = str(bound.arguments.get("stage") or "")
-            stage_reserve = _stage_reserve_tokens(stage, reserve_tokens)
+
+            configured_output = _configured_output_tokens(client, provider_name)
+            base_reserve = min(reserve_tokens, configured_output) if configured_output else reserve_tokens
+            stage_reserve = _stage_reserve_tokens(stage, base_reserve)
             messages = list(bound.arguments.get("messages") or [])
-            rewritten, headroom = shed_optional_context(
-                messages,
-                configured_context_tokens=context_tokens,
-                requested_reserve_tokens=stage_reserve,
-            )
+            context_tokens = _configured_context_tokens(client, provider_name)
+
+            if context_tokens:
+                rewritten, headroom = shed_optional_context(
+                    messages,
+                    configured_context_tokens=context_tokens,
+                    requested_reserve_tokens=stage_reserve,
+                )
+                effective_output_budget = int(headroom["context_headroom_reserve_tokens"])
+            else:
+                rewritten = [dict(message) for message in messages]
+                effective_output_budget = stage_reserve
+                headroom = {
+                    "context_headroom_requested_reserve_tokens": stage_reserve,
+                    "context_headroom_satisfied": None,
+                    "optional_context_blocks_removed": [],
+                }
+
+            # The provider clients strip this private control message before sending chat messages.
+            # It aligns max_tokens/num_predict with the same stage-aware reserve used by headroom.
+            rewritten.append(make_output_budget_marker(effective_output_budget))
             existing_metadata = dict(bound.arguments.get("metadata") or {})
             bound.arguments["messages"] = rewritten
             bound.arguments["metadata"] = {
                 **existing_metadata,
                 **headroom,
                 "context_headroom_stage": stage,
+                "provider_output_budget_tokens": effective_output_budget,
             }
         except Exception:
-            # Headroom shaping is an optimization. Existing provider error handling remains the
-            # authority if the immutable/core prompt itself is too large for the configured model.
+            # Headroom/output-budget shaping is an optimization. Existing provider error handling
+            # remains authoritative if the immutable/core prompt itself is too large.
             return supervised(*args, **kwargs)
 
         return supervised(*bound.args, **bound.kwargs)
@@ -189,7 +222,7 @@ def _wrap_supervised_provider_chat(
 
 
 def install_context_headroom_runtime() -> int:
-    """Reserve output-token headroom by shedding only optional derived prompt blocks."""
+    """Reserve output headroom and align provider completion caps by generation stage."""
 
     global _INSTALLED
     if _INSTALLED or not _enabled():
