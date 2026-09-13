@@ -151,11 +151,13 @@ def test_openai_compatible_falls_back_when_response_format_is_unsupported_and_ke
     )
 
     assert result == '{"fallback":true}'
-    assert len(seen_payloads) == 2
-    assert "response_format" in seen_payloads[0]
+    assert len(seen_payloads) == 3
+    assert seen_payloads[0]["response_format"] == {"type": "json_object"}
     assert seen_payloads[0]["max_tokens"] == 8192
-    assert "response_format" not in seen_payloads[1]
-    assert seen_payloads[1]["max_tokens"] == 8192
+    assert seen_payloads[1]["response_format"] == {"type": "json_object"}
+    assert "max_tokens" not in seen_payloads[1]
+    assert "response_format" not in seen_payloads[2]
+    assert seen_payloads[2]["max_tokens"] == 8192
     assert client.last_chat_metrics["total_tokens"] == 530
 
 
@@ -231,9 +233,12 @@ def test_openai_compatible_can_fall_back_from_structured_and_budget_fields() -> 
     )
 
     assert result == '{"bare":true}'
-    assert len(seen_payloads) == 3
-    assert "response_format" in seen_payloads[0]
-    assert "response_format" not in seen_payloads[1]
-    assert "max_tokens" in seen_payloads[1]
+    assert len(seen_payloads) == 4
+    assert seen_payloads[0]["response_format"] == {"type": "json_object"}
+    assert seen_payloads[0]["max_tokens"] == 4096
+    assert seen_payloads[1]["response_format"] == {"type": "json_object"}
+    assert "max_tokens" not in seen_payloads[1]
     assert "response_format" not in seen_payloads[2]
-    assert "max_tokens" not in seen_payloads[2]
+    assert seen_payloads[2]["max_tokens"] == 4096
+    assert "response_format" not in seen_payloads[3]
+    assert "max_tokens" not in seen_payloads[3]
