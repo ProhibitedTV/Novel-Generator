@@ -121,6 +121,18 @@ def _schema_response_format(name: str | None, schema: dict[str, Any]) -> dict[st
     }
 
 
+def _dedupe_payloads(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for payload in payloads:
+        marker = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        result.append(payload)
+    return result
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -131,6 +143,7 @@ class OpenAICompatibleClient:
         chat_timeout_seconds: float | None = None,
         retry_backoff_seconds: float = 0.0,
         structured_temperature: float = 0.2,
+        max_tokens: int | None = None,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -140,6 +153,7 @@ class OpenAICompatibleClient:
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
         self.structured_temperature = structured_temperature
+        self.max_tokens = max_tokens
         self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
 
@@ -220,48 +234,58 @@ class OpenAICompatibleClient:
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
         clean_messages, response_schema, schema_name = extract_schema_marker(messages)
         structured = response_schema is not None or _requests_json_only(clean_messages)
-        base_payload: dict = {
+        bare_payload: dict[str, Any] = {
             "model": model_name,
             "messages": clean_messages,
             "stream": stream,
         }
-        payload = dict(base_payload)
-        json_object_payload = dict(base_payload)
+        budgeted_payload = dict(bare_payload)
+        if self.max_tokens:
+            budgeted_payload["max_tokens"] = self.max_tokens
+
+        candidates: list[dict[str, Any]] = []
         if response_schema is not None:
-            payload["response_format"] = _schema_response_format(schema_name, response_schema)
-            payload["temperature"] = self.structured_temperature
-            json_object_payload["response_format"] = {"type": "json_object"}
-            json_object_payload["temperature"] = self.structured_temperature
+            schema_payload = dict(budgeted_payload)
+            schema_payload["response_format"] = _schema_response_format(schema_name, response_schema)
+            schema_payload["temperature"] = self.structured_temperature
+            candidates.append(schema_payload)
+
+            json_payload = dict(budgeted_payload)
+            json_payload["response_format"] = {"type": "json_object"}
+            json_payload["temperature"] = self.structured_temperature
+            candidates.append(json_payload)
         elif structured:
-            payload["response_format"] = {"type": "json_object"}
-            payload["temperature"] = self.structured_temperature
+            json_payload = dict(budgeted_payload)
+            json_payload["response_format"] = {"type": "json_object"}
+            json_payload["temperature"] = self.structured_temperature
+            candidates.append(json_payload)
+
+        candidates.append(budgeted_payload)
+        if self.max_tokens:
+            # Some local OpenAI-compatible servers reject max_tokens even though ordinary chat works.
+            candidates.append(bare_payload)
+        candidates = _dedupe_payloads(candidates)
 
         self.last_chat_metrics = {}
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
                 with self._make_client(for_chat=True) as client:
-                    try:
-                        response = client.post("/chat/completions", json=payload)
-                        response.raise_for_status()
-                    except httpx.HTTPStatusError as exc:
-                        # Local servers vary in how much of response_format they implement. A schema
-                        # optimization must degrade to JSON-object mode, then ordinary chat, rather
-                        # than making an otherwise usable backend fail.
-                        if exc.response.status_code not in {400, 422} or not structured:
-                            raise
-                        if response_schema is not None:
-                            try:
-                                response = client.post("/chat/completions", json=json_object_payload)
-                                response.raise_for_status()
-                            except httpx.HTTPStatusError as json_exc:
-                                if json_exc.response.status_code not in {400, 422}:
-                                    raise
-                                response = client.post("/chat/completions", json=base_payload)
-                                response.raise_for_status()
-                        else:
-                            response = client.post("/chat/completions", json=base_payload)
+                    response: httpx.Response | None = None
+                    for index, candidate in enumerate(candidates):
+                        try:
+                            response = client.post("/chat/completions", json=candidate)
                             response.raise_for_status()
+                            break
+                        except httpx.HTTPStatusError as exc:
+                            can_fallback = (
+                                exc.response.status_code in {400, 422}
+                                and index < len(candidates) - 1
+                            )
+                            if not can_fallback:
+                                raise
+                    if response is None:
+                        raise OpenAICompatibleError("OpenAI-compatible provider returned no response candidate.")
                     raw = response.text
                     output = parse_openai_chat_payload(raw)
                     self.last_chat_metrics = extract_openai_chat_metrics(raw)
