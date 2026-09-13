@@ -7,6 +7,7 @@ from novel_generator.services.context_headroom_runtime import (
     _wrap_supervised_provider_chat,
     shed_optional_context,
 )
+from novel_generator.services.provider_controls import extract_output_budget_marker
 
 
 def _block(label: str, size: int) -> str:
@@ -92,6 +93,8 @@ def test_headroom_wrapper_updates_metadata_before_provider_call() -> None:
     assert captured["metadata"]["context_headroom_requested_reserve_tokens"] == 8192
     assert captured["metadata"]["context_headroom_reserve_tokens"] == 2048
     assert captured["metadata"]["provider_output_budget_tokens"] == 2048
+    assert captured["metadata"]["context_headroom_enabled"] is True
+    assert captured["metadata"]["stage_output_budgets_enabled"] is True
     assert captured["metadata"]["optional_context_blocks_removed"] == ["Long-range chapter recall"]
     assert "Long-range chapter recall" not in captured["messages"][1]["content"]
 
@@ -113,6 +116,68 @@ def test_structured_stage_preserves_more_input_context_than_prose_stage() -> Non
     assert captured[0]["context_headroom_requested_reserve_tokens"] == 8192
     assert captured[1]["context_headroom_requested_reserve_tokens"] == 3072
     assert captured[0]["context_headroom_input_budget_tokens"] < captured[1]["context_headroom_input_budget_tokens"]
+
+
+def test_disabling_headroom_preserves_stage_output_budget_without_shedding_context() -> None:
+    captured: dict = {}
+
+    def supervised(session, run, client, provider_name, model_name, messages, *, stage, chapter_number=None, metadata=None, stream=False):
+        captured["messages"] = messages
+        captured["metadata"] = metadata
+        return "ok"
+
+    wrapped = _wrap_supervised_provider_chat(
+        supervised,
+        reserve_tokens=8192,
+        headroom_enabled=False,
+        stage_budgets_enabled=True,
+    )
+    client = SimpleNamespace(num_ctx=8192, num_predict=8192)
+    recall = "Long-range chapter recall (completed-book memory; use only relevant callbacks and do not recap it):\n"
+    original = [
+        {"role": "user", "content": _block(recall, 18000) + "ESSENTIAL"},
+    ]
+
+    wrapped(None, SimpleNamespace(), client, "ollama", "m", original, stage="chapter_plan")
+
+    cleaned, budget = extract_output_budget_marker(captured["messages"])
+    assert budget == 3072
+    assert cleaned == original
+    assert captured["metadata"]["context_headroom_enabled"] is False
+    assert captured["metadata"]["context_headroom_satisfied"] is None
+    assert captured["metadata"]["optional_context_blocks_removed"] == []
+    assert captured["metadata"]["provider_output_budget_tokens"] == 3072
+
+
+def test_disabling_stage_budgets_keeps_headroom_but_injects_no_provider_control() -> None:
+    captured: dict = {}
+
+    def supervised(session, run, client, provider_name, model_name, messages, *, stage, chapter_number=None, metadata=None, stream=False):
+        captured["messages"] = messages
+        captured["metadata"] = metadata
+        return "ok"
+
+    wrapped = _wrap_supervised_provider_chat(
+        supervised,
+        reserve_tokens=8192,
+        headroom_enabled=True,
+        stage_budgets_enabled=False,
+    )
+    client = SimpleNamespace(num_ctx=8192, num_predict=4096)
+    recall = "Long-range chapter recall (completed-book memory; use only relevant callbacks and do not recap it):\n"
+    messages = [
+        {"role": "user", "content": _block(recall, 18000) + ("essential " * 1000)},
+    ]
+
+    wrapped(None, SimpleNamespace(), client, "ollama", "m", messages, stage="chapter_plan")
+
+    cleaned, budget = extract_output_budget_marker(captured["messages"])
+    assert budget is None
+    assert cleaned == captured["messages"]
+    assert "Long-range chapter recall" not in captured["messages"][0]["content"]
+    assert captured["metadata"]["context_headroom_enabled"] is True
+    assert captured["metadata"]["stage_output_budgets_enabled"] is False
+    assert "provider_output_budget_tokens" not in captured["metadata"]
 
 
 def test_headroom_does_not_mutate_messages_when_already_within_budget() -> None:
