@@ -92,6 +92,39 @@ def test_publication_blockers_allow_explicit_intentional_aftermath_classificatio
     assert not any("ending promise" in blocker for blocker in blockers)
 
 
+def test_publication_blockers_require_candidate_specific_ending_classification() -> None:
+    run = _run()
+    run.continuity_ledger["open_promises_by_name"] = {
+        "public_exposure": "Expose the archive conspiracy publicly to the districts."
+    }
+    qa = ManuscriptQaReport(
+        ending_coherence_notes=[
+            "The Iris/Tarin trust fracture is intentional aftermath after their final decision."
+        ]
+    )
+
+    blockers = compile_publication_blockers(run, qa)
+
+    assert any("1 of 2" in blocker and "candidate-specific" in blocker for blocker in blockers)
+
+
+def test_publication_blockers_allow_each_central_candidate_when_each_is_classified() -> None:
+    run = _run()
+    run.continuity_ledger["open_promises_by_name"] = {
+        "public_exposure": "Expose the archive conspiracy publicly to the districts."
+    }
+    qa = ManuscriptQaReport(
+        ending_coherence_notes=[
+            "The Iris/Tarin trust fracture is intentional aftermath after their final decision.",
+            "The archive conspiracy public exposure is resolved on page when the districts receive the evidence.",
+        ]
+    )
+
+    blockers = compile_publication_blockers(run, qa)
+
+    assert not any("ending promise" in blocker for blocker in blockers)
+
+
 def test_publication_blockers_detect_material_whole_book_length_miss() -> None:
     run = _run(words_each=1500, target=10_000)
     run.continuity_ledger = {
@@ -135,6 +168,29 @@ def test_final_edit_guard_rolls_back_catastrophic_shrink() -> None:
     assert pipeline.events[-1][0] == "final_chapter_edit_guard_rollback"
 
 
+def test_final_edit_guard_uses_prose_count_when_stored_word_count_is_stale() -> None:
+    pipeline = _Pipeline()
+    session = _Session()
+    run = _run(words_each=2200, target=8800)
+    chapter = run.chapters[0]
+    old_content = chapter.content
+    before = {1: (old_content, 2200)}
+    chapter.content = "abrupt ending " * 450
+    chapter.word_count = 2200  # simulate an editor path that changed prose but forgot metadata
+
+    rolled_back = guard_final_edit_regressions(
+        session,
+        run,
+        [chapter],
+        before,
+        pipeline_module=pipeline,
+    )
+
+    assert rolled_back == [1]
+    assert chapter.content == old_content
+    assert pipeline.events[-1][1]["rejected_word_count"] == 900
+
+
 def test_final_edit_guard_rolls_back_new_meta_language_without_length_regression() -> None:
     pipeline = _Pipeline()
     session = _Session()
@@ -142,14 +198,13 @@ def test_final_edit_guard_rolls_back_new_meta_language_without_length_regression
     chapter = run.chapters[0]
     old_content = ("Iris crossed the archive floor and sealed the evidence vault. " * 220).strip()
     chapter.content = old_content
-    chapter.word_count = 2200
-    before = {1: (old_content, 2200)}
+    chapter.word_count = len(old_content.split())
+    before = {1: (old_content, len(old_content.split()))}
     chapter.content = old_content.replace(
         "Iris crossed the archive floor",
         "This sets the groundwork for the next confrontation. Iris crossed the archive floor",
         1,
     )
-    chapter.word_count = 2210
 
     rolled_back = guard_final_edit_regressions(
         session,
@@ -171,11 +226,11 @@ def test_final_edit_guard_rolls_back_new_abstract_ending_without_length_regressi
     chapter = run.chapters[0]
     old_content = (("Iris carried the testimony through the crowd. " * 210) + "She handed the evidence to Mara, and the chamber doors locked behind them.").strip()
     chapter.content = old_content
-    chapter.word_count = 2200
-    before = {1: (old_content, 2200)}
+    old_words = len(old_content.split())
+    chapter.word_count = old_words
+    before = {1: (old_content, old_words)}
     prefix = old_content.rsplit(".", 2)[0]
     chapter.content = prefix + ". The next step would decide everything."
-    chapter.word_count = 2196
 
     rolled_back = guard_final_edit_regressions(
         session,
@@ -197,10 +252,10 @@ def test_final_edit_guard_does_not_blame_edit_for_preexisting_meta_pattern() -> 
     chapter = run.chapters[0]
     old_content = (("The next step was already written on the wall. " * 2) + ("Iris crossed the archive floor. " * 215)).strip()
     chapter.content = old_content
-    chapter.word_count = 2200
-    before = {1: (old_content, 2200)}
+    old_words = len(old_content.split())
+    chapter.word_count = old_words
+    before = {1: (old_content, old_words)}
     chapter.content = old_content.replace("crossed", "walked", 1)
-    chapter.word_count = 2200
 
     rolled_back = guard_final_edit_regressions(
         session,
@@ -222,10 +277,10 @@ def test_final_edit_guard_rolls_back_new_heading_or_markdown_fence() -> None:
     chapter = run.chapters[0]
     old_content = ("Iris closed the archive and stepped into daylight. " * 220).strip()
     chapter.content = old_content
-    chapter.word_count = 2200
-    before = {1: (old_content, 2200)}
+    old_words = len(old_content.split())
+    chapter.word_count = old_words
+    before = {1: (old_content, old_words)}
     chapter.content = "Chapter 1\n\n```text\n" + old_content + "\n```"
-    chapter.word_count = 2204
 
     rolled_back = guard_final_edit_regressions(
         session,
@@ -247,7 +302,7 @@ def test_final_edit_guard_allows_normal_line_edit_delta() -> None:
     run = _run(words_each=2200, target=8800)
     chapter = run.chapters[0]
     before = {1: (chapter.content, 2200)}
-    chapter.content = "polished concrete scene consequence " * 400
+    chapter.content = "polished concrete scene consequence detail " * 400
     chapter.word_count = 2000
 
     rolled_back = guard_final_edit_regressions(
@@ -259,7 +314,7 @@ def test_final_edit_guard_allows_normal_line_edit_delta() -> None:
     )
 
     assert rolled_back == []
-    assert chapter.word_count == 2000
+    assert len(chapter.content.split()) == 2000
     assert session.commits == 0
     assert pipeline.events == []
 
