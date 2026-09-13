@@ -22,9 +22,8 @@ _PROSE_STAGES = frozenset(
         "chapter_edit",
     }
 )
-_MEDIUM_OUTPUT_STAGES = frozenset(
+_LARGE_STRUCTURED_STAGES = frozenset(
     {
-        "story_bible",
         "outline",
         "outline_chunk",
         "manuscript_qa",
@@ -32,6 +31,7 @@ _MEDIUM_OUTPUT_STAGES = frozenset(
         "developmental_rewrite",
     }
 )
+_MEDIUM_OUTPUT_STAGES = frozenset({"story_bible"})
 _SMALL_STRUCTURED_STAGES = frozenset(
     {
         "chapter_plan",
@@ -66,12 +66,14 @@ def _reserve_tokens() -> int:
 
 
 def _stage_reserve_tokens(stage: str, default_reserve: int) -> int:
-    """Right-size output headroom without throwing useful context away on compact stages."""
+    """Right-size output headroom without starving legitimate large structured responses."""
 
     base = max(2_048, int(default_reserve))
     normalized = str(stage or "").strip().lower()
     if normalized in _PROSE_STAGES:
         return base
+    if normalized in _LARGE_STRUCTURED_STAGES:
+        return min(base, 6_144)
     if normalized in _MEDIUM_OUTPUT_STAGES:
         return min(base, 4_096)
     if normalized in _SMALL_STRUCTURED_STAGES:
@@ -123,8 +125,6 @@ def shed_optional_context(
     """Remove optional derived context until a bounded output reserve is available."""
 
     context_tokens = max(1, int(configured_context_tokens))
-    # On smaller contexts, a fixed 8K prose reserve could consume nearly the whole window. Cap the
-    # reserve at one third of the configured window while keeping at least 2K when possible.
     requested = max(2_048, int(requested_reserve_tokens))
     reserve = min(max(2_048, context_tokens // 3), requested)
     reserve = min(reserve, max(1, context_tokens - 1))
