@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from ..schemas import ProviderCapabilities
+from .provider_controls import extract_output_budget_marker
 from .provider_errors import ProviderError, ProviderTransportError
 from .structured_schema_runtime import extract_schema_marker
 
@@ -217,7 +218,8 @@ class OllamaClient:
             raise OllamaError(f"Model '{model_name}' is not available in Ollama.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        clean_messages, response_schema, _ = extract_schema_marker(messages)
+        budget_clean_messages, output_budget = extract_output_budget_marker(messages)
+        clean_messages, response_schema, _ = extract_schema_marker(budget_clean_messages)
         structured = response_schema is not None or _requests_json_only(clean_messages)
         payload: dict = {
             "model": model_name,
@@ -227,8 +229,13 @@ class OllamaClient:
         options: dict[str, int | float] = {}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
-        if self.num_predict:
-            options["num_predict"] = self.num_predict
+
+        effective_num_predict = self.num_predict
+        if output_budget:
+            effective_num_predict = min(effective_num_predict, output_budget) if effective_num_predict else output_budget
+        if effective_num_predict:
+            options["num_predict"] = effective_num_predict
+
         if response_schema is not None:
             payload["format"] = response_schema
             options["temperature"] = self.structured_temperature
