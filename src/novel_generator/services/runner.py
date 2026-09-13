@@ -15,6 +15,7 @@ from .editorial_reconciliation_runtime import install_editorial_reconciliation_r
 from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
+from .publication_guard_runtime import install_publication_guard_runtime
 from .recall_runtime import install_recall_runtime
 from .structured_schema_runtime import install_structured_schema_runtime
 from .truncation_runtime import install_truncation_runtime
@@ -48,12 +49,15 @@ def run_worker_loop(settings: Settings) -> None:
     # Reconciliation is installed after live continuity lifecycle semantics so its ledger replay
     # can genuinely retire resolved promises/threads instead of resurrecting append-only ghost debt.
     runtime_transforms += install_editorial_reconciliation_runtime()
+    # Publication guards run after reconciliation and wrap the final editing/readiness stages only.
+    # They are deterministic and add no inference calls.
+    runtime_transforms += install_publication_guard_runtime()
     # Install after telemetry so continuation attempts inherit the same safe attempt metadata and
     # provider-metric persistence as ordinary calls.
     runtime_transforms += install_truncation_runtime()
     if runtime_transforms:
         logger.info(
-            "Installed %s long-form context, pacing, continuity, editorial-reconciliation, structured-output, telemetry, and truncation-recovery runtime transforms.",
+            "Installed %s long-form context, pacing, continuity, editorial-reconciliation, publication-guard, structured-output, telemetry, and truncation-recovery runtime transforms.",
             runtime_transforms,
         )
 
