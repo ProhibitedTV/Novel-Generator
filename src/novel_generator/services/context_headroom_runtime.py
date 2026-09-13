@@ -51,9 +51,17 @@ _OPTIONAL_BLOCK_PREFIXES = (
 )
 
 
-def _enabled() -> bool:
-    value = os.getenv("NOVEL_CONTEXT_HEADROOM_ENABLED", "1").strip().lower()
+def _env_enabled(name: str, default: str = "1") -> bool:
+    value = os.getenv(name, default).strip().lower()
     return value not in {"0", "false", "no", "off"}
+
+
+def _headroom_enabled() -> bool:
+    return _env_enabled("NOVEL_CONTEXT_HEADROOM_ENABLED")
+
+
+def _stage_budgets_enabled() -> bool:
+    return _env_enabled("NOVEL_STAGE_OUTPUT_BUDGETS_ENABLED")
 
 
 def _reserve_tokens() -> int:
@@ -166,6 +174,8 @@ def _wrap_supervised_provider_chat(
     supervised: Callable[..., str],
     *,
     reserve_tokens: int,
+    headroom_enabled: bool = True,
+    stage_budgets_enabled: bool = True,
 ) -> Callable[..., str]:
     signature = inspect.signature(supervised)
 
@@ -179,37 +189,46 @@ def _wrap_supervised_provider_chat(
 
             configured_output = _configured_output_tokens(client, provider_name)
             base_reserve = min(reserve_tokens, configured_output) if configured_output else reserve_tokens
-            stage_reserve = _stage_reserve_tokens(stage, base_reserve)
+            requested_reserve = (
+                _stage_reserve_tokens(stage, base_reserve)
+                if stage_budgets_enabled
+                else base_reserve
+            )
             messages = list(bound.arguments.get("messages") or [])
             context_tokens = _configured_context_tokens(client, provider_name)
 
-            if context_tokens:
+            if headroom_enabled and context_tokens:
                 rewritten, headroom = shed_optional_context(
                     messages,
                     configured_context_tokens=context_tokens,
-                    requested_reserve_tokens=stage_reserve,
+                    requested_reserve_tokens=requested_reserve,
                 )
                 effective_output_budget = int(headroom["context_headroom_reserve_tokens"])
             else:
                 rewritten = [dict(message) for message in messages]
-                effective_output_budget = stage_reserve
+                effective_output_budget = requested_reserve
                 headroom = {
-                    "context_headroom_requested_reserve_tokens": stage_reserve,
+                    "context_headroom_requested_reserve_tokens": requested_reserve,
                     "context_headroom_satisfied": None,
                     "optional_context_blocks_removed": [],
                 }
 
-            # The provider clients strip this private control message before sending chat messages.
-            # It aligns max_tokens/num_predict with the same stage-aware reserve used by headroom.
-            rewritten.append(make_output_budget_marker(effective_output_budget))
+            if stage_budgets_enabled:
+                # Provider clients strip this private control message before sending chat messages.
+                rewritten.append(make_output_budget_marker(effective_output_budget))
+
             existing_metadata = dict(bound.arguments.get("metadata") or {})
-            bound.arguments["messages"] = rewritten
-            bound.arguments["metadata"] = {
+            metadata = {
                 **existing_metadata,
                 **headroom,
                 "context_headroom_stage": stage,
-                "provider_output_budget_tokens": effective_output_budget,
+                "context_headroom_enabled": headroom_enabled,
+                "stage_output_budgets_enabled": stage_budgets_enabled,
             }
+            if stage_budgets_enabled:
+                metadata["provider_output_budget_tokens"] = effective_output_budget
+            bound.arguments["messages"] = rewritten
+            bound.arguments["metadata"] = metadata
         except Exception:
             # Headroom/output-budget shaping is an optimization. Existing provider error handling
             # remains authoritative if the immutable/core prompt itself is too large.
@@ -222,10 +241,16 @@ def _wrap_supervised_provider_chat(
 
 
 def install_context_headroom_runtime() -> int:
-    """Reserve output headroom and align provider completion caps by generation stage."""
+    """Install independent prompt-headroom and stage-output-budget controls."""
 
     global _INSTALLED
-    if _INSTALLED or not _enabled():
+    if _INSTALLED:
+        return 0
+
+    headroom_enabled = _headroom_enabled()
+    stage_budgets_enabled = _stage_budgets_enabled()
+    if not headroom_enabled and not stage_budgets_enabled:
+        _INSTALLED = True
         return 0
 
     from . import pipeline
@@ -238,7 +263,12 @@ def install_context_headroom_runtime() -> int:
     setattr(
         pipeline,
         "_supervised_provider_chat",
-        _wrap_supervised_provider_chat(supervised, reserve_tokens=_reserve_tokens()),
+        _wrap_supervised_provider_chat(
+            supervised,
+            reserve_tokens=_reserve_tokens(),
+            headroom_enabled=headroom_enabled,
+            stage_budgets_enabled=stage_budgets_enabled,
+        ),
     )
     _INSTALLED = True
     return 1
