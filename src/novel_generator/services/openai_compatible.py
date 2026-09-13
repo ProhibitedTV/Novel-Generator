@@ -134,6 +134,17 @@ def _dedupe_payloads(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
+def _structured_variant(
+    base_payload: dict[str, Any],
+    response_format: dict[str, Any],
+    temperature: float,
+) -> dict[str, Any]:
+    payload = dict(base_payload)
+    payload["response_format"] = response_format
+    payload["temperature"] = temperature
+    return payload
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -255,26 +266,27 @@ class OpenAICompatibleClient:
         if effective_max_tokens:
             budgeted_payload["max_tokens"] = effective_max_tokens
 
+        # Structured-output support and max_tokens support are independent capabilities on local
+        # OpenAI-compatible servers. Try both forms before degrading either control completely.
         candidates: list[dict[str, Any]] = []
         if response_schema is not None:
-            schema_payload = dict(budgeted_payload)
-            schema_payload["response_format"] = _schema_response_format(schema_name, response_schema)
-            schema_payload["temperature"] = self.structured_temperature
-            candidates.append(schema_payload)
+            schema_format = _schema_response_format(schema_name, response_schema)
+            candidates.append(_structured_variant(budgeted_payload, schema_format, self.structured_temperature))
+            if effective_max_tokens:
+                candidates.append(_structured_variant(bare_payload, schema_format, self.structured_temperature))
 
-            json_payload = dict(budgeted_payload)
-            json_payload["response_format"] = {"type": "json_object"}
-            json_payload["temperature"] = self.structured_temperature
-            candidates.append(json_payload)
+            json_format = {"type": "json_object"}
+            candidates.append(_structured_variant(budgeted_payload, json_format, self.structured_temperature))
+            if effective_max_tokens:
+                candidates.append(_structured_variant(bare_payload, json_format, self.structured_temperature))
         elif structured:
-            json_payload = dict(budgeted_payload)
-            json_payload["response_format"] = {"type": "json_object"}
-            json_payload["temperature"] = self.structured_temperature
-            candidates.append(json_payload)
+            json_format = {"type": "json_object"}
+            candidates.append(_structured_variant(budgeted_payload, json_format, self.structured_temperature))
+            if effective_max_tokens:
+                candidates.append(_structured_variant(bare_payload, json_format, self.structured_temperature))
 
         candidates.append(budgeted_payload)
         if effective_max_tokens:
-            # Some local OpenAI-compatible servers reject max_tokens even though ordinary chat works.
             candidates.append(bare_payload)
         candidates = _dedupe_payloads(candidates)
 
