@@ -135,6 +135,112 @@ def test_final_edit_guard_rolls_back_catastrophic_shrink() -> None:
     assert pipeline.events[-1][0] == "final_chapter_edit_guard_rollback"
 
 
+def test_final_edit_guard_rolls_back_new_meta_language_without_length_regression() -> None:
+    pipeline = _Pipeline()
+    session = _Session()
+    run = _run(words_each=2200, target=8800)
+    chapter = run.chapters[0]
+    old_content = ("Iris crossed the archive floor and sealed the evidence vault. " * 220).strip()
+    chapter.content = old_content
+    chapter.word_count = 2200
+    before = {1: (old_content, 2200)}
+    chapter.content = old_content.replace(
+        "Iris crossed the archive floor",
+        "This sets the groundwork for the next confrontation. Iris crossed the archive floor",
+        1,
+    )
+    chapter.word_count = 2210
+
+    rolled_back = guard_final_edit_regressions(
+        session,
+        run,
+        [chapter],
+        before,
+        pipeline_module=pipeline,
+    )
+
+    assert rolled_back == [1]
+    assert chapter.content == old_content
+    assert any("meta/outlining language" in reason for reason in pipeline.events[-1][1]["reasons"])
+
+
+def test_final_edit_guard_rolls_back_new_abstract_ending_without_length_regression() -> None:
+    pipeline = _Pipeline()
+    session = _Session()
+    run = _run(words_each=2200, target=8800)
+    chapter = run.chapters[0]
+    old_content = (("Iris carried the testimony through the crowd. " * 210) + "She handed the evidence to Mara, and the chamber doors locked behind them.").strip()
+    chapter.content = old_content
+    chapter.word_count = 2200
+    before = {1: (old_content, 2200)}
+    prefix = old_content.rsplit(".", 2)[0]
+    chapter.content = prefix + ". The next step would decide everything."
+    chapter.word_count = 2196
+
+    rolled_back = guard_final_edit_regressions(
+        session,
+        run,
+        [chapter],
+        before,
+        pipeline_module=pipeline,
+    )
+
+    assert rolled_back == [1]
+    assert chapter.content == old_content
+    assert any("abstract/outline-summary ending" in reason for reason in pipeline.events[-1][1]["reasons"])
+
+
+def test_final_edit_guard_does_not_blame_edit_for_preexisting_meta_pattern() -> None:
+    pipeline = _Pipeline()
+    session = _Session()
+    run = _run(words_each=2200, target=8800)
+    chapter = run.chapters[0]
+    old_content = (("The next step was already written on the wall. " * 2) + ("Iris crossed the archive floor. " * 215)).strip()
+    chapter.content = old_content
+    chapter.word_count = 2200
+    before = {1: (old_content, 2200)}
+    chapter.content = old_content.replace("crossed", "walked", 1)
+    chapter.word_count = 2200
+
+    rolled_back = guard_final_edit_regressions(
+        session,
+        run,
+        [chapter],
+        before,
+        pipeline_module=pipeline,
+    )
+
+    assert rolled_back == []
+    assert chapter.content != old_content
+    assert pipeline.events == []
+
+
+def test_final_edit_guard_rolls_back_new_heading_or_markdown_fence() -> None:
+    pipeline = _Pipeline()
+    session = _Session()
+    run = _run(words_each=2200, target=8800)
+    chapter = run.chapters[0]
+    old_content = ("Iris closed the archive and stepped into daylight. " * 220).strip()
+    chapter.content = old_content
+    chapter.word_count = 2200
+    before = {1: (old_content, 2200)}
+    chapter.content = "Chapter 1\n\n```text\n" + old_content + "\n```"
+    chapter.word_count = 2204
+
+    rolled_back = guard_final_edit_regressions(
+        session,
+        run,
+        [chapter],
+        before,
+        pipeline_module=pipeline,
+    )
+
+    assert rolled_back == [1]
+    reasons = pipeline.events[-1][1]["reasons"]
+    assert any("chapter heading" in reason for reason in reasons)
+    assert any("markdown fence" in reason for reason in reasons)
+
+
 def test_final_edit_guard_allows_normal_line_edit_delta() -> None:
     pipeline = _Pipeline()
     session = _Session()
