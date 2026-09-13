@@ -68,7 +68,7 @@ def test_extract_openai_usage_and_finish_reason() -> None:
     }
 
 
-def test_openai_compatible_uses_json_object_output_budget_and_records_usage() -> None:
+def test_openai_compatible_uses_json_object_output_budget_and_keeps_context_hint_app_side() -> None:
     seen_payload: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -88,6 +88,7 @@ def test_openai_compatible_uses_json_object_output_budget_and_records_usage() ->
         max_retries=0,
         structured_temperature=0.15,
         max_tokens=8192,
+        context_tokens=65536,
         client_factory=lambda: httpx.Client(
             transport=httpx.MockTransport(handler),
             base_url="http://local.test/v1",
@@ -106,6 +107,9 @@ def test_openai_compatible_uses_json_object_output_budget_and_records_usage() ->
     assert seen_payload["response_format"] == {"type": "json_object"}
     assert seen_payload["temperature"] == 0.15
     assert seen_payload["max_tokens"] == 8192
+    assert "num_ctx" not in seen_payload
+    assert "context_tokens" not in seen_payload
+    assert client.num_ctx == 65536
     assert client.last_chat_metrics["prompt_tokens"] == 640
     assert client.last_chat_metrics["completion_tokens"] == 42
     assert client.last_chat_metrics["finish_reason"] == "stop"
