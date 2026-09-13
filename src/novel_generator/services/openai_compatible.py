@@ -144,6 +144,7 @@ class OpenAICompatibleClient:
         retry_backoff_seconds: float = 0.0,
         structured_temperature: float = 0.2,
         max_tokens: int | None = None,
+        context_tokens: int | None = None,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -154,6 +155,11 @@ class OpenAICompatibleClient:
         self.retry_backoff_seconds = retry_backoff_seconds
         self.structured_temperature = structured_temperature
         self.max_tokens = max_tokens
+        self.context_tokens = int(context_tokens or 0) or None
+        # The shared telemetry/headroom layer already understands ``num_ctx`` as a client-side
+        # context-capacity hint. Mirror the explicitly configured compatible-server window here,
+        # but never serialize it into an OpenAI-compatible request payload.
+        self.num_ctx = self.context_tokens
         self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
 
