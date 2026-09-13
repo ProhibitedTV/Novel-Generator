@@ -135,6 +135,7 @@ class OllamaClient:
         chat_timeout_seconds: float | None = None,
         retry_backoff_seconds: float = 0.0,
         num_ctx: int | None = None,
+        num_predict: int | None = None,
         structured_temperature: float = 0.2,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
@@ -144,6 +145,7 @@ class OllamaClient:
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
         self.num_ctx = num_ctx
+        self.num_predict = num_predict
         self.structured_temperature = structured_temperature
         self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
@@ -225,6 +227,8 @@ class OllamaClient:
         options: dict[str, int | float] = {}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx
+        if self.num_predict:
+            options["num_predict"] = self.num_predict
         if response_schema is not None:
             payload["format"] = response_schema
             options["temperature"] = self.structured_temperature
