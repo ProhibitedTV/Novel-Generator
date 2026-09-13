@@ -99,6 +99,7 @@ class ProviderManager:
                 chat_timeout_seconds=self.settings.provider_chat_timeout_seconds,
                 retry_backoff_seconds=self.settings.provider_retry_backoff_seconds,
                 num_ctx=self.settings.ollama_num_ctx,
+                num_predict=self.settings.ollama_num_predict,
                 structured_temperature=self.settings.ollama_structured_temperature,
             )
         elif key == "openai_compatible":
