@@ -24,17 +24,48 @@ _INTENTIONAL_CLOSURE_MARKERS = (
 _NEGATION_RE = re.compile(r"\b(?:not|never|isn't|wasn't|isnt|wasnt|without)\b", re.IGNORECASE)
 _CHAPTER_HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s*)?chapter\s+\d+\b", re.IGNORECASE)
 _MARKDOWN_FENCE_RE = re.compile(r"^\s*```", re.MULTILINE)
+_CLASSIFICATION_TERM_RE = re.compile(r"[a-z0-9][a-z0-9_\-']{2,}")
+_CLASSIFICATION_STOP = {
+    "about",
+    "after",
+    "again",
+    "being",
+    "book",
+    "central",
+    "chapter",
+    "ending",
+    "final",
+    "from",
+    "have",
+    "into",
+    "live",
+    "open",
+    "promise",
+    "story",
+    "still",
+    "that",
+    "their",
+    "there",
+    "these",
+    "they",
+    "this",
+    "thread",
+    "with",
+}
 
 
 def _word_count(chapter: Any) -> int:
+    """Use final prose as the source of truth, falling back to stored metadata only if prose is empty."""
+
+    content = str(getattr(chapter, "content", "") or "")
+    if content.strip():
+        return len(content.split())
     stored = getattr(chapter, "word_count", None)
     try:
         value = int(stored or 0)
     except (TypeError, ValueError):
         value = 0
-    if value > 0:
-        return value
-    return len(str(getattr(chapter, "content", "") or "").split())
+    return max(0, value)
 
 
 def _chapters(run: Any) -> list[Any]:
@@ -44,20 +75,54 @@ def _chapters(run: Any) -> list[Any]:
     )
 
 
-def _positive_ending_classification(qa_report: Any) -> bool:
-    notes = list(getattr(qa_report, "ending_coherence_notes", None) or [])
-    for note in notes:
-        lowered = " ".join(str(note or "").lower().split())
-        if not lowered:
+def _positive_classification_note(note: str) -> bool:
+    lowered = " ".join(str(note or "").lower().split())
+    if not lowered:
+        return False
+    for marker in _INTENTIONAL_CLOSURE_MARKERS:
+        start = lowered.find(marker)
+        if start < 0:
             continue
-        for marker in _INTENTIONAL_CLOSURE_MARKERS:
-            start = lowered.find(marker)
-            if start < 0:
-                continue
-            prefix = lowered[max(0, start - 32) : start]
-            if not _NEGATION_RE.search(prefix):
-                return True
+        prefix = lowered[max(0, start - 32) : start]
+        if not _NEGATION_RE.search(prefix):
+            return True
     return False
+
+
+def _classification_terms(value: Any) -> set[str]:
+    return {
+        term
+        for term in _CLASSIFICATION_TERM_RE.findall(str(value or "").lower())
+        if term not in _CLASSIFICATION_STOP
+    }
+
+
+def _unclassified_central_debt(debt: dict[str, Any], qa_report: Any) -> list[dict[str, Any]]:
+    """Require explicit candidate-specific closure instead of accepting one unrelated positive note."""
+
+    raw_candidates = debt.get("central_ending_debt_candidates", []) if isinstance(debt, dict) else []
+    candidates = [item for item in raw_candidates if isinstance(item, dict)]
+    positive_notes = [
+        " ".join(str(note or "").split())
+        for note in list(getattr(qa_report, "ending_coherence_notes", None) or [])
+        if _positive_classification_note(str(note or ""))
+    ]
+    if not candidates:
+        return []
+    if not positive_notes:
+        return candidates
+
+    note_terms = [(note, _classification_terms(note)) for note in positive_notes]
+    unclassified: list[dict[str, Any]] = []
+    for candidate in candidates:
+        candidate_terms = _classification_terms(candidate.get("text", ""))
+        if not candidate_terms:
+            unclassified.append(candidate)
+            continue
+        matched = any(len(candidate_terms & terms) >= 2 for _, terms in note_terms)
+        if not matched:
+            unclassified.append(candidate)
+    return unclassified
 
 
 def _pattern_hits(text: str, patterns: list[str]) -> set[str]:
@@ -152,14 +217,11 @@ def compile_publication_blockers(run: Any, qa_report: Any) -> list[str]:
             )
 
     debt = compile_ending_debt_audit(run, chapters).payload
-    meta = debt.get("_ending_debt_audit", {}) if isinstance(debt, dict) else {}
-    try:
-        central_count = int(meta.get("central_candidate_count", 0) or 0)
-    except (TypeError, ValueError, AttributeError):
-        central_count = 0
-    if central_count > 0 and not _positive_ending_classification(qa_report):
+    candidates = list(debt.get("central_ending_debt_candidates", []) or []) if isinstance(debt, dict) else []
+    unclassified = _unclassified_central_debt(debt, qa_report)
+    if unclassified:
         blockers.append(
-            f"{central_count} live story-debt item(s) overlap the story-bible ending promise without an explicit final-QA classification as resolved or intentional aftermath/sequel residue."
+            f"{len(unclassified)} of {len(candidates)} live story-debt candidate(s) overlapping the story-bible ending promise lack a candidate-specific final-QA classification as resolved or intentional aftermath/sequel residue."
         )
 
     return blockers
@@ -191,7 +253,7 @@ def guard_final_edit_regressions(
             continue
         old_content, old_words = before[number]
         new_content = str(getattr(chapter, "content", "") or "")
-        new_words = _word_count(chapter)
+        new_words = len(new_content.split()) if new_content.strip() else 0
         if old_words <= 0 or new_words <= 0 or old_content == new_content:
             continue
 
@@ -243,7 +305,7 @@ def _wrap_final_editing_pass(final_edit: Callable[..., None], *, pipeline_module
         before = {
             int(getattr(chapter, "chapter_number", 0) or 0): (
                 str(getattr(chapter, "content", "") or ""),
-                _word_count(chapter),
+                len(str(getattr(chapter, "content", "") or "").split()) or _word_count(chapter),
             )
             for chapter in chapters
         }
