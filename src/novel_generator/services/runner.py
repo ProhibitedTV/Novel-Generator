@@ -9,6 +9,7 @@ from ..db import build_session_factory
 from ..repositories import claim_next_queued_run, ensure_provider_configs, get_run_for_processing, recover_running_runs
 from ..settings import Settings
 from .adaptive_length_runtime import install_adaptive_length_runtime
+from .context_headroom_runtime import install_context_headroom_runtime
 from .context_runtime import install_context_compiler
 from .continuity_lifecycle import install_continuity_lifecycle
 from .editorial_reconciliation_runtime import install_editorial_reconciliation_runtime
@@ -52,12 +53,14 @@ def run_worker_loop(settings: Settings) -> None:
     # Publication guards run after reconciliation and wrap the final editing/readiness stages only.
     # They are deterministic and add no inference calls.
     runtime_transforms += install_publication_guard_runtime()
-    # Install after telemetry so continuation attempts inherit the same safe attempt metadata and
-    # provider-metric persistence as ordinary calls.
+    # Headroom wraps the supervised call outside telemetry, so prompt-size telemetry measures the
+    # actual post-shedding message set that reaches the provider.
+    runtime_transforms += install_context_headroom_runtime()
+    # Install last so continuation attempts pass through the same headroom + telemetry stack.
     runtime_transforms += install_truncation_runtime()
     if runtime_transforms:
         logger.info(
-            "Installed %s long-form context, pacing, continuity, editorial-reconciliation, publication-guard, structured-output, telemetry, and truncation-recovery runtime transforms.",
+            "Installed %s long-form context, headroom, pacing, continuity, editorial-reconciliation, publication-guard, structured-output, telemetry, and truncation-recovery runtime transforms.",
             runtime_transforms,
         )
 
