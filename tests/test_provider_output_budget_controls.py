@@ -12,6 +12,7 @@ from novel_generator.services.provider_controls import (
     extract_output_budget_marker,
     make_output_budget_marker,
 )
+from novel_generator.services.structured_schema_runtime import make_schema_marker
 
 
 def test_output_budget_marker_is_private_and_uses_smallest_limit() -> None:
@@ -146,3 +147,73 @@ def test_openai_compatible_applies_private_stage_budget_and_strips_marker() -> N
 
     assert seen["max_tokens"] == 4096
     assert seen["messages"] == [{"role": "user", "content": "Write it."}]
+
+
+def test_ollama_schema_and_output_budget_controls_coexist() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"message": {"content": '{"scene_goal":"x"}'}, "done": True})
+
+    client = OllamaClient(
+        base_url="http://ollama.test",
+        timeout_seconds=1,
+        max_retries=0,
+        num_ctx=32768,
+        num_predict=8192,
+        client_factory=lambda: httpx.Client(
+            transport=httpx.MockTransport(handler),
+            base_url="http://ollama.test",
+        ),
+    )
+    schema_marker = make_schema_marker("chapter_plan")
+    assert schema_marker is not None
+    messages = [
+        schema_marker,
+        {"role": "system", "content": "Return valid JSON only."},
+        {"role": "user", "content": "Plan chapter 4."},
+        make_output_budget_marker(3072),
+    ]
+
+    client.chat("test-model", messages)
+
+    assert isinstance(seen["format"], dict)
+    assert seen["options"]["num_predict"] == 3072
+    assert [item["role"] for item in seen["messages"]] == ["system", "user"]
+
+
+def test_openai_schema_and_output_budget_controls_coexist() -> None:
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={"choices": [{"finish_reason": "stop", "message": {"content": '{"scene_goal":"x"}'}}]},
+        )
+
+    client = OpenAICompatibleClient(
+        base_url="http://local.test/v1",
+        timeout_seconds=1,
+        max_retries=0,
+        max_tokens=8192,
+        client_factory=lambda: httpx.Client(
+            transport=httpx.MockTransport(handler),
+            base_url="http://local.test/v1",
+        ),
+    )
+    schema_marker = make_schema_marker("chapter_plan")
+    assert schema_marker is not None
+    messages = [
+        schema_marker,
+        {"role": "system", "content": "Return valid JSON only."},
+        {"role": "user", "content": "Plan chapter 4."},
+        make_output_budget_marker(3072),
+    ]
+
+    client.chat("test-model", messages)
+
+    assert seen["response_format"]["type"] == "json_schema"
+    assert seen["max_tokens"] == 3072
+    assert [item["role"] for item in seen["messages"]] == ["system", "user"]
