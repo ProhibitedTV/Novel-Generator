@@ -43,10 +43,14 @@ def test_headroom_sheds_optional_context_but_preserves_core_and_ending_debt() ->
     assert telemetry["context_headroom_satisfied"] is True
 
 
-def test_stage_reserves_keep_full_budget_for_prose_and_less_for_compact_stages() -> None:
+def test_stage_reserves_keep_full_budget_for_prose_and_right_size_structured_stages() -> None:
     assert _stage_reserve_tokens("chapter_draft", 8192) == 8192
     assert _stage_reserve_tokens("chapter_revision", 8192) == 8192
-    assert _stage_reserve_tokens("manuscript_qa", 8192) == 4096
+    assert _stage_reserve_tokens("outline", 8192) == 6144
+    assert _stage_reserve_tokens("outline_chunk", 8192) == 6144
+    assert _stage_reserve_tokens("manuscript_qa", 8192) == 6144
+    assert _stage_reserve_tokens("developmental_rewrite", 8192) == 6144
+    assert _stage_reserve_tokens("story_bible", 8192) == 4096
     assert _stage_reserve_tokens("chapter_plan", 8192) == 3072
     assert _stage_reserve_tokens("chapter_critique", 8192) == 3072
     assert _stage_reserve_tokens("continuity_update", 8192) == 3072
@@ -86,8 +90,8 @@ def test_headroom_wrapper_updates_metadata_before_provider_call() -> None:
     assert captured["metadata"]["label"] == "chapter 3 draft"
     assert captured["metadata"]["context_headroom_stage"] == "chapter_draft"
     assert captured["metadata"]["context_headroom_requested_reserve_tokens"] == 8192
-    # The actual reserve is capped at one third / small-context safety for a 4K context.
     assert captured["metadata"]["context_headroom_reserve_tokens"] == 2048
+    assert captured["metadata"]["provider_output_budget_tokens"] == 2048
     assert captured["metadata"]["optional_context_blocks_removed"] == ["Long-range chapter recall"]
     assert "Long-range chapter recall" not in captured["messages"][1]["content"]
 
