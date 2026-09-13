@@ -1,8 +1,37 @@
 # Long-form output reliability
 
-Novel Generator treats a local model response as an intermediate artifact, not automatically as a trustworthy finished chapter or structured record. Long novels fail in ways that short prompts rarely expose: output-token truncation, malformed JSON, stale continuity after rewrites, final prose drifting away from stored checkpoints, and unresolved story debt surviving into a superficially climactic ending.
+Novel Generator treats a local model response as an intermediate artifact, not automatically as a trustworthy finished chapter or structured record. Long novels fail in ways that short prompts rarely expose: context-window crowding, output-token truncation, malformed JSON, stale continuity after rewrites, final prose drifting away from stored checkpoints, and unresolved story debt surviving into a superficially climactic ending.
 
 This document describes the safeguards added around those failure modes.
+
+## Context headroom and proactive output capacity
+
+A prompt can fit inside a model's configured context window and still be operationally broken if it leaves too little room for the completion. This matters most for local chapter generation: a 32K context can be consumed by story bible, continuity, recall, arc state, horizon data, QA context, and current prose before a 2,000-3,000 word chapter has room to finish.
+
+For Ollama, Novel Generator now makes both sides of that budget explicit:
+
+```env
+OLLAMA_NUM_CTX=32768
+OLLAMA_NUM_PREDICT=8192
+NOVEL_CONTEXT_HEADROOM_ENABLED=1
+NOVEL_CONTEXT_HEADROOM_RESERVE_TOKENS=8192
+```
+
+`OLLAMA_NUM_PREDICT` is sent as `options.num_predict`; the default is 8192 tokens. The headroom preflight uses the known provider context size and reserves completion capacity before the call. On smaller context windows, the reserve is capped at one third of the configured context so the prompt is not starved completely.
+
+When a prompt exceeds the resulting input budget, the preflight removes only derived/read-only context blocks in this order:
+
+1. whole-book quality-trend audit;
+2. long-range chapter recall;
+3. story-arc audit;
+4. whole-book unresolved-arc audit; then
+5. narrative horizon.
+
+It never truncates the chapter prose, current draft, story bible, outline, durable continuity payload, or other core task data. The end-of-book story-debt audit is also protected from this shedding order so final QA keeps its closure evidence.
+
+The attempt metadata records the estimated input size before/after headroom shaping, the input budget, requested reserve, whether headroom was satisfied, and which optional blocks were removed. No prompt/manuscript text is copied into metadata.
+
+Headroom is preventive. If the immutable/core prompt itself still exceeds the configured model window, existing provider error handling remains authoritative rather than silently deleting canon.
 
 ## Prose output-limit recovery
 
@@ -36,7 +65,7 @@ NOVEL_TRUNCATION_CONTEXT_MAX_CHARS=18000
 
 `NOVEL_TRUNCATION_MAX_CONTINUATIONS` is clamped to 0-4. The continuation context budget is clamped to 8,000-40,000 characters.
 
-Each continuation is a normal supervised provider attempt, so it receives the same attempt logging, prompt-size telemetry, provider token metrics, stop reason, and failure handling as an ordinary generation call.
+Each continuation is a normal supervised provider attempt, so it receives the same attempt logging, prompt-size telemetry, provider token metrics, stop reason, headroom shaping, and failure handling as an ordinary generation call.
 
 ## Schema-constrained structured output
 
@@ -56,7 +85,7 @@ The schema travels through the existing pipeline using a private runtime marker 
 
 ### Ollama
 
-When a stage schema is available, the Ollama client sends the JSON Schema directly through the native `format` field and keeps the configured low structured temperature. JSON-only calls without a mapped stage schema continue to use ordinary JSON mode.
+When a stage schema is available, the Ollama client sends the JSON Schema directly through the native `format` field and keeps the configured low structured temperature. JSON-only calls without a mapped stage schema continue to use ordinary JSON mode. The configured `num_ctx` and `num_predict` options remain present for both prose and structured calls.
 
 ### OpenAI-compatible local servers
 
@@ -78,7 +107,7 @@ OpenAI-compatible telemetry can include prompt/completion/total tokens, cached p
 
 These fields are persisted under the successful stage attempt's `metadata.provider_metrics`. Prompt text and manuscript output are not copied into telemetry.
 
-The truncation-recovery layer consumes these stop reasons directly, which turns observability into a generation safety feature rather than passive logging.
+The truncation-recovery layer consumes these stop reasons directly, which turns observability into a generation safety feature rather than passive logging. Headroom metadata complements this by showing when optional context was removed before a call to preserve completion capacity.
 
 ## Final manuscript QA sees final prose
 
@@ -114,6 +143,23 @@ Remaining live state is not automatically treated as a defect. Grief, political 
 
 The audit is injected into manuscript QA and is also persisted deterministically into the resulting QA report. If live debt strongly overlaps the stated ending promise, the QA report receives an explicit warning even if the model otherwise returns a reassuring verdict.
 
+## Final-edit integrity and publication-readiness guard
+
+Final line editing is intended to polish rather than structurally rewrite a chapter. A local model can still occasionally compress or expand far beyond that mandate. The publication guard snapshots each chapter before the final edit and deterministically rolls back only catastrophic length regressions, including large shrink/balloon ratios or a previously compliant chapter being pushed materially outside the configured range.
+
+Rollback events store counts/reasons only; they do not copy chapter prose into event metadata. A normal line-edit delta is accepted unchanged.
+
+The final publication-readiness label also has a deterministic veto layer. It does not fail/export-block the run; it prevents a manuscript from being labeled `publication-ready` when book-scale requirements are visibly unmet. Current blockers include:
+
+- final manuscript word count below 90% of the configured target;
+- final manuscript word count above 115% of target;
+- severe per-chapter length outliers; and
+- live story-debt candidates that overlap the ending promise without final QA explicitly classifying them as paid off, intentional aftermath, or deliberate sequel residue.
+
+If any blocker exists, the readiness score is capped below the configured publication threshold, the label becomes `needs editorial revision`, the blockers are added to QA warnings, and a `publication_readiness_guard_applied` event is recorded.
+
+This distinction is deliberate: an imperfect manuscript should still export for human review, but the system should not falsely certify it as publication-ready.
+
 ## Continuity reconciliation after structural revision
 
 Developmental revision is allowed to sharpen or materially alter a chapter's structural consequence. That means the chapter summary and continuity checkpoint created during the original draft can become stale.
@@ -142,17 +188,19 @@ The worker installs the long-form runtime transforms in an intentional order:
 4. long-range chapter recall;
 5. adaptive length enforcement;
 6. live continuity lifecycle semantics;
-7. post-developmental continuity reconciliation; and
-8. prose truncation recovery.
+7. post-developmental continuity reconciliation;
+8. final-edit/publication-readiness guards;
+9. context headroom preflight; and
+10. prose truncation recovery.
 
-Schema shaping is installed before telemetry so the private schema marker is not counted as model prompt text. Reconciliation is installed after continuity lifecycle handling so ledger replay respects live snapshot semantics. Truncation recovery is installed after supervised telemetry so every continuation receives ordinary attempt accounting and provider metrics.
+Schema shaping is installed before telemetry so the private schema marker is not counted as model prompt text. Reconciliation is installed after continuity lifecycle handling so ledger replay respects live snapshot semantics. Headroom wraps the supervised call outside telemetry, so prompt-size telemetry measures the actual post-shedding messages sent to the provider. Truncation recovery is installed last so continuation attempts flow through the same headroom + telemetry stack as ordinary prose calls.
 
 ## Failure philosophy
 
 The reliability layers follow three principles:
 
 - **Do not silently accept incomplete output.** Explicit provider length stops on prose are recovered or surfaced as failures.
-- **Do not confuse optimization with canon.** Bounded context, schema markers, audits, and retrieval views never replace the durable manuscript/outline/ledger.
-- **Fail open where a safeguard is advisory, fail closed where silent corruption is worse.** Telemetry extraction, audit injection, and provider schema optimizations can fall back safely. Persistently truncated prose cannot be treated as complete.
+- **Do not confuse optimization with canon.** Bounded context, headroom shaping, schema markers, audits, and retrieval views never replace the durable manuscript/outline/ledger.
+- **Fail open where a safeguard is advisory, fail closed where silent corruption is worse.** Telemetry extraction, audit injection, context shedding, and provider schema optimizations can fall back safely. Persistently truncated prose cannot be treated as complete, and a deterministic publication blocker cannot be overridden by a superficially high model score.
 
 The result is still local-first: none of these safeguards requires embeddings, a hosted memory service, a cloud model, or a separate inference provider.
