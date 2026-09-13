@@ -8,8 +8,18 @@ import time
 from ..db import build_session_factory
 from ..repositories import claim_next_queued_run, ensure_provider_configs, get_run_for_processing, recover_running_runs
 from ..settings import Settings
+from .adaptive_length_runtime import install_adaptive_length_runtime
+from .context_headroom_runtime import install_context_headroom_runtime
+from .context_runtime import install_context_compiler
+from .continuity_lifecycle import install_continuity_lifecycle
+from .editorial_reconciliation_runtime import install_editorial_reconciliation_runtime
+from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
+from .publication_guard_runtime import install_publication_guard_runtime
+from .recall_runtime import install_recall_runtime
+from .structured_schema_runtime import install_structured_schema_runtime
+from .truncation_runtime import install_truncation_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +38,32 @@ def recover_incomplete_runs(settings: Settings) -> None:
 
 
 def run_worker_loop(settings: Settings) -> None:
+    # Install schema shaping before telemetry. The telemetry wrapper therefore measures the actual
+    # chat messages rather than counting the private JSON-schema marker that provider clients strip
+    # and translate into their native structured-output controls.
+    runtime_transforms = install_structured_schema_runtime()
+    runtime_transforms += install_context_compiler()
+    runtime_transforms += install_longform_runtime()
+    runtime_transforms += install_recall_runtime()
+    runtime_transforms += install_adaptive_length_runtime()
+    runtime_transforms += install_continuity_lifecycle()
+    # Reconciliation is installed after live continuity lifecycle semantics so its ledger replay
+    # can genuinely retire resolved promises/threads instead of resurrecting append-only ghost debt.
+    runtime_transforms += install_editorial_reconciliation_runtime()
+    # Publication guards run after reconciliation and wrap the final editing/readiness stages only.
+    # They are deterministic and add no inference calls.
+    runtime_transforms += install_publication_guard_runtime()
+    # Headroom wraps the supervised call outside telemetry, so prompt-size telemetry measures the
+    # actual post-shedding message set that reaches the provider.
+    runtime_transforms += install_context_headroom_runtime()
+    # Install last so continuation attempts pass through the same headroom + telemetry stack.
+    runtime_transforms += install_truncation_runtime()
+    if runtime_transforms:
+        logger.info(
+            "Installed %s long-form context, headroom, pacing, continuity, editorial-reconciliation, publication-guard, structured-output, telemetry, and truncation-recovery runtime transforms.",
+            runtime_transforms,
+        )
+
     session_factory = build_session_factory(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     while True:

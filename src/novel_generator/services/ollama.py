@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 
 from ..schemas import ProviderCapabilities
+from .provider_controls import extract_output_budget_marker
 from .provider_errors import ProviderError, ProviderTransportError
+from .structured_schema_runtime import extract_schema_marker
 
 
 class OllamaError(ProviderError):
@@ -49,6 +52,81 @@ def parse_ollama_chat_payload(payload: str | bytes | dict) -> str:
     return "".join(chunks).strip()
 
 
+def extract_ollama_chat_metrics(payload: str | bytes | dict) -> dict[str, Any]:
+    """Extract safe performance/usage telemetry from an Ollama chat response.
+
+    Ollama reports token counts and durations on the final response object. Durations are nanoseconds;
+    expose milliseconds and derived token rates so model/hardware tuning does not require preserving
+    prompt or completion text in telemetry.
+    """
+
+    data: dict[str, Any] | None = payload if isinstance(payload, dict) else None
+    if data is None:
+        raw = payload.decode("utf-8") if isinstance(payload, bytes) else str(payload or "")
+        raw = raw.strip()
+        if not raw:
+            return {}
+        try:
+            if "\n" not in raw:
+                parsed = json.loads(raw)
+                data = parsed if isinstance(parsed, dict) else None
+            else:
+                for line in raw.splitlines():
+                    if not line.strip():
+                        continue
+                    parsed = json.loads(line)
+                    if isinstance(parsed, dict):
+                        data = parsed
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    if not isinstance(data, dict):
+        return {}
+
+    metrics: dict[str, Any] = {}
+    for key in ("prompt_eval_count", "eval_count"):
+        value = data.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            metrics[key] = value
+
+    duration_fields = {
+        "total_duration": "total_duration_ms",
+        "load_duration": "load_duration_ms",
+        "prompt_eval_duration": "prompt_eval_duration_ms",
+        "eval_duration": "eval_duration_ms",
+    }
+    for source, target in duration_fields.items():
+        value = data.get(source)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+            metrics[target] = round(float(value) / 1_000_000, 2)
+
+    prompt_count = metrics.get("prompt_eval_count")
+    prompt_duration = data.get("prompt_eval_duration")
+    if isinstance(prompt_count, int) and isinstance(prompt_duration, (int, float)) and prompt_duration > 0:
+        metrics["prompt_tokens_per_second"] = round(prompt_count / (float(prompt_duration) / 1_000_000_000), 2)
+
+    eval_count = metrics.get("eval_count")
+    eval_duration = data.get("eval_duration")
+    if isinstance(eval_count, int) and isinstance(eval_duration, (int, float)) and eval_duration > 0:
+        metrics["completion_tokens_per_second"] = round(eval_count / (float(eval_duration) / 1_000_000_000), 2)
+
+    done_reason = data.get("done_reason")
+    if done_reason:
+        metrics["done_reason"] = str(done_reason)
+    if isinstance(data.get("done"), bool):
+        metrics["done"] = data["done"]
+    return metrics
+
+
+def _requests_json_only(messages: list[dict[str, Any]]) -> bool:
+    for message in messages:
+        if str(message.get("role", "")).lower() != "system":
+            continue
+        content = str(message.get("content", "")).lower()
+        if "json only" in content or "valid json" in content:
+            return True
+    return False
+
+
 class OllamaClient:
     def __init__(
         self,
@@ -57,6 +135,9 @@ class OllamaClient:
         max_retries: int,
         chat_timeout_seconds: float | None = None,
         retry_backoff_seconds: float = 0.0,
+        num_ctx: int | None = None,
+        num_predict: int | None = None,
+        structured_temperature: float = 0.2,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -64,6 +145,10 @@ class OllamaClient:
         self.max_retries = max_retries
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
+        self.num_ctx = num_ctx
+        self.num_predict = num_predict
+        self.structured_temperature = structured_temperature
+        self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
 
     def _default_timeout(self) -> httpx.Timeout:
@@ -133,18 +218,44 @@ class OllamaClient:
             raise OllamaError(f"Model '{model_name}' is not available in Ollama.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        payload = {
+        budget_clean_messages, output_budget = extract_output_budget_marker(messages)
+        clean_messages, response_schema, _ = extract_schema_marker(budget_clean_messages)
+        structured = response_schema is not None or _requests_json_only(clean_messages)
+        payload: dict = {
             "model": model_name,
-            "messages": messages,
+            "messages": clean_messages,
             "stream": stream,
         }
+        options: dict[str, int | float] = {}
+        if self.num_ctx:
+            options["num_ctx"] = self.num_ctx
+
+        effective_num_predict = self.num_predict
+        if output_budget:
+            effective_num_predict = min(effective_num_predict, output_budget) if effective_num_predict else output_budget
+        if effective_num_predict:
+            options["num_predict"] = effective_num_predict
+
+        if response_schema is not None:
+            payload["format"] = response_schema
+            options["temperature"] = self.structured_temperature
+        elif structured:
+            payload["format"] = "json"
+            options["temperature"] = self.structured_temperature
+        if options:
+            payload["options"] = options
+
+        self.last_chat_metrics = {}
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
                 with self._make_client(for_chat=True) as client:
                     response = client.post("/api/chat", json=payload)
                     response.raise_for_status()
-                    return parse_ollama_chat_payload(response.text)
+                    raw = response.text
+                    output = parse_ollama_chat_payload(raw)
+                    self.last_chat_metrics = extract_ollama_chat_metrics(raw)
+                    return output
             except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError, json.JSONDecodeError, OllamaError) as exc:
                 last_error = exc
                 if attempt >= self.max_retries:

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 import json
 import time
 
 import httpx
 
 from ..schemas import ProviderCapabilities
+from .provider_controls import extract_output_budget_marker
 from .provider_errors import ProviderError, ProviderTransportError
+from .structured_schema_runtime import extract_schema_marker
 
 
 class OpenAICompatibleError(ProviderError):
@@ -52,6 +55,96 @@ def parse_openai_chat_payload(payload: str | bytes | dict) -> str:
     raise OpenAICompatibleError("OpenAI-compatible response did not include message content.")
 
 
+def extract_openai_chat_metrics(payload: str | bytes | dict) -> dict[str, Any]:
+    """Extract provider-neutral usage/stop telemetry without retaining generated text."""
+
+    data: Any = payload
+    if isinstance(payload, (str, bytes)):
+        raw = payload.decode("utf-8") if isinstance(payload, bytes) else payload
+        raw = raw.strip()
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    if not isinstance(data, dict):
+        return {}
+
+    metrics: dict[str, Any] = {}
+    usage = data.get("usage") or {}
+    if isinstance(usage, dict):
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = usage.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                metrics[key] = value
+
+        prompt_details = usage.get("prompt_tokens_details") or {}
+        if isinstance(prompt_details, dict):
+            cached = prompt_details.get("cached_tokens")
+            if isinstance(cached, int) and not isinstance(cached, bool) and cached >= 0:
+                metrics["cached_prompt_tokens"] = cached
+
+        completion_details = usage.get("completion_tokens_details") or {}
+        if isinstance(completion_details, dict):
+            reasoning = completion_details.get("reasoning_tokens")
+            if isinstance(reasoning, int) and not isinstance(reasoning, bool) and reasoning >= 0:
+                metrics["reasoning_tokens"] = reasoning
+
+    choices = data.get("choices") or []
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        finish_reason = choices[0].get("finish_reason")
+        if finish_reason:
+            metrics["finish_reason"] = str(finish_reason)
+    response_model = data.get("model")
+    if response_model:
+        metrics["response_model"] = str(response_model)
+    return metrics
+
+
+def _requests_json_only(messages: list[dict[str, Any]]) -> bool:
+    for message in messages:
+        if str(message.get("role", "")).lower() != "system":
+            continue
+        content = str(message.get("content", "")).lower()
+        if "json only" in content or "valid json" in content:
+            return True
+    return False
+
+
+def _schema_response_format(name: str | None, schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name or "structured_output",
+            "schema": schema,
+        },
+    }
+
+
+def _dedupe_payloads(payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for payload in payloads:
+        marker = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        if marker in seen:
+            continue
+        seen.add(marker)
+        result.append(payload)
+    return result
+
+
+def _structured_variant(
+    base_payload: dict[str, Any],
+    response_format: dict[str, Any],
+    temperature: float,
+) -> dict[str, Any]:
+    payload = dict(base_payload)
+    payload["response_format"] = response_format
+    payload["temperature"] = temperature
+    return payload
+
+
 class OpenAICompatibleClient:
     def __init__(
         self,
@@ -61,6 +154,9 @@ class OpenAICompatibleClient:
         api_key: str | None = None,
         chat_timeout_seconds: float | None = None,
         retry_backoff_seconds: float = 0.0,
+        structured_temperature: float = 0.2,
+        max_tokens: int | None = None,
+        context_tokens: int | None = None,
         client_factory: Callable[[], httpx.Client] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -69,6 +165,14 @@ class OpenAICompatibleClient:
         self.api_key = (api_key or "").strip()
         self.chat_timeout_seconds = chat_timeout_seconds or timeout_seconds
         self.retry_backoff_seconds = retry_backoff_seconds
+        self.structured_temperature = structured_temperature
+        self.max_tokens = max_tokens
+        self.context_tokens = int(context_tokens or 0) or None
+        # The shared telemetry/headroom layer already understands ``num_ctx`` as a client-side
+        # context-capacity hint. Mirror the explicitly configured compatible-server window here,
+        # but never serialize it into an OpenAI-compatible request payload.
+        self.num_ctx = self.context_tokens
+        self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
 
     def _headers(self) -> dict[str, str]:
@@ -146,18 +250,70 @@ class OpenAICompatibleClient:
             raise OpenAICompatibleError(f"Model '{model_name}' is not available in the configured OpenAI-compatible provider.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        payload = {
+        budget_clean_messages, output_budget = extract_output_budget_marker(messages)
+        clean_messages, response_schema, schema_name = extract_schema_marker(budget_clean_messages)
+        structured = response_schema is not None or _requests_json_only(clean_messages)
+        bare_payload: dict[str, Any] = {
             "model": model_name,
-            "messages": messages,
+            "messages": clean_messages,
             "stream": stream,
         }
+
+        effective_max_tokens = self.max_tokens
+        if output_budget:
+            effective_max_tokens = min(effective_max_tokens, output_budget) if effective_max_tokens else output_budget
+        budgeted_payload = dict(bare_payload)
+        if effective_max_tokens:
+            budgeted_payload["max_tokens"] = effective_max_tokens
+
+        # Structured-output support and max_tokens support are independent capabilities on local
+        # OpenAI-compatible servers. Try both forms before degrading either control completely.
+        candidates: list[dict[str, Any]] = []
+        if response_schema is not None:
+            schema_format = _schema_response_format(schema_name, response_schema)
+            candidates.append(_structured_variant(budgeted_payload, schema_format, self.structured_temperature))
+            if effective_max_tokens:
+                candidates.append(_structured_variant(bare_payload, schema_format, self.structured_temperature))
+
+            json_format = {"type": "json_object"}
+            candidates.append(_structured_variant(budgeted_payload, json_format, self.structured_temperature))
+            if effective_max_tokens:
+                candidates.append(_structured_variant(bare_payload, json_format, self.structured_temperature))
+        elif structured:
+            json_format = {"type": "json_object"}
+            candidates.append(_structured_variant(budgeted_payload, json_format, self.structured_temperature))
+            if effective_max_tokens:
+                candidates.append(_structured_variant(bare_payload, json_format, self.structured_temperature))
+
+        candidates.append(budgeted_payload)
+        if effective_max_tokens:
+            candidates.append(bare_payload)
+        candidates = _dedupe_payloads(candidates)
+
+        self.last_chat_metrics = {}
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
                 with self._make_client(for_chat=True) as client:
-                    response = client.post("/chat/completions", json=payload)
-                    response.raise_for_status()
-                    return parse_openai_chat_payload(response.text)
+                    response: httpx.Response | None = None
+                    for index, candidate in enumerate(candidates):
+                        try:
+                            response = client.post("/chat/completions", json=candidate)
+                            response.raise_for_status()
+                            break
+                        except httpx.HTTPStatusError as exc:
+                            can_fallback = (
+                                exc.response.status_code in {400, 422}
+                                and index < len(candidates) - 1
+                            )
+                            if not can_fallback:
+                                raise
+                    if response is None:
+                        raise OpenAICompatibleError("OpenAI-compatible provider returned no response candidate.")
+                    raw = response.text
+                    output = parse_openai_chat_payload(raw)
+                    self.last_chat_metrics = extract_openai_chat_metrics(raw)
+                    return output
             except (
                 httpx.TimeoutException,
                 httpx.RequestError,

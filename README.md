@@ -18,6 +18,10 @@ The product is built around one practical goal: get to a complete book draft, th
 - Chapter-level checkpointing, in-place resume, and regeneration from any chapter onward
 - Draft, balanced, strict, and publication quality profiles
 - Standard developmental planning, targeted revision waves, final chapter editing, and optional publication-mode humanization/compression passes
+- Bounded long-form continuity memory, causal horizons, long-range callback recall, character/subplot arc audits, adaptive pacing, and late-book convergence controls
+- Bounded whole-manuscript developmental/QA context plus deterministic quality-trend analysis
+- Safe prompt telemetry plus actual provider token/throughput/stop metrics when the configured backend reports them
+- Deterministic 32-chapter long-form architecture benchmark
 - Markdown and DOCX manuscript exports plus publication layout helpers with required front matter
 - Docker Compose setup for self-hosting
 
@@ -97,6 +101,18 @@ Current routing guidance:
 - `gemma4:e4b` is a strong manual choice for fast draft-profile runs and support stages.
 - Watch story-bible generation closely with `gemma4:e4b`; the benchmark completed successfully, but one story-bible call needed JSON repair before validation.
 
+## Long-form Architecture Benchmark
+
+The repository also includes a deterministic synthetic 32-chapter stress benchmark for the context/state architecture. Unlike the model benchmark above, it makes no inference call and does not measure prose quality or model speed. It tests whether long-run invariants still hold as the book becomes large and messy.
+
+```bash
+python -m novel_generator.services.longform_benchmark
+```
+
+The benchmark checks bounded continuity compaction, buried callback recall, dormant unresolved character detection, future arc visibility, adaptive manuscript pacing, late-book resolution priority, bounded developmental/QA whole-book coverage, and deliberate final-third quality/length drift detection. It prints a JSON report and exits non-zero if any architectural check fails.
+
+See [Long-form benchmark and generation telemetry](docs/longform-benchmark.md), [Bounded novel memory](docs/novel-memory.md), and [Continuity state lifecycle](docs/continuity-lifecycle.md).
+
 ## Local Development
 
 Use Python 3.11+.
@@ -144,8 +160,8 @@ The generation pipeline is designed to finish a complete book package, even for 
 2. Pause for outline review when requested, or automatically for publication runs.
 3. Plan each chapter, draft prose, critique the chapter, revise when profile thresholds require it, summarize for continuity, and update the continuity ledger.
 4. Persist progress after each stage so the run can resume from checkpoints.
-5. Record safe model-call attempts with provider, model, stage, timing, status, output length, and error metadata.
-6. Run manuscript QA after the full draft is assembled.
+5. Record safe model-call attempts with provider, model, stage, timing, status, output length, error metadata, prompt-size telemetry, and actual provider usage/throughput metadata when available.
+6. Run manuscript QA after the full draft is assembled, including bounded whole-book context, unresolved-arc state, and deterministic quality-trend signals.
 7. Build a developmental rewrite plan and revised-outline report.
 8. Apply targeted developmental revision waves to chapters marked for structural action.
 9. For publication runs, supplement weak rewrite plans with deterministic QA findings, then run character humanization and prose compression waves.
@@ -176,6 +192,9 @@ Additional docs:
 - [Self-hosting](docs/self-hosting.md)
 - [Backup and restore](docs/backup-and-restore.md)
 - [Releasing](docs/releasing.md)
+- [Long-form benchmark and generation telemetry](docs/longform-benchmark.md)
+- [Bounded novel memory](docs/novel-memory.md)
+- [Continuity state lifecycle](docs/continuity-lifecycle.md)
 
 ## Development Standards
 

@@ -98,6 +98,9 @@ class ProviderManager:
                 max_retries=self.settings.ollama_max_retries,
                 chat_timeout_seconds=self.settings.provider_chat_timeout_seconds,
                 retry_backoff_seconds=self.settings.provider_retry_backoff_seconds,
+                num_ctx=self.settings.ollama_num_ctx,
+                num_predict=self.settings.ollama_num_predict,
+                structured_temperature=self.settings.ollama_structured_temperature,
             )
         elif key == "openai_compatible":
             client = OpenAICompatibleClient(
@@ -107,6 +110,8 @@ class ProviderManager:
                 api_key=config.api_key,
                 chat_timeout_seconds=self.settings.provider_chat_timeout_seconds,
                 retry_backoff_seconds=self.settings.provider_retry_backoff_seconds,
+                max_tokens=self.settings.openai_compatible_max_tokens,
+                context_tokens=self.settings.openai_compatible_context_tokens,
             )
         else:
             raise ProviderError(f"Unsupported provider '{provider_name}'.")
