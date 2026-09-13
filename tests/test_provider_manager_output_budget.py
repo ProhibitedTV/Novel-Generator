@@ -31,9 +31,10 @@ def test_provider_manager_propagates_ollama_context_and_output_budgets() -> None
     assert client.structured_temperature == 0.12
 
 
-def test_provider_manager_propagates_openai_compatible_output_budget() -> None:
+def test_provider_manager_propagates_openai_compatible_context_hint_and_output_budget() -> None:
     settings = Settings(
         _env_file=None,
+        openai_compatible_context_tokens=65536,
         openai_compatible_max_tokens=7168,
     )
     config = ProviderConfig(
@@ -48,4 +49,24 @@ def test_provider_manager_propagates_openai_compatible_output_budget() -> None:
     client = manager.client_for("openai_compatible")
 
     assert isinstance(client, OpenAICompatibleClient)
+    assert client.context_tokens == 65536
+    assert client.num_ctx == 65536
     assert client.max_tokens == 7168
+
+
+def test_openai_compatible_context_hint_defaults_to_unknown() -> None:
+    settings = Settings(_env_file=None)
+    config = ProviderConfig(
+        provider_name="openai_compatible",
+        base_url="http://local.test/v1",
+        default_model="local-model",
+        api_key="",
+        is_enabled=True,
+    )
+
+    manager = ProviderManager(settings, [config])
+    client = manager.client_for("openai_compatible")
+
+    assert isinstance(client, OpenAICompatibleClient)
+    assert client.context_tokens is None
+    assert client.num_ctx is None
