@@ -10,6 +10,32 @@ from .context_runtime import _configured_context_tokens
 
 
 _INSTALLED = False
+_PROSE_STAGES = frozenset(
+    {
+        "chapter_draft",
+        "chapter_revision",
+        "chapter_expansion",
+        "developmental_revision",
+        "chapter_humanization",
+        "chapter_compression",
+        "chapter_edit",
+    }
+)
+_MEDIUM_OUTPUT_STAGES = frozenset(
+    {
+        "story_bible",
+        "outline",
+        "manuscript_qa",
+        "developmental_rewrite",
+    }
+)
+_SMALL_STRUCTURED_STAGES = frozenset(
+    {
+        "chapter_plan",
+        "chapter_critique",
+        "continuity_update",
+    }
+)
 # Least essential derived/read-only blocks are removed first. Durable prompt inputs such as chapter
 # prose, outline, story bible, and continuity state are never truncated here. End-of-book story debt
 # is intentionally absent from this list so final QA keeps its closure evidence under pressure.
@@ -34,6 +60,22 @@ def _reserve_tokens() -> int:
     except ValueError:
         parsed = 8192
     return min(16_384, max(2_048, parsed))
+
+
+def _stage_reserve_tokens(stage: str, default_reserve: int) -> int:
+    """Right-size output headroom without throwing useful context away on compact stages."""
+
+    base = max(2_048, int(default_reserve))
+    normalized = str(stage or "").strip().lower()
+    if normalized in _PROSE_STAGES:
+        return base
+    if normalized in _MEDIUM_OUTPUT_STAGES:
+        return min(base, 4_096)
+    if normalized in _SMALL_STRUCTURED_STAGES:
+        return min(base, 3_072)
+    if normalized == "chapter_summary":
+        return min(base, 2_048)
+    return min(base, 4_096)
 
 
 def _estimated_tokens(messages: Any) -> int:
@@ -64,9 +106,10 @@ def shed_optional_context(
     """Remove optional derived context until a bounded output reserve is available."""
 
     context_tokens = max(1, int(configured_context_tokens))
-    # On smaller contexts, a fixed 8K reserve could consume nearly the whole window. Cap the
+    # On smaller contexts, a fixed 8K prose reserve could consume nearly the whole window. Cap the
     # reserve at one third of the configured window while keeping at least 2K when possible.
-    reserve = min(max(2_048, context_tokens // 3), max(2_048, int(requested_reserve_tokens)))
+    requested = max(2_048, int(requested_reserve_tokens))
+    reserve = min(max(2_048, context_tokens // 3), requested)
     reserve = min(reserve, max(1, context_tokens - 1))
     input_budget = max(1, context_tokens - reserve)
     before_tokens = _estimated_tokens(messages)
@@ -91,6 +134,7 @@ def shed_optional_context(
 
     after_tokens = _estimated_tokens(rewritten)
     telemetry = {
+        "context_headroom_requested_reserve_tokens": requested,
         "context_headroom_reserve_tokens": reserve,
         "context_headroom_input_budget_tokens": input_budget,
         "estimated_input_tokens_before_headroom": before_tokens,
@@ -118,15 +162,21 @@ def _wrap_supervised_provider_chat(
             if not context_tokens:
                 return supervised(*args, **kwargs)
 
+            stage = str(bound.arguments.get("stage") or "")
+            stage_reserve = _stage_reserve_tokens(stage, reserve_tokens)
             messages = list(bound.arguments.get("messages") or [])
             rewritten, headroom = shed_optional_context(
                 messages,
                 configured_context_tokens=context_tokens,
-                requested_reserve_tokens=reserve_tokens,
+                requested_reserve_tokens=stage_reserve,
             )
             existing_metadata = dict(bound.arguments.get("metadata") or {})
             bound.arguments["messages"] = rewritten
-            bound.arguments["metadata"] = {**existing_metadata, **headroom}
+            bound.arguments["metadata"] = {
+                **existing_metadata,
+                **headroom,
+                "context_headroom_stage": stage,
+            }
         except Exception:
             # Headroom shaping is an optimization. Existing provider error handling remains the
             # authority if the immutable/core prompt itself is too large for the configured model.
