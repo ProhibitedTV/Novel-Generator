@@ -111,6 +111,7 @@ class ProviderManager:
                 chat_timeout_seconds=self.settings.provider_chat_timeout_seconds,
                 retry_backoff_seconds=self.settings.provider_retry_backoff_seconds,
                 max_tokens=self.settings.openai_compatible_max_tokens,
+                context_tokens=self.settings.openai_compatible_context_tokens,
             )
         else:
             raise ProviderError(f"Unsupported provider '{provider_name}'.")
