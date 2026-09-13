@@ -78,9 +78,9 @@ Saved chapter prose is never changed by this process. The capsules are a tempora
 
 The manuscript-QA stage previously had a subtler version of the same problem: it serialized every chapter summary, full continuity update, story turn, and QA object. Because continuity updates can contain cumulative state, a 64-chapter book could repeat the same promises, trust fractures, and state maps dozens of times.
 
-The QA stage now receives a separate bounded chapter map. Every chapter stays represented, while each row retains the editorial signals that matter most: summary, word count, story turn, chapter outcome, state-change signals, ideology shifts, selected trust/emotional/side-character state, genre state, system transitions, and chapter QA scores/warnings. Detail degrades uniformly from detailed to compact to minimal before chapter coverage is reduced.
+The QA stage now receives a separate bounded chapter map. Every chapter stays represented, while each row retains the editorial signals that matter most: summary, word count, story turn, chapter outcome, state-change signals, ideology shifts, selected trust/emotional/side-character state, genre state, system transitions, chapter QA scores/warnings, and bounded literal final-prose evidence. Detail degrades uniformly before chapter coverage is reduced.
 
-Whole-book QA also receives the final unresolved arc audit, making abandoned character/subplot lanes visible to the editor without requiring raw chapter prose or repeated cumulative ledgers.
+Whole-book QA also receives the final unresolved arc and ending-debt audits. Final QA runs after the final-edit integrity guard, so a rolled-back edit cannot be evaluated as though it were accepted manuscript prose.
 
 `NOVEL_MANUSCRIPT_QA_CONTEXT_MAX_CHARS` defaults to 70,000 characters independently from the developmental rewrite budget.
 
@@ -88,29 +88,51 @@ Whole-book QA also receives the final unresolved arc audit, making abandoned cha
 
 Individually acceptable chapters can still form a declining manuscript. The whole-book QA prompt therefore receives a deterministic trend audit derived from persisted chapter QA/state.
 
-The audit compares the first and last thirds of the manuscript, tracks chapter-length drift, identifies sustained changes in quality scores, finds repeated chapter modes and ending-hook types, surfaces recurring QA warnings, and records chapters still marked revision-required. Score direction is explicit: craft/continuity measures are generally higher-is-better, while repetition risk, technical-escalation fatigue, and cuttable-chapter risk are lower-is-better. A normalized `quality_direction_delta` always uses negative values for degradation and positive values for improvement.
+The audit compares the first and last thirds, tracks chapter-length drift, identifies sustained changes in quality scores, finds repeated chapter modes and ending-hook types, surfaces recurring QA warnings, and records chapters still marked revision-required. Score direction is explicit: craft/continuity measures are generally higher-is-better, while repetition risk, technical-escalation fatigue, and cuttable-chapter risk are lower-is-better. A normalized `quality_direction_delta` always uses negative values for degradation and positive values for improvement.
 
 Trend signals are advisory. They tell the manuscript editor where to inspect sustained drift rather than forcing every act into identical pacing or tone.
 
-## Ollama context and structured output
+## Provider context, structured output, and completion capacity
 
-The native Ollama chat API accepts model runtime options including `num_ctx` and also supports JSON response formatting. Novel Generator sends an explicit context size on Ollama generation calls instead of depending on the server or model default. The default is 32,768 tokens, which is large enough for the bounded chapter and developmental contexts used by this pipeline while remaining configurable for machines with tighter RAM or VRAM limits.
+Ollama calls set both the context window and a provider-wide completion ceiling:
 
-Structured pipeline prompts such as story bibles, outlines, chapter plans, critiques, continuity updates, manuscript QA, and JSON repair requests are detected automatically from their system instructions. Those calls use Ollama's native `format: "json"` mode and a lower structured-generation temperature. This reduces the chance that a local model wraps JSON in commentary, markdown, or malformed free-form text before the application's existing validation and repair layer sees it.
+- `OLLAMA_NUM_CTX=32768`
+- `OLLAMA_NUM_PREDICT=8192`
 
-OpenAI-compatible local servers receive `response_format: {"type": "json_object"}` for the same structured stages. If a compatible server rejects that option with HTTP 400/422, the client retries the same request without `response_format` rather than breaking the run.
+OpenAI-compatible local servers expose a provider-wide completion ceiling through `OPENAI_COMPATIBLE_MAX_TOKENS`. Their model context window is not safely inferable from every frontend, so `OPENAI_COMPATIBLE_CONTEXT_TOKENS=0` means unknown by default. If the real loaded-model window is known, setting a non-zero value enables application-side headroom/context-utilization logic; the hint is never sent as an OpenAI request field.
 
-The default structured temperature is `0.2`. It is intentionally lower than normal prose generation because these stages are schema-following control work rather than creative drafting. Prose calls keep the model's normal generation behavior.
+Structured stages use stage-specific Pydantic JSON Schemas when supported. Ollama receives the schema through native `format`. OpenAI-compatible servers receive `response_format.type = json_schema`, with independent 400/422 compatibility fallback for schema controls and `max_tokens`. Application-side Pydantic validation and JSON repair remain authoritative.
 
-If a selected model supports less context than the configured value, or the machine cannot comfortably run that context size, lower `OLLAMA_NUM_CTX`. If the model and hardware support substantially more context, it can be raised up to the application validation limit.
+### Stage-aware provider output ceilings
+
+The configured provider ceilings are maximums. With `NOVEL_STAGE_OUTPUT_BUDGETS_ENABLED=1`, each supervised call can lower that ceiling to match the stage:
+
+- prose stages: up to 8,192 tokens;
+- outline/chunk, manuscript QA, publication readiness, developmental rewrite: up to 6,144;
+- story bible: up to 4,096;
+- chapter plan, critique, continuity update: up to 3,072;
+- summary: up to 2,048;
+- other stages: up to 4,096.
+
+The per-call budget uses a private application marker that provider clients strip before sending chat messages. It can never raise the configured provider-wide maximum.
+
+With `NOVEL_CONTEXT_HEADROOM_ENABLED=1` and a known provider context size, the same effective stage budget is reserved before generation. If the window is small, the reserve and provider cap are lowered together. Optional derived blocks can be shed in a fixed priority order while current prose, canon, durable continuity, and final ending-debt evidence remain protected.
+
+The two controls are independent: disabling headroom does not disable stage provider caps, and disabling stage caps does not prevent headroom from reserving against the configured global provider output maximum.
+
+### Output truncation recovery
+
+Provider stop telemetry is used as a correctness signal. If a prose-producing stage explicitly ends because the output limit was reached, bounded continuation recovery uses clipped task guidance plus the prose tail, de-duplicates repeated seams, rejects obvious chapter restarts, and records each continuation as a normal supervised attempt.
+
+If the continuation budget is exhausted while the provider still reports a length stop, the stage fails explicitly rather than accepting incomplete prose.
 
 ## Prompt and provider telemetry
 
-Every supervised provider attempt records safe input-size telemetry alongside the existing provider/model/stage timing data. Before the request, metadata includes total input characters, a deliberately rough character-based token estimate, message count, largest message size, configured context size when known, and estimated context utilization percentage.
+Every supervised provider attempt records safe input-size telemetry alongside the existing provider/model/stage timing data. Metadata can include total input characters, a deliberately rough character-based token estimate, message count, largest message size, configured context size when known, headroom decisions, effective provider output budget, and estimated context utilization.
 
-When a provider exposes actual generation metrics, the successful attempt is then enriched under `metadata.provider_metrics` without replacing the pre-request telemetry. Ollama can supply actual prompt/eval token counts, prompt/eval/load/total durations, prompt/completion throughput, stop reason, and actual context-window utilization. OpenAI-compatible servers can supply prompt/completion/total tokens, cached and reasoning-token details when reported, finish reason, and the response model identifier.
+When a provider exposes actual generation metrics, the successful attempt is enriched under `metadata.provider_metrics`. Ollama can supply actual prompt/eval token counts, durations, throughput, stop reason, and actual context utilization. OpenAI-compatible servers can supply prompt/completion/total tokens, cached and reasoning-token details when reported, finish reason, response model, and context utilization when a compatible context hint is configured.
 
-The manuscript text itself is not copied into telemetry. Metric extraction and persistence are fail-open: observability can never turn a successful model call into a failed generation run.
+The manuscript text itself is not copied into telemetry. Metric extraction and persistence are fail-open: observability cannot turn a successful model call into a failed run.
 
 ## Deterministic long-form benchmark
 
@@ -120,15 +142,18 @@ Run:
 python -m novel_generator.services.longform_benchmark
 ```
 
-The benchmark builds a deliberately difficult synthetic 32-chapter book and currently checks nine cross-cutting properties in one run: continuity compaction, buried callback recall, dormant unresolved character detection, visibility of future arc touches, adaptive pacing, late-book resolution priority, bounded all-chapter developmental coverage, bounded all-chapter QA coverage, and detection of deliberate final-third quality/length drift.
+The benchmark builds a deliberately difficult synthetic 32-chapter book and checks cross-cutting long-form properties including continuity compaction, buried callback recall, dormant unresolved character detection, visibility of future arc touches, adaptive pacing, late-book resolution priority, bounded all-chapter developmental coverage, bounded all-chapter QA coverage, and detection of deliberate final-third quality/length drift.
 
-It makes no model call and requires no embeddings or hosted service. A failure indicates a long-form architecture regression even when isolated helper tests still pass. See `docs/longform-benchmark.md` for the report fields and interpretation guidance.
+It makes no model call and requires no embeddings or hosted service. A failure indicates a long-form architecture regression even when isolated helper tests still pass. Dedicated reliability tests separately cover schema/provider-control fallbacks, context headroom, stage output caps, output truncation recovery, final-edit rollback, final-prose evidence, ending debt, and reconciliation.
 
 ## Configuration
 
 ```env
 OLLAMA_NUM_CTX=32768
+OLLAMA_NUM_PREDICT=8192
 OLLAMA_STRUCTURED_TEMPERATURE=0.2
+OPENAI_COMPATIBLE_CONTEXT_TOKENS=0
+OPENAI_COMPATIBLE_MAX_TOKENS=8192
 NOVEL_MEMORY_ENABLED=1
 NOVEL_MEMORY_MAX_CHARS=14000
 NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS=70000
@@ -143,10 +168,16 @@ NOVEL_CHAPTER_RECALL_RECENT=2
 NOVEL_CHAPTER_RECALL_RELEVANT=4
 NOVEL_ADAPTIVE_LENGTH_ENFORCEMENT=1
 NOVEL_ADAPTIVE_LENGTH_MAX_EXTRA_PASSES=1
+NOVEL_CONTEXT_HEADROOM_ENABLED=1
+NOVEL_CONTEXT_HEADROOM_RESERVE_TOKENS=8192
+NOVEL_STAGE_OUTPUT_BUDGETS_ENABLED=1
+NOVEL_TRUNCATION_RECOVERY_ENABLED=1
+NOVEL_TRUNCATION_MAX_CONTINUATIONS=2
+NOVEL_TRUNCATION_CONTEXT_MAX_CHARS=18000
 ```
 
-`NOVEL_MEMORY_MAX_CHARS` is the compact-JSON character budget for the continuity portion of chapter-level prompts and is clamped to 4,000–50,000 characters. `NOVEL_MANUSCRIPT_CONTEXT_MAX_CHARS` controls developmental rewrite capsules and is clamped to 30,000–160,000 characters. `NOVEL_MANUSCRIPT_QA_CONTEXT_MAX_CHARS` independently controls the whole-book QA map over the same range. `NOVEL_NARRATIVE_LOOKAHEAD_CHAPTERS` controls causal lookahead and is clamped to 1–6 chapters. `NOVEL_ARC_CONTEXT_MAX_CHARS` controls the character/subplot audit and is clamped to 4,000–30,000 characters. `NOVEL_ARC_DORMANT_AFTER_CHAPTERS` determines when an unresolved lane becomes a dormancy warning and is clamped to 2–16 chapters. `NOVEL_CHAPTER_RECALL_MAX_CHARS` is clamped to 3,000–24,000 characters, while recent and relevant recall counts are capped at 4 and 8 respectively. `NOVEL_ADAPTIVE_LENGTH_MAX_EXTRA_PASSES` is capped at 2. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens. `OLLAMA_STRUCTURED_TEMPERATURE` is validated from 0.0–2.0.
+`NOVEL_MEMORY_MAX_CHARS` is the compact-JSON character budget for continuity portions of chapter-level prompts and is clamped to 4,000–50,000 characters. Developmental and manuscript-QA context budgets are independently clamped to 30,000–160,000 characters. Narrative lookahead is clamped to 1–6 chapters. Arc context is clamped to 4,000–30,000 characters and its dormancy threshold to 2–16 chapters. Recall context is clamped to 3,000–24,000 characters, with recent/relevant counts capped at 4/8. Adaptive extra passes are capped at 2. `OLLAMA_NUM_CTX` is validated from 2,048–262,144 tokens. Provider output ceilings are validated by settings and can only be lowered by per-stage controls.
 
-The runtime integrations are fail-open: if a future prompt builder changes serialization format and a compiler cannot safely replace or inject a context block, the original prompt is used instead of failing the generation run.
+Runtime context integrations are fail-open: if a future prompt builder changes serialization format and a compiler cannot safely replace or inject a context block, the original prompt is used instead of failing the generation run. Reliability layers that protect against silent corruption—persistent output truncation, destructive final edits, and false publication readiness—remain explicit rather than silently accepting bad state.
 
-For local 8B–20B models, the defaults intentionally leave most of the attention budget for the current scene and prose while retaining enough book-level state to prevent character, canon, timeline, unresolved-thread, subplot, callback, ending-convergence, quality-drift, and manuscript-length drift.
+For local 8B–20B models, the defaults intentionally leave most useful attention for the current task while retaining enough book-level state to protect character, canon, timeline, unresolved threads, subplots, callbacks, ending convergence, quality drift, and manuscript-length drift.
