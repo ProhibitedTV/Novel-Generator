@@ -8,16 +8,19 @@ This document describes the safeguards added around those failure modes.
 
 A prompt can fit inside a model's configured context window and still be operationally broken if it leaves too little room for the completion. This matters most for local chapter generation: a 32K context can be consumed by story bible, continuity, recall, arc state, horizon data, QA context, and current prose before a 2,000-3,000 word chapter has room to finish.
 
-For Ollama, Novel Generator now makes both sides of that budget explicit:
+Novel Generator therefore makes local completion budgets explicit:
 
 ```env
 OLLAMA_NUM_CTX=32768
 OLLAMA_NUM_PREDICT=8192
+OPENAI_COMPATIBLE_MAX_TOKENS=8192
 NOVEL_CONTEXT_HEADROOM_ENABLED=1
 NOVEL_CONTEXT_HEADROOM_RESERVE_TOKENS=8192
 ```
 
-`OLLAMA_NUM_PREDICT` is sent as `options.num_predict`; the default is 8192 tokens. The headroom preflight uses the known provider context size and reserves completion capacity before the call. On smaller context windows, the reserve is capped at one third of the configured context so the prompt is not starved completely.
+For Ollama, `OLLAMA_NUM_PREDICT` is sent as `options.num_predict`; the default is 8192 tokens. For OpenAI-compatible local servers, `OPENAI_COMPATIBLE_MAX_TOKENS` is sent as `max_tokens` by default. If a compatible server rejects that field with HTTP 400/422, Novel Generator retries without it rather than making an otherwise usable local backend fail.
+
+The headroom preflight uses a provider's known configured context size and reserves completion capacity before the call. Today that is directly available for Ollama through `OLLAMA_NUM_CTX`. On smaller context windows, the reserve is capped at one third of the configured context so the prompt is not starved completely. An OpenAI-compatible completion budget is still enforced proactively, but headroom shedding is not guessed from an unknown server context size.
 
 When a prompt exceeds the resulting input budget, the preflight removes only derived/read-only context blocks in this order:
 
@@ -65,7 +68,7 @@ NOVEL_TRUNCATION_CONTEXT_MAX_CHARS=18000
 
 `NOVEL_TRUNCATION_MAX_CONTINUATIONS` is clamped to 0-4. The continuation context budget is clamped to 8,000-40,000 characters.
 
-Each continuation is a normal supervised provider attempt, so it receives the same attempt logging, prompt-size telemetry, provider token metrics, stop reason, headroom shaping, and failure handling as an ordinary generation call.
+Each continuation is a normal supervised provider attempt, so it receives the same attempt logging, prompt-size telemetry, provider token metrics, stop reason, headroom shaping where the context size is known, and failure handling as an ordinary generation call.
 
 ## Schema-constrained structured output
 
@@ -89,11 +92,14 @@ When a stage schema is available, the Ollama client sends the JSON Schema direct
 
 ### OpenAI-compatible local servers
 
-When a stage schema is available, the client requests `response_format.type = json_schema`. Local servers vary in how fully they implement the OpenAI-compatible surface, so schema support is fail-open in this order:
+When a stage schema is available, the client requests `response_format.type = json_schema`. Local servers vary in how fully they implement the OpenAI-compatible surface, so the request uses a compatibility ladder. For a schema-constrained call it tries, in order:
 
-1. JSON Schema response format;
-2. JSON-object response format if schema mode is rejected with HTTP 400/422; then
-3. ordinary chat if JSON-object mode is also rejected.
+1. JSON Schema + configured `max_tokens`;
+2. JSON-object mode + configured `max_tokens`;
+3. ordinary chat + configured `max_tokens`; then
+4. ordinary chat without `max_tokens` if the local server rejects that field too.
+
+For JSON-only calls without a stage schema, the same ladder starts at JSON-object mode. HTTP 400/422 moves to the next compatibility candidate; transport failures and other HTTP errors continue through the normal retry/error path.
 
 The existing Pydantic validation and JSON-repair pass remain in place after provider generation. Native structured output reduces malformed responses; it does not replace application validation.
 
@@ -193,7 +199,7 @@ The worker installs the long-form runtime transforms in an intentional order:
 9. context headroom preflight; and
 10. prose truncation recovery.
 
-Schema shaping is installed before telemetry so the private schema marker is not counted as model prompt text. Reconciliation is installed after continuity lifecycle handling so ledger replay respects live snapshot semantics. Headroom wraps the supervised call outside telemetry, so prompt-size telemetry measures the actual post-shedding messages sent to the provider. Truncation recovery is installed last so continuation attempts flow through the same headroom + telemetry stack as ordinary prose calls.
+Schema shaping is installed before telemetry so the private schema marker is not counted as model prompt text. Reconciliation is installed after continuity lifecycle handling so ledger replay respects live snapshot semantics. Headroom wraps the supervised call outside telemetry, so prompt-size telemetry measures the actual post-shedding messages sent to providers with known context sizes. Truncation recovery is installed last so continuation attempts flow through the same headroom + telemetry stack as ordinary prose calls.
 
 ## Failure philosophy
 
@@ -201,6 +207,6 @@ The reliability layers follow three principles:
 
 - **Do not silently accept incomplete output.** Explicit provider length stops on prose are recovered or surfaced as failures.
 - **Do not confuse optimization with canon.** Bounded context, headroom shaping, schema markers, audits, and retrieval views never replace the durable manuscript/outline/ledger.
-- **Fail open where a safeguard is advisory, fail closed where silent corruption is worse.** Telemetry extraction, audit injection, context shedding, and provider schema optimizations can fall back safely. Persistently truncated prose cannot be treated as complete, and a deterministic publication blocker cannot be overridden by a superficially high model score.
+- **Fail open where a safeguard is advisory, fail closed where silent corruption is worse.** Telemetry extraction, audit injection, context shedding, provider completion-budget hints, and schema optimizations can fall back safely. Persistently truncated prose cannot be treated as complete, and a deterministic publication blocker cannot be overridden by a superficially high model score.
 
 The result is still local-first: none of these safeguards requires embeddings, a hosted memory service, a cloud model, or a separate inference provider.
