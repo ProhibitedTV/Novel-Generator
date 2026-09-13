@@ -8,6 +8,7 @@ import time
 import httpx
 
 from ..schemas import ProviderCapabilities
+from .provider_controls import extract_output_budget_marker
 from .provider_errors import ProviderError, ProviderTransportError
 from .structured_schema_runtime import extract_schema_marker
 
@@ -238,16 +239,21 @@ class OpenAICompatibleClient:
             raise OpenAICompatibleError(f"Model '{model_name}' is not available in the configured OpenAI-compatible provider.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        clean_messages, response_schema, schema_name = extract_schema_marker(messages)
+        budget_clean_messages, output_budget = extract_output_budget_marker(messages)
+        clean_messages, response_schema, schema_name = extract_schema_marker(budget_clean_messages)
         structured = response_schema is not None or _requests_json_only(clean_messages)
         bare_payload: dict[str, Any] = {
             "model": model_name,
             "messages": clean_messages,
             "stream": stream,
         }
+
+        effective_max_tokens = self.max_tokens
+        if output_budget:
+            effective_max_tokens = min(effective_max_tokens, output_budget) if effective_max_tokens else output_budget
         budgeted_payload = dict(bare_payload)
-        if self.max_tokens:
-            budgeted_payload["max_tokens"] = self.max_tokens
+        if effective_max_tokens:
+            budgeted_payload["max_tokens"] = effective_max_tokens
 
         candidates: list[dict[str, Any]] = []
         if response_schema is not None:
@@ -267,7 +273,7 @@ class OpenAICompatibleClient:
             candidates.append(json_payload)
 
         candidates.append(budgeted_payload)
-        if self.max_tokens:
+        if effective_max_tokens:
             # Some local OpenAI-compatible servers reject max_tokens even though ordinary chat works.
             candidates.append(bare_payload)
         candidates = _dedupe_payloads(candidates)
