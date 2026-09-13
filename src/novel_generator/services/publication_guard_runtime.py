@@ -5,6 +5,7 @@ import inspect
 import re
 from typing import Any, Callable
 
+from .editorial import ABSTRACT_ENDING_PATTERNS, META_LANGUAGE_PATTERNS
 from .ending_debt import compile_ending_debt_audit
 
 
@@ -21,6 +22,8 @@ _INTENTIONAL_CLOSURE_MARKERS = (
     "transformed into aftermath",
 )
 _NEGATION_RE = re.compile(r"\b(?:not|never|isn't|wasn't|isnt|wasnt|without)\b", re.IGNORECASE)
+_CHAPTER_HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s*)?chapter\s+\d+\b", re.IGNORECASE)
+_MARKDOWN_FENCE_RE = re.compile(r"^\s*```", re.MULTILINE)
 
 
 def _word_count(chapter: Any) -> int:
@@ -55,6 +58,39 @@ def _positive_ending_classification(qa_report: Any) -> bool:
             if not _NEGATION_RE.search(prefix):
                 return True
     return False
+
+
+def _pattern_hits(text: str, patterns: list[str]) -> set[str]:
+    return {
+        pattern
+        for pattern in patterns
+        if re.search(pattern, text or "", flags=re.IGNORECASE)
+    }
+
+
+def _new_final_edit_semantic_regressions(before: str, after: str) -> list[str]:
+    """Detect deterministic editorial failures introduced by the final edit itself."""
+
+    reasons: list[str] = []
+    before_meta = _pattern_hits(before, META_LANGUAGE_PATTERNS)
+    after_meta = _pattern_hits(after, META_LANGUAGE_PATTERNS)
+    introduced_meta = after_meta - before_meta
+    if introduced_meta:
+        reasons.append("final edit introduced meta/outlining language")
+
+    before_ending = before[-1_400:]
+    after_ending = after[-1_400:]
+    before_abstract = _pattern_hits(before_ending, ABSTRACT_ENDING_PATTERNS)
+    after_abstract = _pattern_hits(after_ending, ABSTRACT_ENDING_PATTERNS)
+    introduced_abstract = after_abstract - before_abstract
+    if introduced_abstract:
+        reasons.append("final edit introduced a new abstract/outline-summary ending pattern")
+
+    if _CHAPTER_HEADING_RE.search(after) and not _CHAPTER_HEADING_RE.search(before):
+        reasons.append("final edit introduced a chapter heading despite prose-only instructions")
+    if _MARKDOWN_FENCE_RE.search(after) and not _MARKDOWN_FENCE_RE.search(before):
+        reasons.append("final edit introduced a markdown fence into manuscript prose")
+    return reasons
 
 
 def compile_publication_blockers(run: Any, qa_report: Any) -> list[str]:
@@ -137,7 +173,7 @@ def guard_final_edit_regressions(
     *,
     pipeline_module: Any,
 ) -> list[int]:
-    """Rollback only catastrophic length regressions introduced by the final line-edit pass."""
+    """Rollback catastrophic length or semantic regressions introduced by the final line edit."""
 
     try:
         minimum = int(getattr(run, "min_words_per_chapter", 0) or 0)
@@ -154,8 +190,9 @@ def guard_final_edit_regressions(
         if number not in before:
             continue
         old_content, old_words = before[number]
+        new_content = str(getattr(chapter, "content", "") or "")
         new_words = _word_count(chapter)
-        if old_words <= 0 or new_words <= 0 or old_content == str(getattr(chapter, "content", "") or ""):
+        if old_words <= 0 or new_words <= 0 or old_content == new_content:
             continue
 
         ratio = new_words / old_words
@@ -168,6 +205,7 @@ def guard_final_edit_regressions(
             reasons.append("final edit pushed a previously compliant chapter materially below the configured minimum")
         if maximum > 0 and old_words <= maximum and new_words > int(maximum * 1.20):
             reasons.append("final edit pushed a previously compliant chapter materially above the configured maximum")
+        reasons.extend(_new_final_edit_semantic_regressions(old_content, new_content))
 
         if not reasons:
             continue
@@ -186,7 +224,7 @@ def guard_final_edit_regressions(
                     "chapter_number": number,
                     "before_word_count": old_words,
                     "rejected_word_count": new_words,
-                    "reasons": reasons,
+                    "reasons": list(dict.fromkeys(reasons)),
                 },
             )
 
