@@ -28,11 +28,11 @@ def _enabled() -> bool:
 
 
 def _reserve_tokens() -> int:
-    raw = os.getenv("NOVEL_CONTEXT_HEADROOM_RESERVE_TOKENS", "6144").strip()
+    raw = os.getenv("NOVEL_CONTEXT_HEADROOM_RESERVE_TOKENS", "8192").strip()
     try:
         parsed = int(raw)
     except ValueError:
-        parsed = 6144
+        parsed = 8192
     return min(16_384, max(2_048, parsed))
 
 
@@ -64,8 +64,8 @@ def shed_optional_context(
     """Remove optional derived context until a bounded output reserve is available."""
 
     context_tokens = max(1, int(configured_context_tokens))
-    # On very small contexts, asking for a fixed 6K reserve would consume nearly the whole window.
-    # Cap the reserve at one third of the configured window while keeping at least 2K when possible.
+    # On smaller contexts, a fixed 8K reserve could consume nearly the whole window. Cap the
+    # reserve at one third of the configured window while keeping at least 2K when possible.
     reserve = min(max(2_048, context_tokens // 3), max(2_048, int(requested_reserve_tokens)))
     reserve = min(reserve, max(1, context_tokens - 1))
     input_budget = max(1, context_tokens - reserve)
