@@ -55,11 +55,11 @@ _CLASSIFICATION_STOP = {
 
 
 def _word_count(chapter: Any) -> int:
-    """Use final prose as the source of truth, falling back to stored metadata only if prose is empty."""
+    """Use final prose as the source of truth; stored metadata is only a no-content fallback."""
 
-    content = str(getattr(chapter, "content", "") or "")
-    if content.strip():
-        return len(content.split())
+    content = getattr(chapter, "content", None)
+    if content is not None:
+        return len(str(content).split())
     stored = getattr(chapter, "word_count", None)
     try:
         value = int(stored or 0)
@@ -112,14 +112,20 @@ def _unclassified_central_debt(debt: dict[str, Any], qa_report: Any) -> list[dic
     if not positive_notes:
         return candidates
 
-    note_terms = [(note, _classification_terms(note)) for note in positive_notes]
+    note_terms = [_classification_terms(note) for note in positive_notes]
     unclassified: list[dict[str, Any]] = []
     for candidate in candidates:
         candidate_terms = _classification_terms(candidate.get("text", ""))
         if not candidate_terms:
             unclassified.append(candidate)
             continue
-        matched = any(len(candidate_terms & terms) >= 2 for _, terms in note_terms)
+        matched = False
+        for terms in note_terms:
+            overlap = len(candidate_terms & terms)
+            coverage = overlap / max(1, len(candidate_terms))
+            if overlap >= 2 and coverage >= 0.35:
+                matched = True
+                break
         if not matched:
             unclassified.append(candidate)
     return unclassified
@@ -254,20 +260,23 @@ def guard_final_edit_regressions(
         old_content, old_words = before[number]
         new_content = str(getattr(chapter, "content", "") or "")
         new_words = len(new_content.split()) if new_content.strip() else 0
-        if old_words <= 0 or new_words <= 0 or old_content == new_content:
+        if old_words <= 0 or old_content == new_content:
             continue
 
-        ratio = new_words / old_words
         reasons: list[str] = []
-        if ratio < 0.72:
-            reasons.append(f"final edit retained only {ratio:.0%} of the prior chapter length")
-        elif ratio > 1.35:
-            reasons.append(f"final edit expanded to {ratio:.0%} of the prior chapter length")
-        if minimum > 0 and old_words >= minimum and new_words < int(minimum * 0.90):
-            reasons.append("final edit pushed a previously compliant chapter materially below the configured minimum")
-        if maximum > 0 and old_words <= maximum and new_words > int(maximum * 1.20):
-            reasons.append("final edit pushed a previously compliant chapter materially above the configured maximum")
-        reasons.extend(_new_final_edit_semantic_regressions(old_content, new_content))
+        if new_words <= 0:
+            reasons.append("final edit produced empty prose")
+        else:
+            ratio = new_words / old_words
+            if ratio < 0.72:
+                reasons.append(f"final edit retained only {ratio:.0%} of the prior chapter length")
+            elif ratio > 1.35:
+                reasons.append(f"final edit expanded to {ratio:.0%} of the prior chapter length")
+            if minimum > 0 and old_words >= minimum and new_words < int(minimum * 0.90):
+                reasons.append("final edit pushed a previously compliant chapter materially below the configured minimum")
+            if maximum > 0 and old_words <= maximum and new_words > int(maximum * 1.20):
+                reasons.append("final edit pushed a previously compliant chapter materially above the configured maximum")
+            reasons.extend(_new_final_edit_semantic_regressions(old_content, new_content))
 
         if not reasons:
             continue
