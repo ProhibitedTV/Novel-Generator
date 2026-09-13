@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from novel_generator.services.context_headroom_runtime import (
+    _stage_reserve_tokens,
     _wrap_supervised_provider_chat,
     shed_optional_context,
 )
@@ -35,10 +36,22 @@ def test_headroom_sheds_optional_context_but_preserves_core_and_ending_debt() ->
 
     assert telemetry["estimated_input_tokens_before_headroom"] > telemetry["context_headroom_input_budget_tokens"]
     assert telemetry["estimated_input_tokens_after_headroom"] < telemetry["estimated_input_tokens_before_headroom"]
+    assert telemetry["context_headroom_requested_reserve_tokens"] == 3072
     assert telemetry["optional_context_blocks_removed"]
     assert "CURRENT CHAPTER PROSE MUST SURVIVE" in content
     assert "End-of-book story-debt audit" in content
     assert telemetry["context_headroom_satisfied"] is True
+
+
+def test_stage_reserves_keep_full_budget_for_prose_and_less_for_compact_stages() -> None:
+    assert _stage_reserve_tokens("chapter_draft", 8192) == 8192
+    assert _stage_reserve_tokens("chapter_revision", 8192) == 8192
+    assert _stage_reserve_tokens("manuscript_qa", 8192) == 4096
+    assert _stage_reserve_tokens("chapter_plan", 8192) == 3072
+    assert _stage_reserve_tokens("chapter_critique", 8192) == 3072
+    assert _stage_reserve_tokens("continuity_update", 8192) == 3072
+    assert _stage_reserve_tokens("chapter_summary", 8192) == 2048
+    assert _stage_reserve_tokens("unknown_stage", 8192) == 4096
 
 
 def test_headroom_wrapper_updates_metadata_before_provider_call() -> None:
@@ -49,7 +62,7 @@ def test_headroom_wrapper_updates_metadata_before_provider_call() -> None:
         captured["metadata"] = metadata
         return "ok"
 
-    wrapped = _wrap_supervised_provider_chat(supervised, reserve_tokens=2048)
+    wrapped = _wrap_supervised_provider_chat(supervised, reserve_tokens=8192)
     client = SimpleNamespace(num_ctx=4096)
     recall = "Long-range chapter recall (completed-book memory; use only relevant callbacks and do not recap it):\n"
     messages = [
@@ -71,9 +84,31 @@ def test_headroom_wrapper_updates_metadata_before_provider_call() -> None:
 
     assert result == "ok"
     assert captured["metadata"]["label"] == "chapter 3 draft"
-    assert captured["metadata"]["context_headroom_reserve_tokens"] >= 2048
+    assert captured["metadata"]["context_headroom_stage"] == "chapter_draft"
+    assert captured["metadata"]["context_headroom_requested_reserve_tokens"] == 8192
+    # The actual reserve is capped at one third / small-context safety for a 4K context.
+    assert captured["metadata"]["context_headroom_reserve_tokens"] == 2048
     assert captured["metadata"]["optional_context_blocks_removed"] == ["Long-range chapter recall"]
     assert "Long-range chapter recall" not in captured["messages"][1]["content"]
+
+
+def test_structured_stage_preserves_more_input_context_than_prose_stage() -> None:
+    captured: list[dict] = []
+
+    def supervised(session, run, client, provider_name, model_name, messages, *, stage, chapter_number=None, metadata=None, stream=False):
+        captured.append(dict(metadata or {}))
+        return "ok"
+
+    wrapped = _wrap_supervised_provider_chat(supervised, reserve_tokens=8192)
+    client = SimpleNamespace(num_ctx=32768)
+    messages = [{"role": "user", "content": "small prompt"}]
+
+    wrapped(None, SimpleNamespace(), client, "ollama", "m", messages, stage="chapter_draft")
+    wrapped(None, SimpleNamespace(), client, "ollama", "m", messages, stage="chapter_plan")
+
+    assert captured[0]["context_headroom_requested_reserve_tokens"] == 8192
+    assert captured[1]["context_headroom_requested_reserve_tokens"] == 3072
+    assert captured[0]["context_headroom_input_budget_tokens"] < captured[1]["context_headroom_input_budget_tokens"]
 
 
 def test_headroom_does_not_mutate_messages_when_already_within_budget() -> None:
