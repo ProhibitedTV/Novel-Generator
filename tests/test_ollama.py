@@ -107,7 +107,7 @@ def test_ollama_chat_client_uses_long_read_timeout() -> None:
         assert http_client.timeout.read == 1800
 
 
-def test_ollama_chat_sends_configured_context_window_and_records_metrics() -> None:
+def test_ollama_chat_sends_configured_context_and_output_budgets_and_records_metrics() -> None:
     seen_payload: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -131,6 +131,7 @@ def test_ollama_chat_sends_configured_context_window_and_records_metrics() -> No
         timeout_seconds=1,
         max_retries=0,
         num_ctx=32768,
+        num_predict=8192,
         client_factory=lambda: httpx.Client(
             transport=httpx.MockTransport(handler),
             base_url="http://ollama.test",
@@ -138,7 +139,7 @@ def test_ollama_chat_sends_configured_context_window_and_records_metrics() -> No
     )
 
     assert client.chat("test-model", [{"role": "user", "content": "Hello"}]) == "ok"
-    assert seen_payload["options"] == {"num_ctx": 32768}
+    assert seen_payload["options"] == {"num_ctx": 32768, "num_predict": 8192}
     assert "format" not in seen_payload
     assert client.last_chat_metrics["prompt_eval_count"] == 1024
     assert client.last_chat_metrics["eval_count"] == 100
@@ -157,6 +158,7 @@ def test_ollama_chat_uses_json_mode_and_low_temperature_for_structured_prompt() 
         timeout_seconds=1,
         max_retries=0,
         num_ctx=32768,
+        num_predict=4096,
         structured_temperature=0.15,
         client_factory=lambda: httpx.Client(
             transport=httpx.MockTransport(handler),
@@ -174,4 +176,4 @@ def test_ollama_chat_uses_json_mode_and_low_temperature_for_structured_prompt() 
 
     assert result == '{"ok":true}'
     assert seen_payload["format"] == "json"
-    assert seen_payload["options"] == {"num_ctx": 32768, "temperature": 0.15}
+    assert seen_payload["options"] == {"num_ctx": 32768, "num_predict": 4096, "temperature": 0.15}
