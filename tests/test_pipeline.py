@@ -692,6 +692,45 @@ def test_continuity_fallback_completes_run_when_continuity_provider_fails(config
         assert refreshed.chapters[0].continuity_update
 
 
+def test_chapter_checkpoint_preserves_missing_live_fields(configured_environment, monkeypatch) -> None:
+    from novel_generator.schemas import ChapterContinuityUpdate
+    from novel_generator.services import pipeline
+
+    original_generate = pipeline._generate_structured_output
+
+    def generate(*args, **kwargs):
+        stage = kwargs.get("stage", args[8] if len(args) > 8 else None)
+        if stage == "continuity_update":
+            return ChapterContinuityUpdate(
+                chapter_outcome="Iris takes the lower route.", current_patch_status="Unchanged.",
+                world_state="The archive is sealed.", timeline_entry="Iris leaves the archive.",
+                emotional_open_loops={},
+            )
+        return original_generate(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "_generate_structured_output", generate)
+    with get_session_factory()() as session:
+        project = _create_project(session, requested_chapters=1)
+        run = create_run(session, project, RunCreate(
+            project_id=project.id, pause_after_outline=False, developmental_rewrite_enabled=False,
+        ))
+        session.commit()
+        process_run_safe(session, run, get_settings(), FakeOllamaClient([
+            _story_bible_json(), _outline_json(1), _plan_json(1),
+            "Iris slips out of the archive while Tarin resists following her. Trigger 1 arrives when the visible actor 1 seals the corridor, leaving only route 1 below them.",
+            _critique_json(revision_required=False), "Iris chooses the lower route.", _qa_report_json(),
+        ]))
+        session.expire_all()
+        refreshed = get_run(session, run.id)
+        assert refreshed.status == RunStatus.COMPLETED
+        checkpoint = refreshed.chapters[0].continuity_update
+        assert checkpoint["emotional_open_loops"] == {}
+        assert "open_promises_by_name" not in checkpoint
+        assert "trust_fractures" not in checkpoint
+        replayed = ChapterContinuityUpdate.model_validate(checkpoint)
+        assert "open_promises_by_name" not in replayed.model_fields_set
+
+
 def test_under_length_chapter_expands_before_critique(configured_environment) -> None:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -928,6 +967,27 @@ def test_process_run_merges_approved_project_canon_into_story_bible(configured_e
         assert canon_by_name["Glass Orchard"]["approved"] is True
         assert canon_by_name["Glass Orchard"]["locked"] is True
         assert refreshed.continuity_ledger["active_entities"][0]["name"] == "Glass Orchard"
+
+
+def test_short_outline_preserves_plot_when_midpoint_label_needs_repair(configured_environment) -> None:
+    from novel_generator.services.pipeline import _generate_outline
+    from novel_generator.services.prompts import parse_story_bible, parse_outline
+
+    outline = json.loads(_outline_json(3))["chapters"]
+    for entry in outline:
+        entry["outcome_type"] = "compromise"
+    with get_session_factory()() as session:
+        project = _create_project(session, requested_chapters=3)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+        _generate_outline(session, run, parse_story_bible(_story_bible_json()),
+                          FakeOllamaClient([json.dumps(outline)]))
+        assert [entry["objective"] for entry in run.outline] == [entry["objective"] for entry in outline]
+        assert [entry["title"] for entry in run.outline] == [entry["title"] for entry in outline]
+        assert run.outline[1]["outcome_type"] == "reversal"
+        assert parse_outline(json.dumps(run.outline), 3)
+        assert any(event.event_type == "outline_validation_repaired" for event in run.events)
+        assert not any(event.event_type == "outline_fallback" for event in run.events)
 
 
 def test_approved_run_completes_and_generates_qa_report(configured_environment) -> None:

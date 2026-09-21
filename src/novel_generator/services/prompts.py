@@ -106,6 +106,16 @@ def _publication_draft_requirements(run: GenerationRun) -> str:
     )
 
 
+NOVELIST_PROCESS_REQUIREMENTS = (
+    "- novelist process: begin with the reader promise, protagonist pressure, and ending promise before adding plot machinery\n"
+    "- novelist process: make external events challenge the protagonist's backstory wound, misbelief, desire, and fear instead of treating plot and character as separate tracks\n"
+    "- novelist process: build from simple to complex: logline, act pressure, chapter map, scene purpose, draft, then revision\n"
+    "- novelist process: every scene needs a purpose, a high moment, an altered state, and a reason it cannot be removed without damaging the book\n"
+    "- novelist process: dialogue is not neutral information exchange; each speaker should try to accomplish something under social, emotional, or power pressure\n"
+    "- novelist process: developmental structure comes before line polish; diagnose story, character, pacing, continuity, and scene order before treating prose style as the main fix\n"
+)
+
+
 def _chapter_continuity_payload(chapter: ChapterDraft) -> dict[str, Any]:
     payload = chapter.continuity_update or {}
     if isinstance(payload, dict):
@@ -135,7 +145,10 @@ def _story_brief_lines(project: Project) -> str:
         f"Genre profile: {profile.label} ({profile.id})",
         f"Setting: {brief.get('setting') or 'Not specified.'}",
         f"Tone: {brief.get('tone') or 'Not specified.'}",
+        f"Reader promise: {brief.get('reader_promise') or 'Not specified.'}",
         f"Protagonist: {brief.get('protagonist') or 'Not specified.'}",
+        f"Protagonist backstory: {brief.get('protagonist_backstory') or 'Not specified.'}",
+        f"Protagonist misbelief: {brief.get('protagonist_misbelief') or 'Not specified.'}",
         f"Supporting cast: {', '.join(brief.get('supporting_cast', [])) or 'Not specified.'}",
         f"Antagonist: {brief.get('antagonist') or 'Not specified.'}",
         f"Core conflict: {brief.get('core_conflict') or 'Not specified.'}",
@@ -146,6 +159,7 @@ def _story_brief_lines(project: Project) -> str:
         f"Style targets: {', '.join(brief.get('style_targets', [])) or 'Not specified.'}",
         f"Dialogue targets: {', '.join(brief.get('dialogue_targets', [])) or 'Not specified.'}",
         f"Style avoid: {', '.join(brief.get('style_avoid', [])) or 'Not specified.'}",
+        f"Revision priorities: {', '.join(brief.get('revision_priorities', [])) or 'Not specified.'}",
         f"Style reference: {style_reference or 'Not specified.'}",
         f"Approved canon: {'; '.join(approved_canon) if approved_canon else 'None approved yet.'}",
     ]
@@ -295,6 +309,9 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 "- each major character agenda must include a stable ideological belief, a private pressure point, and a predictable stress response\n"
                 "- include only recurring canonical entities in canon_registry and keep names stable\n"
                 "- build a clean escalation ladder toward one primary ending, not multiple competing finales\n"
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "- use reader_promise to define what emotional, genre, and intellectual experience the book must repeatedly pay off\n"
+                "- if protagonist_backstory or protagonist_misbelief is provided, make it the engine for the protagonist's reactions, bad choices, and final change\n"
                 "- include profile-specific story bible focus: "
                 + "; ".join(profile.story_bible_focus)
                 + "\n"
@@ -303,6 +320,7 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
                 "- if a style reference is provided, infer durable craft guidance from it without copying its exact sentences, imagery, names, or distinctive phrasing\n"
                 "- character_voice_map must give each major character a distinct pressure behavior, dialogue texture, and default verbal rhythm\n"
                 "- style_profile.avoid must include the user's style avoid items plus any generic prose habits that would make the draft sound flat\n"
+                "- fold revision_priorities into prose_guardrails, conflict_ladder, and genre_contract so later QA can judge them\n"
                 + _publication_story_bible_requirements(run)
                 + "- keep the tone and world rules specific enough to govern later chapters"
             ),
@@ -371,6 +389,10 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
                 "Rules:\n"
                 f"- return exactly {run.requested_chapters} chapters numbered 1 through {run.requested_chapters}\n"
                 "- chapter 1 should contain the true inciting incident once and only once as the main discovery beat\n"
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "- treat this as a novelist's scene list: every chapter must open, complicate, or close a clear story promise rather than merely visit a premise element\n"
+                "- track the dominant story driver in each chapter: place/world pressure, inquiry/clue pressure, character-change pressure, or event/disruption pressure\n"
+                "- every chapter must test the protagonist's stated or inferred misbelief through a concrete obstacle, relationship pressure, or consequence\n"
                 "- no chapter after chapter 1 may rediscover or restate the inciting incident as its primary motion\n"
                 "- each later chapter must change the external situation and at least one character state\n"
                 f"- at least {minimum_setbacks} chapters must have outcome_type set to setback or reversal\n"
@@ -473,6 +495,9 @@ def build_outline_chunk_messages(
                 "Rules:\n"
                 f"- return exactly chapters {start_chapter} through {end_chapter}, no missing chapters and no extra chapters\n"
                 "- continue the prior outline instead of repeating its inciting incident, discovery, midpoint, or climax\n"
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "- continue the same promise/pressure map from the accepted chapters, and do not open new major threads unless they can be paid off before the ending\n"
+                "- every chapter in this slice must test the protagonist's stated or inferred misbelief through a concrete obstacle, relationship pressure, or consequence\n"
                 "- each chapter must change the external situation and at least one character state\n"
                 f"- at least {minimum_local_setbacks} chapters in this chunk must have outcome_type set to setback or reversal\n"
                 "- distribute those setbacks/reversals across the chunk instead of clustering them all at the end\n"
@@ -575,6 +600,9 @@ def build_chapter_plan_messages(
                 "- set chapter_mode to the current outline chapter_mode unless that would repeat a mode from the previous 2 chapters; if it would repeat, choose the closest non-repeating dramatic mode that preserves the same plot outcome\n"
                 "- chapter_mode must describe the dominant dramatic mode of the planned scene, not the presence of a console, alarm, drone, or system prop\n"
                 "- include 4 to 6 concrete scene beats\n"
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "- scene_beats must follow a readable scene progression: action, reaction, processing under pressure, decision, and new action or changed state\n"
+                "- define what each important speaker wants from the conversation before using dialogue for exposition\n"
                 "- at least one beat must materially worsen or transform the conflict\n"
                 "- define story_turn before drafting; it must name what permanently changes, what the protagonist chooses, what credible alternatives they rejected, and what consequence cannot be undone\n"
                 "- story_turn.why_this_chapter_cannot_be_cut must explain the structural damage caused if the chapter were removed, not just say it advances the plot\n"
@@ -640,6 +668,8 @@ def build_chapter_draft_messages(
                 f"Chapter plan:\n{json.dumps(chapter_plan, indent=2)}\n\n"
                 "Hard rules:\n"
                 "- do not include a chapter heading or title line\n"
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "- draft for read-aloud rhythm: vary sentence length, paragraph weight, silence, interruption, and the pressure of the final beat\n"
                 "- do not repeat the inciting incident unless the situation has materially changed\n"
                 "- the chapter must change the external situation and at least one character state\n"
                 "- enact chapter_plan.story_turn on the page: the irreversible_change, protagonist_choice, rejected alternatives, permanent_consequence, and state_after must be visible in scene action or dialogue\n"
@@ -660,6 +690,7 @@ def build_chapter_draft_messages(
                 "- pay off the chapter plan's genre_specific_focus and genre_specific_beats on the page\n"
                 "- obey the prose style profile's narrative_voice, sentence_rhythm, imagery_palette, dialogue_rules, character_voice_map, and avoid list\n"
                 "- make dialogue carry tension through subtext, disagreement, withheld information, or asymmetrical goals rather than neutral exposition\n"
+                "- in dialogue, ask what each speaker needs to accomplish, not what information the author needs to deliver\n"
                 "- vary sentence length and paragraph shape enough that action, reflection, and dialogue do not share one default cadence\n"
                 "- use concrete sensory anchors that belong to this setting instead of generic atmosphere\n"
                 "- honor profile-specific drafting focus: "
@@ -748,6 +779,9 @@ def build_chapter_critique_messages(
                 "}\n\n"
                 "Rules:\n"
                 "- classify ending_hook_type as concrete_action_hook when the final beat is a visible event/action/reversal, resolved_scene_turn when it quietly completes the scene turn with a tangible decision or state change, abstract_cliffhanger when it only gestures at future stakes, image_or_feeling_beat when it ends on mood/image without external consequence, or outline_summary when it uses planning language such as 'next problem' or 'next step'\n"
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "- judge whether the chapter pays off the reader promise, tests the protagonist's misbelief, and changes the book's promise map\n"
+                "- judge dialogue by agenda, subtext, conflict, and character-specific rhythm rather than by information completeness\n"
                 "- set revision_required to true if any draft prose contains meta/outlining language such as 'The chapter ends on', 'This lays the groundwork for', 'pushing the story forward', 'The story was not finished', 'the decision would shape the next chapter', or 'in the next chapter'\n"
                 "- set revision_required to true if the chapter has an abstract ending, outline-summary ending, image/feeling-only ending, unresolved immediate scene turn, zero-cost major solution, repeated emergency mechanics, repeated premise beat, side character who only helps or warns, proper-noun inconsistency, emotional fallout that disappears, blurred ideology positions, or weak style/voice delivery\n"
                 "- set revision_required to true if the chapter lacks the planned irreversible story_turn, if protagonist_choice is unclear, if the permanent_consequence is reversible or abstract, or if the chapter could be cut without changing the manuscript state\n"
@@ -1087,10 +1121,15 @@ def build_manuscript_qa_messages(
                 '      "observed_status": "latest manuscript state",\n'
                 '      "notes": "pronoun, role, name, or state-machine note"\n'
                 "    }\n"
-                "  ]\n"
+                "  ],\n"
+                '  "revision_pass_plan": ["developmental pass, character pass, scene pass, line pass, copy/proof pass, or handoff action"],\n'
+                '  "beta_reader_questions": ["specific reader-facing question that cannot be answered yes/no"]\n'
                 "}\n\n"
-                "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "Be specific about repeated setups, duplicated endings, abstract or outline-summary endings, continuity instability, easy technical wins, side-character flatness, "
                 "meta/outlining language in chapter prose, chapter_mode distribution and adjacent mode repetition, story_turn quality, cuttable chapters, duplicated irreversible turns, proper-noun drift, emotional pacing, ideology blur, civilian-life absence, repeated crisis loops with chapter numbers, exact beat patterns, representative phrases, severity, and suggested structural fixes, repeated emergency mechanics such as lockdown, quarantine, reboot, alarm, warning banner, reserve drain, core temperature, critical failure, drone breach, override, or countdown, continuity-bible risks such as character pronoun or role drift, confusingly similar names with suggested renames, and unexplained core-system state transitions, and whether the manuscript delivers on the ending promise. "
+                "revision_pass_plan must order fixes like a real manuscript workflow: developmental structure before chapter rewrites, then scene/character passes, then line/copy/proof cleanup. "
+                "beta_reader_questions must focus on reader experience, confusion, boredom, belief, character investment, ending meaning, and genre promise rather than asking readers how they would rewrite the book. "
                 "Genre contract notes must judge the selected profile: "
                 + "; ".join(profile.qa_focus or profile.genre_contract)
             ),
@@ -1160,6 +1199,8 @@ def build_developmental_rewrite_messages(
                 '  "post_rewrite_risk_targets": ["string"]\n'
                 "}\n\n"
                 "Every chapter must appear in chapter_actions. Identify chapters that do not permanently change the story. "
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "Prioritize structural diagnosis before prose polish: act order, scene causality, character arc, reader promise, tension, pacing, and continuity must be solved before line-level repairs. "
                 "Use merge or cut only when the story can preserve the permanent consequence elsewhere. "
                 "The post_rewrite_risk_targets field should compare the current QA risks with what the revised outline must prove has improved."
             ),
@@ -1200,6 +1241,8 @@ def _qa_editing_context(qa_report: ManuscriptQaReport) -> dict[str, Any]:
         "scene_mode_distribution_notes",
         "story_turn_quality_notes",
         "genre_contract_notes",
+        "revision_pass_plan",
+        "beta_reader_questions",
     ]
     return {key: payload.get(key) for key in keys if payload.get(key)}
 
@@ -1246,6 +1289,8 @@ def build_chapter_edit_messages(
                 f"Current chapter prose:\n{chapter.content or ''}\n\n"
                 "Final editing instructions:\n"
                 "- preserve the same plot events, order of events, POV, named entities, relationship state, and continuity outcome\n"
+                + NOVELIST_PROCESS_REQUIREMENTS
+                + "- treat this as a line-edit after structural work: improve clarity, rhythm, subtext, and precision without changing the approved manuscript architecture\n"
                 "- do not add a new scene, new twist, new system rule, new character, chapter heading, author note, or outline summary\n"
                 "- polish sentence rhythm, paragraph flow, transitions, sensory specificity, and dialogue subtext\n"
                 "- remove repeated phrasing, filler explanation, and meta/outlining language such as 'the next problem', 'the chapter ends', 'pushing the story forward', or 'sets up'\n"

@@ -26,6 +26,7 @@ from novel_generator.services.prompts import (
     rolling_context,
     sanitize_chapter_content,
 )
+from novel_generator.services.editorial import render_qa_report_markdown
 
 
 def test_story_bible_parser_accepts_valid_json_with_fences() -> None:
@@ -1003,10 +1004,14 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
         max_words_per_chapter=1200,
         preferred_model="test-model",
         story_brief={
+            "reader_promise": "A tense consent thriller with emotional horror.",
+            "protagonist_backstory": "Iris once chose safety over a friend's memory.",
+            "protagonist_misbelief": "Control is the only form of care.",
             "tone": "tense luminous sci-fi",
             "style_targets": ["taut lyric pressure", "concrete sensory dread"],
             "dialogue_targets": ["arguments with subtext"],
             "style_avoid": ["weight of everything"],
+            "revision_priorities": ["Check whether Iris's misbelief changes on page."],
             "style_reference": "Short clipped sentences. Wet stone. No copied lines.",
         },
     )
@@ -1140,14 +1145,24 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     revision_prompt = build_chapter_revision_messages(project, chapter, outline_entry, story_bible, ledger, plan, critique, [])[1]["content"]
 
     assert "Style targets: taut lyric pressure" in story_prompt
+    assert "Reader promise: A tense consent thriller with emotional horror." in story_prompt
+    assert "Protagonist backstory: Iris once chose safety over a friend's memory." in story_prompt
+    assert "Protagonist misbelief: Control is the only form of care." in story_prompt
+    assert "Revision priorities: Check whether Iris's misbelief changes on page." in story_prompt
+    assert "novelist process" in story_prompt
     assert '"style_profile"' in story_prompt
+    assert "scene list" in build_outline_messages(project, run, story_bible)[1]["content"]
     assert "Recent chapter modes to avoid repeating" in plan_prompt
     assert "previous 2 chapters" in plan_prompt
     assert "chapter_mode" in plan_prompt
+    assert "action, reaction, processing under pressure, decision" in plan_prompt
+    assert "speaker wants" in plan_prompt
     assert "irreversible_change" in plan_prompt
     assert "why_this_chapter_cannot_be_cut" in plan_prompt
     assert "Prose style profile" in draft_prompt
     assert "character_voice_map" in draft_prompt
+    assert "read-aloud rhythm" in draft_prompt
+    assert "what each speaker needs to accomplish" in draft_prompt
     assert "final paragraph must include" in draft_prompt
     assert "visible consequence" in draft_prompt
     assert "at most one primary system-crisis mechanic" in draft_prompt
@@ -1162,6 +1177,9 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "irreversibility_score" in critique_prompt
     assert "choice_clarity_score" in critique_prompt
     assert "cuttable_chapter_risk_score" in critique_prompt
+    assert "reader promise" in critique_prompt
+    assert "protagonist's misbelief" in critique_prompt
+    assert "dialogue by agenda" in critique_prompt
     assert "abstract_cliffhanger" in critique_prompt
     assert "next problem" in critique_prompt
     assert "meta/outlining language" in critique_prompt
@@ -1175,6 +1193,11 @@ def test_prompt_builders_include_prose_voice_profile() -> None:
     assert "add or sharpen the planned independent_side_character_move" in revision_prompt
     assert "voice_and_texture" in revision_prompt
     assert "do not copy exact language" in revision_prompt
+
+    qa_prompt = build_manuscript_qa_messages(project, story_bible, [], [chapter])[1]["content"]
+    assert "revision_pass_plan" in qa_prompt
+    assert "beta_reader_questions" in qa_prompt
+    assert "developmental structure before chapter rewrites" in qa_prompt
 
 
 def test_publication_profile_prompts_include_character_variety_and_compression_controls() -> None:
@@ -1298,3 +1321,18 @@ def test_rolling_context_uses_recent_completed_chapters() -> None:
     assert "Chapter 2" in context
     assert "Chapter 3" in context
     assert "Chapter 1" not in context
+
+
+def test_qa_report_renders_revision_plan_and_beta_questions() -> None:
+    report = ManuscriptQaReport(
+        overall_verdict="Needs another structural pass.",
+        revision_pass_plan=["Developmental pass: fix the midpoint promise."],
+        beta_reader_questions=["Where did your attention first drift, and why?"],
+    )
+
+    rendered = render_qa_report_markdown(report)
+
+    assert "## Revision Pass Plan" in rendered
+    assert "Developmental pass: fix the midpoint promise." in rendered
+    assert "## Beta Reader Questions" in rendered
+    assert "Where did your attention first drift, and why?" in rendered

@@ -193,6 +193,27 @@ RUN_STAGES = [
         "result": "You can rerun with the same settings or edit the project before trying again.",
     },
 ]
+_export_stage_index = next(index for index, stage in enumerate(RUN_STAGES) if stage["id"] == "export")
+RUN_STAGES[_export_stage_index:_export_stage_index] = [
+    {
+        "id": "autonomous_review", "label": "Automatic editorial review",
+        "description": "Checking actual prose for continuity, causality, voice, and unresolved payoffs.",
+        "why": "A draft must pass chapter and whole-book checks before completion.",
+        "result": "Accept the text or send evidence-based issues to automatic repair.",
+    },
+    {
+        "id": "autonomous_revision", "label": "Automatic editorial repair",
+        "description": "Rewriting a chapter to resolve detected issues, then reviewing it again.",
+        "why": "Detected issues need to be resolved in the manuscript itself.",
+        "result": "Save the revision and preserve the previous text in editorial history.",
+    },
+    {
+        "id": "autonomous_reconciliation", "label": "Rebuilding continuity",
+        "description": "Extracting summaries and story state from the revised chapters in order.",
+        "why": "Later chapters must be checked against what the current manuscript actually says.",
+        "result": "Updated story state for the final editorial checks.",
+    },
+]
 TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
 
 CANON_ENTITY_TYPES = [
@@ -222,6 +243,12 @@ HIGH_TOKEN_DISCLOSURE = (
 PREFLIGHT_OUTLINE_CHUNK_THRESHOLD = 32
 PREFLIGHT_OUTLINE_CHUNK_SIZE = 8
 QUALITY_PROFILE_DEFS = [
+    {
+        "value": "autonomous",
+        "label": "Autonomous",
+        "summary": "Automatic editing and acceptance checks",
+        "description": "Review and repair chapters automatically, rebuild continuity after edits, and complete only after chapter and whole-book checks pass. No outline approval step. Unresolved issues stop the run with saved diagnostics.",
+    },
     {
         "value": "balanced",
         "label": "Balanced",
@@ -266,6 +293,9 @@ RUN_STAGE_PROGRESS_ORDER = [
     "chapter_compression",
     "chapter_edit",
     "publication_readiness",
+    "autonomous_reconciliation",
+    "autonomous_review",
+    "autonomous_revision",
     "export",
     "completed",
 ]
@@ -1263,7 +1293,10 @@ def _story_brief_form_values(story_brief: dict[str, Any] | None = None) -> dict[
         "story_genre_profile": genre_profile(brief.get("genre_profile")).id,
         "story_setting": str(brief.get("setting", "") or ""),
         "story_tone": str(brief.get("tone", "") or ""),
+        "story_reader_promise": str(brief.get("reader_promise", "") or ""),
         "story_protagonist": str(brief.get("protagonist", "") or ""),
+        "story_protagonist_backstory": str(brief.get("protagonist_backstory", "") or ""),
+        "story_protagonist_misbelief": str(brief.get("protagonist_misbelief", "") or ""),
         "story_supporting_cast": _join_lines(brief.get("supporting_cast", [])),
         "story_antagonist": str(brief.get("antagonist", "") or ""),
         "story_core_conflict": str(brief.get("core_conflict", "") or ""),
@@ -1275,6 +1308,7 @@ def _story_brief_form_values(story_brief: dict[str, Any] | None = None) -> dict[
         "story_style_targets": _join_lines(brief.get("style_targets", [])),
         "story_dialogue_targets": _join_lines(brief.get("dialogue_targets", [])),
         "story_style_avoid": _join_lines(brief.get("style_avoid", [])),
+        "story_revision_priorities": _join_lines(brief.get("revision_priorities", [])),
     }
 
 
@@ -1283,7 +1317,10 @@ def _story_brief_payload(values: dict[str, Any]) -> dict[str, Any]:
         "genre_profile": values.get("story_genre_profile", ""),
         "setting": values.get("story_setting", ""),
         "tone": values.get("story_tone", ""),
+        "reader_promise": values.get("story_reader_promise", ""),
         "protagonist": values.get("story_protagonist", ""),
+        "protagonist_backstory": values.get("story_protagonist_backstory", ""),
+        "protagonist_misbelief": values.get("story_protagonist_misbelief", ""),
         "supporting_cast": values.get("story_supporting_cast", ""),
         "antagonist": values.get("story_antagonist", ""),
         "core_conflict": values.get("story_core_conflict", ""),
@@ -1295,6 +1332,7 @@ def _story_brief_payload(values: dict[str, Any]) -> dict[str, Any]:
         "style_targets": values.get("story_style_targets", ""),
         "dialogue_targets": values.get("story_dialogue_targets", ""),
         "style_avoid": values.get("story_style_avoid", ""),
+        "revision_priorities": values.get("story_revision_priorities", ""),
     }
 
 
@@ -1308,10 +1346,10 @@ def _project_defaults(default_model: str) -> dict[str, Any]:
     return {
         "title": "",
         "premise": "",
-        "desired_word_count": 40000,
-        "requested_chapters": 12,
-        "min_words_per_chapter": 1200,
-        "max_words_per_chapter": 2200,
+        "desired_word_count": 60000,
+        "requested_chapters": 24,
+        "min_words_per_chapter": 2000,
+        "max_words_per_chapter": 3000,
         "preferred_provider_name": "ollama",
         "preferred_model": default_model,
         "notes": "",
@@ -1357,9 +1395,9 @@ def _run_form_values(project: Project, values: dict[str, Any] | None = None) -> 
         "requested_chapters": project.requested_chapters,
         "min_words_per_chapter": project.min_words_per_chapter,
         "max_words_per_chapter": project.max_words_per_chapter,
-        "pause_after_outline": True,
+        "pause_after_outline": False,
         "developmental_rewrite_enabled": True,
-        "quality_profile": "balanced",
+        "quality_profile": "autonomous",
         **_task_routing_form_values(project.task_routing),
     }
     if values:
@@ -1462,6 +1500,8 @@ def _run_preflight_context(
     target_word_count = _positive_int(values.get("target_word_count"), 1)
     pause_after_outline = bool(values.get("pause_after_outline", True))
     profile = _quality_profile_context(values.get("quality_profile"))
+    if profile["value"] == "autonomous":
+        pause_after_outline = False
     developmental_rewrite_enabled = bool(values.get("developmental_rewrite_enabled")) or profile["value"] in {"strict", "publication"}
     task_routing = _task_routing_payload(values)
     route_disclosure = _route_privacy_summary(provider_name, model_name, task_routing)
@@ -1476,8 +1516,17 @@ def _run_preflight_context(
     estimated_model_calls = 1 + outline_chunks + (requested_chapters * 5) + 1 + requested_chapters + 1
     if developmental_rewrite_enabled:
         estimated_model_calls += 1
+    if profile["value"] == "publication":
+        estimated_model_calls += requested_chapters * 2
+    if profile["value"] == "autonomous":
+        estimated_model_calls += requested_chapters * 4 + 1
 
     warnings: list[dict[str, str]] = []
+    if profile["value"] == "autonomous":
+        minimum = requested_chapters * _positive_int(values.get("min_words_per_chapter"), 1)
+        maximum = requested_chapters * _positive_int(values.get("max_words_per_chapter"), target_word_count)
+        if not minimum <= target_word_count <= maximum:
+            warnings.append({"tone": "error", "message": f"Autonomous target must be reachable within the chapter word ranges ({minimum:,}-{maximum:,} words)."})
     if config is None:
         warnings.append({"tone": "error", "message": "The selected provider is not configured."})
     elif not config.is_enabled:
@@ -2433,6 +2482,9 @@ def _run_editorial_next_step_context(run: GenerationRun, chapter_cards: list[dic
     if run.status == RunStatus.COMPLETED:
         title = "Editorial next step"
         body = "Use QA, chapter risks, comparison, and export options to decide whether this draft is ready or needs a targeted rerun."
+        if run.quality_profile == "autonomous":
+            title = "Automatic editorial checks passed"
+            body = "Download the manuscript and automatic quality report. Every final chapter and the whole-book audit passed the configured checks; the report records revisions and the exact manuscript checked."
     elif run.status == RunStatus.FAILED:
         title = "Recovery next step"
         body = run.error_message or "The run stopped before completion. Start with the failure stage, then rerun or regenerate from the safest chapter boundary."
@@ -2765,7 +2817,10 @@ def create_project_ui(
     story_genre_profile: str = Form("sci_fi_thriller"),
     story_setting: str = Form(""),
     story_tone: str = Form(""),
+    story_reader_promise: str = Form(""),
     story_protagonist: str = Form(""),
+    story_protagonist_backstory: str = Form(""),
+    story_protagonist_misbelief: str = Form(""),
     story_supporting_cast: str = Form(""),
     story_antagonist: str = Form(""),
     story_core_conflict: str = Form(""),
@@ -2777,6 +2832,7 @@ def create_project_ui(
     story_style_targets: str = Form(""),
     story_dialogue_targets: str = Form(""),
     story_style_avoid: str = Form(""),
+    story_revision_priorities: str = Form(""),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -2811,7 +2867,10 @@ def create_project_ui(
         "story_genre_profile": story_genre_profile,
         "story_setting": story_setting,
         "story_tone": story_tone,
+        "story_reader_promise": story_reader_promise,
         "story_protagonist": story_protagonist,
+        "story_protagonist_backstory": story_protagonist_backstory,
+        "story_protagonist_misbelief": story_protagonist_misbelief,
         "story_supporting_cast": story_supporting_cast,
         "story_antagonist": story_antagonist,
         "story_core_conflict": story_core_conflict,
@@ -2823,6 +2882,7 @@ def create_project_ui(
         "story_style_targets": story_style_targets,
         "story_dialogue_targets": story_dialogue_targets,
         "story_style_avoid": story_style_avoid,
+        "story_revision_priorities": story_revision_priorities,
     }
     payload_values = {
         "title": title,
@@ -3147,7 +3207,10 @@ def edit_project_ui(
     story_genre_profile: str = Form("sci_fi_thriller"),
     story_setting: str = Form(""),
     story_tone: str = Form(""),
+    story_reader_promise: str = Form(""),
     story_protagonist: str = Form(""),
+    story_protagonist_backstory: str = Form(""),
+    story_protagonist_misbelief: str = Form(""),
     story_supporting_cast: str = Form(""),
     story_antagonist: str = Form(""),
     story_core_conflict: str = Form(""),
@@ -3159,6 +3222,7 @@ def edit_project_ui(
     story_style_targets: str = Form(""),
     story_dialogue_targets: str = Form(""),
     story_style_avoid: str = Form(""),
+    story_revision_priorities: str = Form(""),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -3197,7 +3261,10 @@ def edit_project_ui(
         "story_genre_profile": story_genre_profile,
         "story_setting": story_setting,
         "story_tone": story_tone,
+        "story_reader_promise": story_reader_promise,
         "story_protagonist": story_protagonist,
+        "story_protagonist_backstory": story_protagonist_backstory,
+        "story_protagonist_misbelief": story_protagonist_misbelief,
         "story_supporting_cast": story_supporting_cast,
         "story_antagonist": story_antagonist,
         "story_core_conflict": story_core_conflict,
@@ -3209,6 +3276,7 @@ def edit_project_ui(
         "story_style_targets": story_style_targets,
         "story_dialogue_targets": story_dialogue_targets,
         "story_style_avoid": story_style_avoid,
+        "story_revision_priorities": story_revision_priorities,
     }
     story_brief_payload = _story_brief_payload(raw_form_values)
     story_brief_payload["approved_canon"] = _project_canon_entries(project)
@@ -3342,7 +3410,7 @@ def create_run_ui(
     max_words_per_chapter: str = Form(""),
     pause_after_outline: str | None = Form(None),
     developmental_rewrite_enabled: str | None = Form(None),
-    quality_profile: str = Form("balanced"),
+    quality_profile: str = Form("autonomous"),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):

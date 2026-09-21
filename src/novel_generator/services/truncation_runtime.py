@@ -17,6 +17,7 @@ _PROSE_STAGES = frozenset(
         "chapter_humanization",
         "chapter_compression",
         "chapter_edit",
+        "autonomous_revision",
     }
 )
 _TRUNCATION_REASONS = frozenset(

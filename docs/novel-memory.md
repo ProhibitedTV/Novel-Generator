@@ -28,6 +28,13 @@ The horizon does not invent new canon or alter the outline. It is a temporary ca
 
 ### Adaptive novel-length pacing
 
+Each chapter prompt also ends with a compact boundary reminder: its current objective, stopping
+state and hook trigger, and the next and final chapters' reserved objectives. This addresses local
+models that mistake the whole-book ending promise or a hook's `next_problem` for events to finish
+inside the current chapter. Planning, drafting, expansion, revision, critique, and editing receive
+the reminder; critique is instructed to flag premature payoffs. It remains a prompt safeguard,
+not a deterministic proof of temporal consistency. Review the generated prose and final QA.
+
 Fixed per-chapter minimums are not enough to guarantee a full-length manuscript. If early chapters consistently land near the minimum, the book can finish tens of thousands of words below its stated target even though every individual chapter passed validation.
 
 The narrative horizon therefore calculates the manuscript's live pace before each chapter: completed words, remaining words, remaining chapters, required average chapter length from this point forward, an adaptive target clamped to the configured chapter range, and whether the overall target is still reachable at the configured maximum.

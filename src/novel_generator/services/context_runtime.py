@@ -222,6 +222,63 @@ def _inject_narrative_horizon(
     return rewritten if injected else messages
 
 
+def _inject_chapter_scope(messages: list[dict[str, str]], run: Any, chapter_number: int) -> list[dict[str, str]]:
+    """Keep the current scene boundary salient after the much larger book-level context."""
+    if run is None or chapter_number <= 0:
+        return messages
+    outline = list(getattr(run, "outline", None) or [])
+    current = next((item for item in outline if item.get("chapter_number") == chapter_number), None)
+    if current is None:
+        return messages
+    total = int(getattr(run, "requested_chapters", 0) or len(outline))
+    future = [item for item in outline if item.get("chapter_number", 0) > chapter_number]
+    # The next chapter and the final payoff are sufficient reminders even in a 64-chapter book.
+    deferred = future[:1]
+    if len(future) > 1:
+        deferred.append(future[-1])
+    brief = getattr(getattr(run, "project", None), "story_brief", None) or {}
+    packet = {
+        "chapter": chapter_number,
+        "total_chapters": total,
+        "current_objective": str(current.get("objective", ""))[:600],
+        "stop_at_this_state": str(current.get("ending_state", ""))[:600],
+        "ending_trigger": str((current.get("concrete_ending_hook") or {}).get("trigger", ""))[:400],
+        "author_character_facts": [str(brief.get("protagonist", ""))[:300],
+                                   *[str(item)[:300] for item in (brief.get("supporting_cast") or [])[:8]]],
+        "author_world_rules": [str(item)[:300] for item in (brief.get("world_rules") or [])[:8]],
+        "reserved_for_later": [
+            {"chapter": item.get("chapter_number"), "objective": str(item.get("objective", ""))[:600]}
+            for item in deferred
+        ],
+    }
+    instruction = (
+        "\n\nCurrent chapter boundary (applies to planning, prose, and critique):\n"
+        + json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
+        + "\nProduce only the current chapter's events. Stop at its assigned ending state and trigger. "
+        "The hook's next_problem is a question left for later, not an instruction to solve it now. "
+        "Book-level ending targets describe the whole novel, not the task for every chapter. "
+        "Preserve author_character_facts and author_world_rules exactly in substance; do not invent replacement occupations or histories. "
+        "Do not append a synopsis, epilogue, or time jump that enacts reserved_for_later. "
+        "During expansion add depth inside the current events, not later chapters. "
+        "During critique mark premature later payoffs or a repeated already-completed event as revision_required "
+        "and explain the boundary violation. In the final chapter deliver the assigned resolution and aftermath."
+    )
+    if chapter_number == total:
+        instruction += (
+            "\nFINAL CHAPTER: there is no later chapter to supply missing resolution. "
+            "The author's ending target takes precedence if the outline stopping state only sets up "
+            "a confrontation. Resolve the central conflict in actual scenes and show its consequences "
+            "and aftermath; do not end on a teaser for that resolution. Author ending target: "
+            + str(brief.get("ending_target") or (getattr(run, "story_bible", None) or {}).get("ending_promise") or "Resolve the central conflict.")
+        )
+    rewritten = [dict(message) for message in messages]
+    for item in reversed(rewritten):
+        if item.get("role") == "user":
+            item["content"] = item.get("content", "") + instruction
+            return rewritten
+    return messages
+
+
 def _wrap_builder(
     builder: Callable[..., list[dict[str, str]]],
     *,
@@ -253,7 +310,7 @@ def _wrap_builder(
                     chapter_number=_chapter_number_for_bound(bound),
                     lookahead=horizon_lookahead,
                 )
-            return messages
+            return _inject_chapter_scope(messages, _run_for_bound(bound), _chapter_number_for_bound(bound))
         except Exception:
             # Context shaping is an optimization, never a reason to fail a generation run.
             return messages

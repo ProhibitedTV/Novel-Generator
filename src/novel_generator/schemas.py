@@ -10,7 +10,7 @@ from .models import ChapterStatus, RunStatus
 from .services.genre_profiles import DEFAULT_GENRE_PROFILE, GENRE_PROFILES
 
 
-QUALITY_PROFILE_VALUES = {"draft", "balanced", "strict", "publication"}
+QUALITY_PROFILE_VALUES = {"draft", "balanced", "strict", "publication", "autonomous"}
 
 ALLOWED_CHAPTER_MODES = {
     "investigation",
@@ -94,7 +94,7 @@ def _validate_genre_profile(value: Any) -> str:
 def _validate_quality_profile(value: Any) -> str:
     key = str(value or "balanced").strip().lower().replace("-", "_").replace(" ", "_")
     if key not in QUALITY_PROFILE_VALUES:
-        raise ValueError("Choose draft, balanced, strict, or publication.")
+        raise ValueError("Choose draft, balanced, strict, publication, or autonomous.")
     return key
 
 
@@ -142,7 +142,10 @@ class StoryBrief(BaseModel):
     genre_profile: str = DEFAULT_GENRE_PROFILE
     setting: str = ""
     tone: str = ""
+    reader_promise: str = ""
     protagonist: str = ""
+    protagonist_backstory: str = ""
+    protagonist_misbelief: str = ""
     supporting_cast: list[str] = Field(default_factory=list)
     antagonist: str = ""
     core_conflict: str = ""
@@ -154,6 +157,7 @@ class StoryBrief(BaseModel):
     style_targets: list[str] = Field(default_factory=list)
     dialogue_targets: list[str] = Field(default_factory=list)
     style_avoid: list[str] = Field(default_factory=list)
+    revision_priorities: list[str] = Field(default_factory=list)
     approved_canon: list[CanonicalEntity] = Field(default_factory=list)
 
     @field_validator(
@@ -164,6 +168,7 @@ class StoryBrief(BaseModel):
         "style_targets",
         "dialogue_targets",
         "style_avoid",
+        "revision_priorities",
         mode="before",
     )
     @classmethod
@@ -173,7 +178,10 @@ class StoryBrief(BaseModel):
     @field_validator(
         "setting",
         "tone",
+        "reader_promise",
         "protagonist",
+        "protagonist_backstory",
+        "protagonist_misbelief",
         "antagonist",
         "core_conflict",
         "ending_target",
@@ -612,6 +620,8 @@ class ManuscriptQaReport(BaseModel):
     genre_contract_notes: list[str] = Field(default_factory=list)
     continuity_bible_findings: list[str] = Field(default_factory=list)
     continuity_bible_table: list[ContinuityBibleRow] = Field(default_factory=list)
+    revision_pass_plan: list[str] = Field(default_factory=list)
+    beta_reader_questions: list[str] = Field(default_factory=list)
     publication_readiness_scores: dict[str, int] = Field(default_factory=dict)
     publication_readiness_label: str = ""
     publication_readiness_summary: str = ""
@@ -643,6 +653,8 @@ class ManuscriptQaReport(BaseModel):
         "story_turn_quality_notes",
         "genre_contract_notes",
         "continuity_bible_findings",
+        "revision_pass_plan",
+        "beta_reader_questions",
         mode="before",
     )
     @classmethod
@@ -792,6 +804,8 @@ class TaskRouteOverride(BaseModel):
 
 
 class TaskRouting(BaseModel):
+    autonomous_review: TaskRouteOverride | None = None
+    autonomous_revision: TaskRouteOverride | None = None
     story_bible: TaskRouteOverride | None = None
     outline: TaskRouteOverride | None = None
     chapter_plan: TaskRouteOverride | None = None

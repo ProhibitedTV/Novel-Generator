@@ -267,10 +267,14 @@ def test_project_new_page_renders_story_brief_and_model_picker_hooks(client, mon
     assert 'data-model-choice' in response.text
     assert 'name="story_genre_profile"' in response.text
     assert 'name="story_setting"' in response.text
+    assert 'name="story_reader_promise"' in response.text
+    assert 'name="story_protagonist_backstory"' in response.text
+    assert 'name="story_protagonist_misbelief"' in response.text
     assert 'name="story_style_targets"' in response.text
     assert 'name="story_dialogue_targets"' in response.text
     assert 'name="story_style_avoid"' in response.text
     assert 'name="story_style_reference"' in response.text
+    assert 'name="story_revision_priorities"' in response.text
     assert "What happens after this" in response.text
     assert "Setup progress" in response.text
     assert "Runs locally on your configured Ollama host." in response.text
@@ -287,6 +291,7 @@ def test_project_detail_renders_quality_profile_controls_and_preflight(client, m
     assert 'data-quality-profile-control' in response.text
     assert 'name="quality_profile"' in response.text
     assert 'value="balanced"' in response.text
+    assert 'value="autonomous"' in response.text
     assert 'value="publication"' in response.text
     assert "Highest-cost editorial path" in response.text
     assert "Run preflight" in response.text
@@ -297,7 +302,7 @@ def test_project_detail_renders_quality_profile_controls_and_preflight(client, m
     assert 'id="edit-project"' in response.text
     assert "Full project brief" in response.text
     assert "Estimated model calls" in response.text
-    assert "29 minimum" in response.text
+    assert "46 minimum" in response.text
     assert "Stage attempt ledger" in response.text
     assert "Checkpoint resume" in response.text
     assert 'data-run-queue-form' in response.text
@@ -318,7 +323,7 @@ def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch)
     assert response.status_code == 200
     assert "64 chapters will use 8 outline chunks" in response.text
     assert "High chapter counts make checkpoint resume" in response.text
-    assert "396 minimum" in response.text
+    assert "653 minimum" in response.text
 
 
 def test_project_detail_preflight_chunks_32_chapter_runs(client, monkeypatch) -> None:
@@ -329,7 +334,7 @@ def test_project_detail_preflight_chunks_32_chapter_runs(client, monkeypatch) ->
 
     assert response.status_code == 200
     assert "32 chapters will use 4 outline chunks" in response.text
-    assert "200 minimum" in response.text
+    assert "329 minimum" in response.text
 
 
 def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:
@@ -359,7 +364,10 @@ def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatc
             "story_genre_profile": "mystery",
             "story_setting": "Orbital city",
             "story_tone": "claustrophobic",
+            "story_reader_promise": "A tense consent thriller with emotional horror.",
             "story_protagonist": "Nora",
+            "story_protagonist_backstory": "Nora lost a sibling to a softened memory.",
+            "story_protagonist_misbelief": "Safety requires obedience.",
             "story_supporting_cast": "Jun\nLiora",
             "story_antagonist": "Watcher lattice",
             "story_core_conflict": "Safety versus consent",
@@ -371,6 +379,7 @@ def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatc
             "story_dialogue_targets": "subtext before confession",
             "story_style_avoid": "weight of everything",
             "story_style_reference": "Short clipped sentences around wet stone.",
+            "story_revision_priorities": "Check whether Nora's misbelief changes on page.",
         },
     )
 
@@ -378,11 +387,15 @@ def test_project_edit_validation_preserves_story_brief_fields(client, monkeypatc
     assert "Max words per chapter must be greater than or equal to min words per chapter." in response.text
     assert '<option value="mystery" selected>' in response.text
     assert 'value="Orbital city"' in response.text
+    assert "A tense consent thriller with emotional horror." in response.text
+    assert "Nora lost a sibling to a softened memory." in response.text
+    assert "Safety requires obedience." in response.text
     assert "Looping chapter restarts" in response.text
     assert "taut lyric pressure" in response.text
     assert "subtext before confession" in response.text
     assert "weight of everything" in response.text
     assert "Short clipped sentences around wet stone." in response.text
+    assert "Check whether Nora&#39;s misbelief changes on page." in response.text
 
 
 def test_project_edit_saves_prose_voice_fields(client, monkeypatch) -> None:
@@ -403,7 +416,10 @@ def test_project_edit_saves_prose_voice_fields(client, monkeypatch) -> None:
             "story_genre_profile": "sci_fi_thriller",
             "story_setting": "Orbital city",
             "story_tone": "claustrophobic",
+            "story_reader_promise": "A tense consent thriller with emotional horror.",
             "story_protagonist": "Nora",
+            "story_protagonist_backstory": "Nora lost a sibling to a softened memory.",
+            "story_protagonist_misbelief": "Safety requires obedience.",
             "story_supporting_cast": "Jun",
             "story_antagonist": "Watcher lattice",
             "story_core_conflict": "Safety versus consent",
@@ -415,6 +431,7 @@ def test_project_edit_saves_prose_voice_fields(client, monkeypatch) -> None:
             "story_dialogue_targets": "subtext before confession",
             "story_style_avoid": "weight of everything",
             "story_style_reference": "Short clipped sentences around wet stone.",
+            "story_revision_priorities": "Check whether Nora's misbelief changes on page.\nCut repeated system warnings.",
         },
         follow_redirects=False,
     )
@@ -423,10 +440,17 @@ def test_project_edit_saves_prose_voice_fields(client, monkeypatch) -> None:
     with get_session_factory()() as session:
         project = get_project(session, project_id)
         assert project is not None
+        assert project.story_brief["reader_promise"] == "A tense consent thriller with emotional horror."
+        assert project.story_brief["protagonist_backstory"] == "Nora lost a sibling to a softened memory."
+        assert project.story_brief["protagonist_misbelief"] == "Safety requires obedience."
         assert project.story_brief["style_targets"] == ["taut lyric pressure", "concrete sensory dread"]
         assert project.story_brief["dialogue_targets"] == ["subtext before confession"]
         assert project.story_brief["style_avoid"] == ["weight of everything"]
         assert project.story_brief["style_reference"] == "Short clipped sentences around wet stone."
+        assert project.story_brief["revision_priorities"] == [
+            "Check whether Nora's misbelief changes on page.",
+            "Cut repeated system warnings.",
+        ]
 
 
 def test_provider_settings_validation_and_live_actions_render(client, monkeypatch) -> None:
@@ -608,6 +632,19 @@ def test_run_detail_shows_quality_profile(client, monkeypatch) -> None:
     assert response.status_code == 200
     assert "Quality profile" in response.text
     assert "Strict - Most editorial scrutiny" in response.text
+
+
+def test_completed_autonomous_run_shows_automatic_acceptance(client, monkeypatch) -> None:
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run(quality_profile="autonomous")
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        run.status = RunStatus.COMPLETED
+        session.commit()
+    response = client.get(f"/runs/{run_id}")
+    assert response.status_code == 200
+    assert "Automatic editorial checks passed" in response.text
+    assert "Automatic editing" in response.text
 
 
 def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> None:

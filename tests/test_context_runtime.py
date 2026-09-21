@@ -5,12 +5,44 @@ from types import SimpleNamespace
 import pytest
 
 from novel_generator.services.context_runtime import (
+    _inject_chapter_scope,
     _configured_context_tokens,
     _message_telemetry,
     _persist_provider_metrics,
     _provider_metrics,
     _wrap_supervised_provider_chat,
 )
+
+
+def test_chapter_boundary_is_last_and_keeps_future_finale_deferred():
+    run = SimpleNamespace(requested_chapters=64, outline=[
+        {"chapter_number": number, "objective": f"Objective {number}",
+         "ending_state": f"State {number}", "concrete_ending_hook": {"trigger": f"Trigger {number}"}}
+        for number in range(1, 65)
+    ])
+    messages = [{"role": "system", "content": "Return prose."}, {"role": "user", "content": "Original prompt"}]
+    rewritten = _inject_chapter_scope(messages, run, 1)
+    assert messages[1]["content"] == "Original prompt"
+    text = rewritten[-1]["content"]
+    assert '"stop_at_this_state":"State 1"' in text
+    assert '"chapter":2,"objective":"Objective 2"' in text
+    assert '"chapter":64,"objective":"Objective 64"' in text
+    assert '"objective":"Objective 3"' not in text
+    assert "not an instruction to solve it now" in text
+    assert len(text) < 2500
+
+
+def test_final_chapter_boundary_does_not_defer_its_own_resolution():
+    run = SimpleNamespace(project=SimpleNamespace(story_brief={
+        "supporting_cast": ["Ivo Chen, retired ferryman"], "world_rules": ["The ledger is paper"],
+    }), requested_chapters=1, outline=[
+        {"chapter_number": 1, "objective": "Prove the fraud", "ending_state": "District saved"},
+    ])
+    text = _inject_chapter_scope([{"role": "user", "content": "Write"}], run, 1)[0]["content"]
+    assert '"reserved_for_later":[]' in text
+    assert '"stop_at_this_state":"District saved"' in text
+    assert "Ivo Chen, retired ferryman" in text
+    assert "The ledger is paper" in text
 
 
 def test_message_telemetry_records_safe_prompt_size_estimates() -> None:
@@ -140,6 +172,20 @@ def test_supervised_wrapper_merges_telemetry_without_storing_prompt_content() ->
     assert seen["estimated_input_tokens"] > 0
     assert seen["configured_context_tokens"] == 32768
     assert "SECRET STORY CONTENT" not in str(seen)
+
+
+def test_final_chapter_boundary_requires_author_ending_even_if_outline_is_setup():
+    from novel_generator.services.context_runtime import _inject_chapter_scope
+    run = SimpleNamespace(
+        requested_chapters=2,
+        project=SimpleNamespace(story_brief={"ending_target": "Win the hearing, lose her job, show aftermath."}),
+        outline=[{"chapter_number": number, "objective": "Find evidence", "ending_state": "Hearing about to start"} for number in (1, 2)],
+    )
+    messages = [{"role": "user", "content": "Write this chapter."}]
+    assert "FINAL CHAPTER:" not in _inject_chapter_scope(messages, run, 1)[0]["content"]
+    final = _inject_chapter_scope(messages, run, 2)[0]["content"]
+    assert "FINAL CHAPTER:" in final
+    assert "Win the hearing, lose her job, show aftermath." in final
 
 
 def test_supervised_wrapper_propagates_provider_failure_without_duplicate_call() -> None:

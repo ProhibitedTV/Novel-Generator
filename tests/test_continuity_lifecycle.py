@@ -82,3 +82,32 @@ def test_rephrased_resolved_thread_can_close_substantive_open_thread() -> None:
     cleaned = apply_continuity_lifecycle(merged, update)
 
     assert cleaned.open_threads == []
+
+
+def test_omitted_snapshot_fields_preserve_live_debt_across_checkpoint_replay() -> None:
+    update = ChapterContinuityUpdate(
+        chapter_outcome="The inquiry continues.", current_patch_status="Public.",
+        world_state="The inquiry is underway.", timeline_entry="Chapter 10: the inquiry continues.",
+    )
+    checkpoint = update.model_dump(exclude_unset=True)
+    replayed = ChapterContinuityUpdate.model_validate(checkpoint)
+    merged = _merged_ledger()
+    cleaned = apply_continuity_lifecycle(merged, replayed)
+
+    assert cleaned.open_promises_by_name == merged.open_promises_by_name
+    assert cleaned.memory_damage == merged.memory_damage
+    assert cleaned.trust_fractures == merged.trust_fractures
+    assert cleaned.emotional_open_loops == merged.emotional_open_loops
+    assert cleaned.civilian_pressure_points == merged.civilian_pressure_points
+    assert cleaned.open_threads == merged.open_threads[1:]
+
+
+def test_explicit_resolution_does_not_clear_other_omitted_snapshot_fields() -> None:
+    update = ChapterContinuityUpdate(
+        chapter_outcome="Iris forgives Tarin.", current_patch_status="Public.",
+        world_state="The inquiry continues.", timeline_entry="Chapter 10: forgiveness.",
+        emotional_open_loops={},
+    )
+    cleaned = apply_continuity_lifecycle(_merged_ledger(), update)
+    assert cleaned.emotional_open_loops == {}
+    assert cleaned.open_promises_by_name == _merged_ledger().open_promises_by_name

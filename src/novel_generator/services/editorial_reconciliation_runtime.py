@@ -193,7 +193,7 @@ def reconcile_developmental_continuity(
             if continuity_update.timeline != ledger_after.timeline:
                 continuity_update.timeline = ledger_after.timeline
             pipeline._apply_continuity_canon_warnings(chapter, continuity_update)
-            chapter.continuity_update = continuity_update.model_dump()
+            chapter.continuity_update = continuity_update.model_dump(exclude_unset=True)
             ledger = ledger_after
 
             if continuity_refreshed:

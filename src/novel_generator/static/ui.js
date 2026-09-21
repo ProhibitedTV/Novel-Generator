@@ -101,7 +101,7 @@ function setupRunLengthControls(root) {
     };
 
     const outlineChunksFor = (chapters) => {
-      if (chapters <= outlineThreshold) {
+      if (chapters < outlineThreshold) {
         return 1;
       }
       return Math.max(1, Math.ceil(chapters / outlineChunkSize));
@@ -115,7 +115,9 @@ function setupRunLengthControls(root) {
       const outlineChunks = outlineChunksFor(chapters);
       const developmentalRewrite = form.querySelector("[data-developmental-rewrite-toggle]")?.checked ? 1 : 0;
       const finalEditCalls = chapters + 1;
-      const minimumCalls = 1 + outlineChunks + chapters * 5 + 1 + developmentalRewrite + finalEditCalls;
+      const profile = form.querySelector('[name="quality_profile"]:checked')?.value;
+      const additionalCalls = profile === "autonomous" ? chapters * 4 + 1 : profile === "publication" ? chapters * 2 : 0;
+      const minimumCalls = 1 + outlineChunks + chapters * 5 + 1 + developmentalRewrite + finalEditCalls + additionalCalls;
       const average = chapters > 0 && targetWords > 0 ? Math.round(targetWords / chapters) : 0;
 
       if (outlineNode) {
@@ -148,7 +150,7 @@ function setupRunLengthControls(root) {
       });
     });
 
-    [chapterInput, targetInput, minInput, maxInput, form.querySelector("[data-developmental-rewrite-toggle]")].forEach((node) => {
+    [chapterInput, targetInput, minInput, maxInput, form.querySelector("[data-developmental-rewrite-toggle]"), ...form.querySelectorAll('[name="quality_profile"]')].forEach((node) => {
       node?.addEventListener("input", sync);
       node?.addEventListener("change", sync);
     });
@@ -185,6 +187,7 @@ function setupQualityProfileControls(root) {
     const options = Array.from(control.querySelectorAll("[data-quality-profile-option]"));
     const note = control.querySelector("[data-quality-profile-note]");
     const rewriteToggle = form?.querySelector("[data-developmental-rewrite-toggle]");
+    const outlineToggle = form?.querySelector('input[name="pause_after_outline"]');
 
     const sync = () => {
       const selected = options.find((option) => option.checked);
@@ -195,8 +198,12 @@ function setupQualityProfileControls(root) {
       if (note && selected) {
         note.textContent = selected.dataset.profileNote || "";
       }
-      if (rewriteToggle && (selected?.value === "strict" || selected?.value === "publication")) {
+      if (rewriteToggle && ["strict", "publication", "autonomous"].includes(selected?.value)) {
         rewriteToggle.checked = true;
+      }
+      if (outlineToggle) {
+        outlineToggle.disabled = selected?.value === "autonomous";
+        if (outlineToggle.disabled) outlineToggle.checked = false;
       }
     };
 

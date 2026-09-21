@@ -228,6 +228,21 @@ Both entrypoints automatically migrate the database to the current Alembic head 
 
 ## First-Launch Checklist
 
+For a reproducible real-model check using the worker's complete generation safeguards, run:
+
+```bash
+python -m novel_generator.services.local_verification --model qwen2.5:7b
+```
+
+Use an exact installed Ollama model name. This writes a fresh database, Markdown/DOCX manuscript,
+QA report, and `report.json` under a new `artifacts/local-verification-*` directory. It does not use
+your normal project database or change `.env`. The default is a three-chapter, 1,500-word smoke
+test using automatic editing; `--chapters 24 --words-per-chapter 2500 --profile autonomous` exercises a 60,000-word target.
+Long runs can take hours. `--base-url`, `--context-tokens`, and `--output-dir` are configurable;
+the output directory must not already exist. A zero exit code means all requested chapters,
+continuity checkpoints, and export formats were produced. Inspect the report's actual word count,
+fallback events, final QA, and prose separately before judging consistency or novel-length success.
+
 Before starting a long novel run:
 
 1. Confirm `GET /api/health` succeeds.
@@ -284,10 +299,11 @@ If you know the loaded model's real context size, set `OPENAI_COMPATIBLE_CONTEXT
 ## First Run
 
 1. Open the dashboard and create a project with a premise, target word count, chapter count, genre, and model.
-2. Confirm provider health before queueing. For high chapter counts, use outline approval so you can review the book shape before drafting starts.
+2. Confirm provider health before queueing. Autonomous mode runs without outline approval; other profiles can pause for outline review.
 3. Choose a quality profile:
    - `draft`: fastest route to a complete manuscript. Best for exploring a premise.
-   - `balanced`: default behavior. Standard QA, developmental planning, targeted revisions, and final chapter editing.
+   - `autonomous`: UI default. Automatically repairs chapters, rebuilds continuity after revisions, and withholds completion and final manuscript exports until chapter and whole-book checks pass.
+   - `balanced`: API compatibility default. Standard QA, developmental planning, targeted revisions, and final chapter editing.
    - `strict`: stronger revision thresholds for a more conservative editorial pass.
    - `publication`: highest-cost path. Forces outline approval, developmental rewrite, character humanization, prose compression, final editing, and a final publication-readiness QA gate.
 4. Keep the worker running. The run page shows current stage, last event, provider route, chapter progress, word progress, attempts, artifacts, and recovery guidance.
@@ -296,10 +312,14 @@ If you know the loaded model's real context size, set `OPENAI_COMPATIBLE_CONTEXT
 
 ## Quality Profiles
 
+See [Unattended novel generation](docs/autonomous-editing.md) for automatic
+editing, local reviewer routing, repair limits, and acceptance reports.
+
 The profiles trade speed for editorial pressure.
 
 | Profile | Best for | Behavior |
 | --- | --- | --- |
+| `autonomous` | Unattended generation and editing | Evidence-based reviews, bounded automatic repairs, continuity reconstruction, final chapter and book acceptance checks. Unresolved failures preserve work and diagnostics without exporting a completed manuscript. |
 | `draft` | Fast exploration | Defers non-blocking polish so long runs reach a complete manuscript sooner. |
 | `balanced` | Normal complete drafts | Uses standard chapter QA, developmental rewrite planning, targeted revision waves, and final editing. |
 | `strict` | More cautious drafts | Tightens revision triggers and enables developmental rewrite by default. |

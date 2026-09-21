@@ -11,6 +11,25 @@ from novel_generator.dependencies import get_session_factory, get_templates
 from novel_generator.settings import get_settings
 
 
+def test_first_launch_creates_sqlite_parent_directory(tmp_path: Path, monkeypatch) -> None:
+    from novel_generator.bootstrap import run_migrations
+
+    database = tmp_path / "new" / "data" / "novel.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database.as_posix()}")
+    monkeypatch.setenv("ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    get_settings.cache_clear()
+    try:
+        run_migrations()
+        assert database.is_file()
+        engine = sa.create_engine(f"sqlite:///{database.as_posix()}")
+        try:
+            assert "generation_runs" in sa.inspect(engine).get_table_names()
+        finally:
+            engine.dispose()
+    finally:
+        get_settings.cache_clear()
+
+
 def _alembic_config() -> Config:
     project_root = Path(__file__).resolve().parents[1]
     config = Config(str(project_root / "alembic.ini"))

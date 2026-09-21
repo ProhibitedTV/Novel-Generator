@@ -1511,6 +1511,11 @@ def _approved_proper_nouns(
     ledger = continuity_ledger if isinstance(continuity_ledger, dict) else continuity_ledger.model_dump()
 
     approved: set[str] = set()
+    # Prose naturally alternates full names, given names, and surnames. The candidate
+    # detector emits each component too; known cast members must approve those forms.
+    for member in [*(bible.get("cast") or []), *(bible.get("character_agendas") or [])]:
+        for part in re.findall(r"\b[A-Z][A-Za-z0-9-]*\b", str(member.get("name", ""))):
+            approved.add(_normalize_entity_key(part))
     for entity in [*(bible.get("canon_registry") or []), *(ledger.get("active_entities") or [])]:
         for term in _canon_terms(entity):
             if term:
@@ -2538,6 +2543,14 @@ def render_qa_report_markdown(report: ManuscriptQaReport) -> str:
         "## Story Turn Quality",
         "",
         *([f"- {item}" for item in report.story_turn_quality_notes] or ["- No story-turn quality notes recorded."]),
+        "",
+        "## Revision Pass Plan",
+        "",
+        *([f"- {item}" for item in report.revision_pass_plan] or ["- No revision pass plan recorded."]),
+        "",
+        "## Beta Reader Questions",
+        "",
+        *([f"- {item}" for item in report.beta_reader_questions] or ["- No beta reader questions recorded."]),
         "",
         "## Genre Contract",
         "",

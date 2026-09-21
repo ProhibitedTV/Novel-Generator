@@ -24,6 +24,12 @@ def test_stage_schema_uses_real_pydantic_contract() -> None:
     assert response_schema_for_stage("chapter_draft") is None
 
 
+def test_continuity_schema_requires_explicit_live_snapshots() -> None:
+    schema = response_schema_for_stage("continuity_update")
+    assert {"open_threads", "open_promises_by_name", "trust_fractures", "memory_damage",
+            "civilian_pressure_points", "emotional_open_loops"} <= set(schema["required"])
+
+
 def test_schema_marker_round_trips_and_is_removed_from_provider_messages() -> None:
     marker = make_schema_marker("chapter_critique")
     assert marker is not None
