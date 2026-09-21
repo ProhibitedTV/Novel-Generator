@@ -12,6 +12,8 @@ from .provider_errors import ProviderError
 
 
 TASK_ROUTE_STAGES: list[dict[str, str]] = [
+    {"id": "autonomous_review", "label": "Automatic editorial reviewer"},
+    {"id": "autonomous_revision", "label": "Automatic editorial repair"},
     {"id": "story_bible", "label": "Story bible"},
     {"id": "outline", "label": "Outline"},
     {"id": "chapter_plan", "label": "Chapter plan"},

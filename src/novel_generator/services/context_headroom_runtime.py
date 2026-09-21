@@ -20,6 +20,7 @@ _PROSE_STAGES = frozenset(
         "chapter_humanization",
         "chapter_compression",
         "chapter_edit",
+        "autonomous_revision",
     }
 )
 _LARGE_STRUCTURED_STAGES = frozenset(
@@ -29,6 +30,7 @@ _LARGE_STRUCTURED_STAGES = frozenset(
         "manuscript_qa",
         "publication_readiness",
         "developmental_rewrite",
+        "autonomous_review",
     }
 )
 _MEDIUM_OUTPUT_STAGES = frozenset({"story_bible"})

@@ -61,8 +61,8 @@
 
       <div class="form-section story-brief-shell">
         <div class="section-header-copy">
-          <h3>Story brief</h3>
-          <p>Optional, but high-leverage. These signals help the structured outline and continuity ledger produce a sharper first draft.</p>
+          <h3>Story engine</h3>
+          <p>Give the generator the same anchors a novelist would use before drafting: promise, pressure, character, conflict, and ending.</p>
         </div>
         <div class="grid compact">
           <label>
@@ -84,12 +84,12 @@
             <input type="text" name="story_tone" value="{{ form_values.story_tone }}" placeholder="Luminous, tense, morally complex sci-fi">
           </label>
           <label>
-            Protagonist
-            <input type="text" name="story_protagonist" value="{{ form_values.story_protagonist }}" placeholder="Mara, a firmware engineer haunted by missing memories">
+            Reader promise
+            <input type="text" name="story_reader_promise" value="{{ form_values.story_reader_promise }}" placeholder="What experience should the reader keep turning pages for?">
           </label>
           <label>
-            Antagonist
-            <input type="text" name="story_antagonist" value="{{ form_values.story_antagonist }}" placeholder="A council faction using peace patches to preserve order">
+            Protagonist
+            <input type="text" name="story_protagonist" value="{{ form_values.story_protagonist }}" placeholder="Mara, a firmware engineer haunted by missing memories">
           </label>
         </div>
 
@@ -103,47 +103,71 @@
           <textarea name="story_ending_target" rows="3" placeholder="Describe the real ending you want the outline to build toward.">{{ form_values.story_ending_target }}</textarea>
         </label>
 
-        <div class="grid compact">
-          <label>
-            Supporting cast
-            <textarea name="story_supporting_cast" rows="5" placeholder="One character per line">{{ form_values.story_supporting_cast }}</textarea>
-          </label>
-          <label>
-            World rules
-            <textarea name="story_world_rules" rows="5" placeholder="One rule or constraint per line">{{ form_values.story_world_rules }}</textarea>
-          </label>
-          <label>
-            Must include
-            <textarea name="story_must_include" rows="5" placeholder="Images, scenes, reveals, or themes you want to keep">{{ form_values.story_must_include }}</textarea>
-          </label>
-          <label>
-            Avoid
-            <textarea name="story_avoid" rows="5" placeholder="Cliches, plot moves, or tonal misses to steer away from">{{ form_values.story_avoid }}</textarea>
-          </label>
-        </div>
+        <details class="compact-details">
+          <summary>Character engine</summary>
+          <div class="grid compact">
+            <label>
+              Protagonist backstory
+              <textarea name="story_protagonist_backstory" rows="4" placeholder="The formative wound, missing truth, or old pressure behind the opening choice">{{ form_values.story_protagonist_backstory }}</textarea>
+            </label>
+            <label>
+              Protagonist misbelief
+              <textarea name="story_protagonist_misbelief" rows="4" placeholder="The flawed belief the plot must challenge">{{ form_values.story_protagonist_misbelief }}</textarea>
+            </label>
+            <label>
+              Antagonist
+              <input type="text" name="story_antagonist" value="{{ form_values.story_antagonist }}" placeholder="A council faction using peace patches to preserve order">
+            </label>
+            <label>
+              Supporting cast
+              <textarea name="story_supporting_cast" rows="5" placeholder="One character per line">{{ form_values.story_supporting_cast }}</textarea>
+            </label>
+          </div>
+        </details>
 
-        <div class="section-header-copy">
-          <h3>Prose and voice</h3>
-          <p>Optional style signals for sentence rhythm, dialogue pressure, sensory texture, and prose habits to avoid.</p>
-        </div>
-        <div class="grid compact">
-          <label>
-            Style targets
-            <textarea name="story_style_targets" rows="5" placeholder="One prose trait per line">{{ form_values.story_style_targets }}</textarea>
-          </label>
-          <label>
-            Dialogue targets
-            <textarea name="story_dialogue_targets" rows="5" placeholder="One dialogue trait per line">{{ form_values.story_dialogue_targets }}</textarea>
-          </label>
-          <label>
-            Style avoid
-            <textarea name="story_style_avoid" rows="5" placeholder="One prose habit or phrase per line">{{ form_values.story_style_avoid }}</textarea>
-          </label>
-          <label>
-            Style reference
-            <textarea name="story_style_reference" rows="5" placeholder="Paste a short excerpt or style notes">{{ form_values.story_style_reference }}</textarea>
-          </label>
-        </div>
+        <details class="compact-details">
+          <summary>World and guardrails</summary>
+          <div class="grid compact">
+            <label>
+              World rules
+              <textarea name="story_world_rules" rows="5" placeholder="One rule or constraint per line">{{ form_values.story_world_rules }}</textarea>
+            </label>
+            <label>
+              Must include
+              <textarea name="story_must_include" rows="5" placeholder="Images, scenes, reveals, or themes you want to keep">{{ form_values.story_must_include }}</textarea>
+            </label>
+            <label>
+              Avoid
+              <textarea name="story_avoid" rows="5" placeholder="Cliches, plot moves, or tonal misses to steer away from">{{ form_values.story_avoid }}</textarea>
+            </label>
+            <label>
+              Revision priorities
+              <textarea name="story_revision_priorities" rows="5" placeholder="One future revision concern per line">{{ form_values.story_revision_priorities }}</textarea>
+            </label>
+          </div>
+        </details>
+
+        <details class="compact-details">
+          <summary>Prose and voice</summary>
+          <div class="grid compact">
+            <label>
+              Style targets
+              <textarea name="story_style_targets" rows="5" placeholder="One prose trait per line">{{ form_values.story_style_targets }}</textarea>
+            </label>
+            <label>
+              Dialogue targets
+              <textarea name="story_dialogue_targets" rows="5" placeholder="One dialogue trait per line">{{ form_values.story_dialogue_targets }}</textarea>
+            </label>
+            <label>
+              Style avoid
+              <textarea name="story_style_avoid" rows="5" placeholder="One prose habit or phrase per line">{{ form_values.story_style_avoid }}</textarea>
+            </label>
+            <label>
+              Style reference
+              <textarea name="story_style_reference" rows="5" placeholder="Paste a short excerpt or style notes">{{ form_values.story_style_reference }}</textarea>
+            </label>
+          </div>
+        </details>
       </div>
 
       <div class="form-section">
@@ -208,11 +232,9 @@
         {% endif %}
       </div>
 
-      <div class="form-section">
-        <div class="section-header-copy">
-          <h3>Advanced per-task routing</h3>
-          <p>Optional. Leave these blank to use the project default provider/model everywhere, or override only the stages where you want a different tradeoff.</p>
-        </div>
+      <details class="compact-details">
+        <summary>Advanced per-task routing</summary>
+        <p class="field-note">Optional. Leave these blank to use the project default provider/model everywhere, or override only the stages where you want a different tradeoff.</p>
         <div class="routing-grid">
           {% for row in task_route_rows %}
             <div class="routing-row">
@@ -236,7 +258,7 @@
             </div>
           {% endfor %}
         </div>
-      </div>
+      </details>
 
       <div class="form-section">
         <div class="section-header-copy">

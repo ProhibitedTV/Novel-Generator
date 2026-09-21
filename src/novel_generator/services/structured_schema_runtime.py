@@ -17,6 +17,8 @@ from ..schemas import (
     StoryBible,
     StructuredOutlineEntry,
 )
+from .continuity_lifecycle import LIVE_SNAPSHOT_FIELDS
+from .autonomous_contracts import EditorialReview
 
 
 _INSTALLED = False
@@ -26,6 +28,7 @@ _SCHEMA_NAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
 def _adapter_for_stage(stage: str) -> TypeAdapter[Any] | None:
     mapping: dict[str, Any] = {
+        "autonomous_review": EditorialReview,
         "story_bible": StoryBible,
         "outline": list[StructuredOutlineEntry],
         "outline_chunk": list[StructuredOutlineEntry],
@@ -45,6 +48,9 @@ def response_schema_for_stage(stage: str) -> dict[str, Any] | None:
     if adapter is None:
         return None
     schema = adapter.json_schema()
+    if stage == "continuity_update":
+        # Ask constrained decoders for an explicit live-state snapshot, including empty fields.
+        schema["required"] = list(dict.fromkeys([*schema.get("required", []), *LIVE_SNAPSHOT_FIELDS]))
     return schema if isinstance(schema, dict) and schema else None
 
 

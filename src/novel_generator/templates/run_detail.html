@@ -656,7 +656,7 @@
   <section class="panel editorial-next-panel">
     <div class="section-header">
       <div class="section-header-copy">
-        <p class="eyebrow">Post-run review</p>
+        <p class="eyebrow">{{ "Automatic editing" if run.quality_profile == "autonomous" else "Post-run review" }}</p>
         <h2>{{ editorial_next_step.title }}</h2>
         <p>{{ editorial_next_step.body }}</p>
       </div>

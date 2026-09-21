@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     provider_retry_backoff_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
     run_stale_after_seconds: int = Field(default=3600, ge=60, le=86400)
     chapter_summary_window: int = Field(default=4, ge=1, le=12)
+    autonomous_chapter_repair_attempts: int = Field(default=3, ge=1, le=6)
+    autonomous_manuscript_repair_rounds: int = Field(default=3, ge=1, le=6)
     secret_key: str = "change-me-for-public-deployments"
 
     model_config = SettingsConfigDict(

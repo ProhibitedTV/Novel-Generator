@@ -190,6 +190,11 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
     is_publication_profile = quality_profile == "publication"
     developmental_rewrite_enabled = payload.developmental_rewrite_enabled or quality_profile in {"strict", "publication"}
     pause_after_outline = True if is_publication_profile else payload.pause_after_outline
+    if quality_profile == "autonomous":
+        pause_after_outline = False
+        developmental_rewrite_enabled = True
+        if not requested_chapters * min_words_per_chapter <= target_word_count <= requested_chapters * max_words_per_chapter:
+            raise ValueError("Autonomous mode requires a word target reachable within the chapter count and word range.")
 
     if not provider_name:
         raise ValueError("A provider name is required.")

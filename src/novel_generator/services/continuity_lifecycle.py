@@ -8,6 +8,10 @@ from ..schemas import ChapterContinuityUpdate, ContinuityLedger
 
 
 _INSTALLED = False
+LIVE_SNAPSHOT_FIELDS = (
+    "open_threads", "open_promises_by_name", "memory_damage", "trust_fractures",
+    "civilian_pressure_points", "emotional_open_loops",
+)
 
 
 def _normalized(value: Any) -> str:
@@ -45,20 +49,26 @@ def apply_continuity_lifecycle(
     """
 
     resolved = list(merged.resolved_threads)
+    # Omitted fields are unknown, not evidence that all their story debt was resolved.
+    # Explicit empty collections still retire live state. Preserve that distinction in checkpoints.
+    snapshot = {
+        name: getattr(update, name) if name in update.model_fields_set else getattr(merged, name)
+        for name in LIVE_SNAPSHOT_FIELDS
+    }
     open_threads = [
         thread
-        for thread in update.open_threads
+        for thread in snapshot["open_threads"]
         if thread and not _thread_is_resolved(thread, resolved)
     ]
 
     return merged.model_copy(
         update={
             "open_threads": list(dict.fromkeys(open_threads)),
-            "open_promises_by_name": dict(update.open_promises_by_name),
-            "memory_damage": dict(update.memory_damage),
-            "trust_fractures": dict(update.trust_fractures),
-            "civilian_pressure_points": list(dict.fromkeys(update.civilian_pressure_points)),
-            "emotional_open_loops": dict(update.emotional_open_loops),
+            "open_promises_by_name": dict(snapshot["open_promises_by_name"]),
+            "memory_damage": dict(snapshot["memory_damage"]),
+            "trust_fractures": dict(snapshot["trust_fractures"]),
+            "civilian_pressure_points": list(dict.fromkeys(snapshot["civilian_pressure_points"])),
+            "emotional_open_loops": dict(snapshot["emotional_open_loops"]),
         }
     )
 

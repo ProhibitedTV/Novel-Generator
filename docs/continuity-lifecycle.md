@@ -29,3 +29,12 @@ A live item may disappear when the chapter genuinely resolves or heals it. Resol
 This distinction is important for long-form generation. Without it, old problems become "ghost debt": they remain in every later prompt even after the prose resolved them, which can cause models to reopen closed mysteries, repeat relationship conflicts, or manufacture unnecessary late-book closure work.
 
 The lifecycle cleanup runs after the normal continuity merge, preserving cumulative history while making current story state genuinely current. Slightly rephrased thread resolutions are matched conservatively: exact normalized matches are accepted, and containment matching is used only for substantive phrases so short generic wording cannot accidentally close unrelated threads.
+
+## Missing fields and saved checkpoints
+
+An omitted live-state field is unknown, not a resolution. The ledger preserves existing promises,
+threads, memory damage, trust fractures, civilian pressure, and emotional loops when a model omits
+their fields. Explicit empty lists/maps still clear those fields. Provider JSON schemas request all
+six live-state fields, and new chapter and editorial checkpoints preserve omitted-field information
+with `exclude_unset=True` so a restart cannot turn missing information into a false resolution.
+Older checkpoints that already serialized defaults cannot recover the original missing-field distinction.

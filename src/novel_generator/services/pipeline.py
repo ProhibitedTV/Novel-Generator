@@ -79,6 +79,7 @@ from .prompts import (
     sanitize_chapter_content,
 )
 from .providers import ProviderManager
+from . import autonomous_editorial
 
 
 class RunCanceled(Exception):
@@ -259,13 +260,25 @@ def _generate_structured_output(
     try:
         return parser(raw_output)
     except Exception as exc:
+        repair_messages = build_json_repair_messages(raw_output, label, str(exc))
+        if stage == "autonomous_review":
+            # Evidence validation cannot be repaired from the invalid JSON alone.
+            # Retain the actual prose and editorial contract on the retry.
+            repair_messages = [*build_messages(),
+                {"role": "assistant", "content": raw_output},
+                {"role": "user", "content": (
+                    f"The review failed validation: {exc}. Re-evaluate against the actual prose above. "
+                    "Return the complete valid review with exact quotations. Do not drop a genuine "
+                    "problem merely to pass validation; correct its evidence and keep its repair instruction."
+                )},
+            ]
         repaired_output = _supervised_provider_chat(
             session,
             run,
             client,
             provider_name,
             model_name,
-            build_json_repair_messages(raw_output, label, str(exc)),
+            repair_messages,
             stage=stage,
             chapter_number=chapter_number,
             metadata={"label": label, "phase": "repair", "repair_error": str(exc)},
@@ -1170,6 +1183,8 @@ def _validated_outline_or_fallback(
                 return parsed
             except Exception as rebalance_exc:
                 fallback_error = rebalance_exc
+        if autonomous_editorial.enabled(run):
+            raise autonomous_editorial.AutonomousQualityError("Outline could not be repaired without replacing the generated plot.") from exc
         record_event(
             session,
             run,
@@ -1219,6 +1234,8 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
         )
     except Exception as exc:
         story_bible = _fallback_story_bible(project, run)
+        if autonomous_editorial.enabled(run):
+            raise autonomous_editorial.AutonomousQualityError("Story-bible generation failed; autonomous mode cannot proceed with placeholder canon.") from exc
         record_event(
             session,
             run,
@@ -1296,6 +1313,8 @@ def _generate_outline_chunks(
                 None,
             )
         except Exception as exc:
+            if autonomous_editorial.enabled(run):
+                raise autonomous_editorial.AutonomousQualityError("Outline chunk generation failed; autonomous mode requires a validated plot.") from exc
             chunk = _fallback_outline_entries(
                 project,
                 story_bible,
@@ -1352,13 +1371,18 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
                 provider_name,
                 model_name,
                 lambda: build_outline_messages(project, run, story_bible),
-                lambda raw: parse_outline(raw, run.requested_chapters),
+                # Validate the chapter records first, then use the same whole-book repair
+                # path as chunked outlines. A pacing label must not discard the model's plot.
+                lambda raw: parse_outline_chunk(raw, 1, run.requested_chapters),
                 "structured outline",
                 "outline",
             )
         run.outline = _validated_outline_or_fallback(session, project, run, story_bible, outline)
     except Exception as exc:
-        run.outline = _fallback_outline_entries(project, story_bible, 1, run.requested_chapters, run.requested_chapters)
+        fallback = _fallback_outline_entries(project, story_bible, 1, run.requested_chapters, run.requested_chapters)
+        if autonomous_editorial.enabled(run):
+            raise autonomous_editorial.AutonomousQualityError("Outline generation failed; autonomous mode requires a validated plot.") from exc
+        run.outline = _validated_outline_or_fallback(session, project, run, story_bible, fallback)
         record_event(
             session,
             run,
@@ -1815,6 +1839,7 @@ def _draft_chapter(
         _persist_structured_qa(chapter, combined_critique)
         session.commit()
 
+    autonomous_editorial.ensure_chapter(session, run, chapter, ledger, settings, client)
     _ensure_not_canceled(session, run)
     if not (chapter.summary or "").strip():
         summary_provider_name, summary_model_name = _resolve_stage_route(client, run, "chapter_summary")
@@ -1834,6 +1859,8 @@ def _draft_chapter(
             if not chapter.summary:
                 raise RuntimeError(f"Chapter {chapter.chapter_number} summary was empty.")
         except Exception as exc:
+            if autonomous_editorial.enabled(run):
+                raise autonomous_editorial.AutonomousQualityError("Chapter summary failed; autonomous continuity requires a summary of the actual prose.") from exc
             chapter.summary = _fallback_chapter_summary(chapter, outline_entry, plan)
             record_event(
                 session,
@@ -1876,6 +1903,8 @@ def _draft_chapter(
             )
         except Exception as exc:
             continuity_update = _fallback_continuity_update(chapter, ledger, outline_entry, plan)
+            if autonomous_editorial.enabled(run):
+                raise autonomous_editorial.AutonomousQualityError("Continuity extraction failed; autonomous mode cannot invent a checkpoint from the outline.") from exc
             record_event(
                 session,
                 run,
@@ -1891,7 +1920,7 @@ def _draft_chapter(
     if continuity_update.timeline != ledger_after.timeline:
         continuity_update.timeline = ledger_after.timeline
     _apply_continuity_canon_warnings(chapter, continuity_update)
-    chapter.continuity_update = continuity_update.model_dump()
+    chapter.continuity_update = continuity_update.model_dump(exclude_unset=True)
     chapter.status = ChapterStatus.COMPLETED
     chapter.error_message = None
     run.continuity_ledger = ledger_after.model_dump()
@@ -2860,6 +2889,17 @@ def _run_final_editing_pass(
 def process_run(session: Session, run: GenerationRun, settings: Settings, client: ProviderManager | OllamaClient) -> None:
     _ensure_not_canceled(session, run)
 
+    checkpoint = autonomous_editorial.final_checkpoint(run)
+    if checkpoint and run.chapters and all(chapter.content for chapter in run.chapters):
+        chapters = _require_requested_chapters(session, run)
+        qa_report = autonomous_editorial.finish_manuscript(
+            session, run, chapters, settings, client, ManuscriptQaReport.model_validate(checkpoint["qa_report"]),
+        )
+        _export_completed_run(session, run, chapters, settings, qa_report,
+                              checkpoint.get("rewrite_markdown"), checkpoint.get("revised_outline_markdown"),
+                              checkpoint.get("developmental_qa_markdown"))
+        return
+
     story_bible = _story_bible_from_run(run) if run.story_bible else _generate_story_bible(session, run, settings, client)
 
     if not run.outline:
@@ -2927,7 +2967,21 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
     completed_chapters = _require_requested_chapters(session, run)
     qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
     qa_report = _apply_publication_readiness_gate(session, run, qa_report)
+    autonomous_editorial.checkpoint_final_stage(
+        session, run, qa_report, rewrite_markdown=rewrite_markdown,
+        revised_outline_markdown=revised_outline_markdown, developmental_qa_markdown=developmental_qa_markdown,
+    )
+    qa_report = autonomous_editorial.finish_manuscript(session, run, completed_chapters, settings, client, qa_report)
+    _export_completed_run(session, run, completed_chapters, settings, qa_report,
+                          rewrite_markdown, revised_outline_markdown, developmental_qa_markdown)
+
+
+def _export_completed_run(session, run, completed_chapters, settings, qa_report,
+                          rewrite_markdown=None, revised_outline_markdown=None, developmental_qa_markdown=None):
     qa_markdown = render_qa_report_markdown(qa_report)
+    for chapter in completed_chapters:
+        chapter.status = ChapterStatus.COMPLETED
+        chapter.error_message = None
 
     run.current_step = "export"
     record_event(session, run, "artifact_export_started", {"message": "Rendering manuscript artifacts."})
@@ -2944,6 +2998,8 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
         developmental_qa_markdown,
     )
     replace_artifacts(session, run, artifacts)
+    if autonomous_editorial.enabled(run):
+        autonomous_editorial.save_report(session, run, settings, "passed")
     run.current_step = "completed"
     run.current_chapter = None
     run.status = RunStatus.COMPLETED
@@ -2976,6 +3032,8 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
         run.completed_at = datetime.utcnow()
         record_event(session, run, "run_failed", {"message": str(exc)})
         session.commit()
+        if autonomous_editorial.enabled(run):
+            autonomous_editorial.save_report(session, run, settings, "not_passed", error=str(exc))
     except Exception as exc:
         if run.current_chapter:
             chapter = next((item for item in run.chapters if item.chapter_number == run.current_chapter), None)
@@ -2989,3 +3047,5 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
         run.completed_at = datetime.utcnow()
         record_event(session, run, "run_failed", {"message": str(exc)})
         session.commit()
+        if autonomous_editorial.enabled(run):
+            autonomous_editorial.save_report(session, run, settings, "not_passed", error=str(exc))

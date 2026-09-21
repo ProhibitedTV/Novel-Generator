@@ -164,8 +164,8 @@
 
       <div class="form-section story-brief-shell">
         <div class="section-header-copy">
-          <h3>Story brief</h3>
-          <p>These structured notes give the v2 pipeline better material for the story bible, outline, continuity ledger, and ending control.</p>
+          <h3>Story engine</h3>
+          <p>Keep the novelist anchors close: promise, pressure, character, conflict, and ending.</p>
         </div>
         <div class="grid compact">
           <label>
@@ -187,12 +187,12 @@
             <input type="text" name="story_tone" value="{{ edit_values.story_tone }}">
           </label>
           <label>
-            Protagonist
-            <input type="text" name="story_protagonist" value="{{ edit_values.story_protagonist }}">
+            Reader promise
+            <input type="text" name="story_reader_promise" value="{{ edit_values.story_reader_promise }}">
           </label>
           <label>
-            Antagonist
-            <input type="text" name="story_antagonist" value="{{ edit_values.story_antagonist }}">
+            Protagonist
+            <input type="text" name="story_protagonist" value="{{ edit_values.story_protagonist }}">
           </label>
         </div>
 
@@ -206,54 +206,76 @@
           <textarea name="story_ending_target" rows="3">{{ edit_values.story_ending_target }}</textarea>
         </label>
 
-        <div class="grid compact">
-          <label>
-            Supporting cast
-            <textarea name="story_supporting_cast" rows="5">{{ edit_values.story_supporting_cast }}</textarea>
-          </label>
-          <label>
-            World rules
-            <textarea name="story_world_rules" rows="5">{{ edit_values.story_world_rules }}</textarea>
-          </label>
-          <label>
-            Must include
-            <textarea name="story_must_include" rows="5">{{ edit_values.story_must_include }}</textarea>
-          </label>
-          <label>
-            Avoid
-            <textarea name="story_avoid" rows="5">{{ edit_values.story_avoid }}</textarea>
-          </label>
-        </div>
+        <details class="compact-details">
+          <summary>Character engine</summary>
+          <div class="grid compact">
+            <label>
+              Protagonist backstory
+              <textarea name="story_protagonist_backstory" rows="4">{{ edit_values.story_protagonist_backstory }}</textarea>
+            </label>
+            <label>
+              Protagonist misbelief
+              <textarea name="story_protagonist_misbelief" rows="4">{{ edit_values.story_protagonist_misbelief }}</textarea>
+            </label>
+            <label>
+              Antagonist
+              <input type="text" name="story_antagonist" value="{{ edit_values.story_antagonist }}">
+            </label>
+            <label>
+              Supporting cast
+              <textarea name="story_supporting_cast" rows="5">{{ edit_values.story_supporting_cast }}</textarea>
+            </label>
+          </div>
+        </details>
 
-        <div class="section-header-copy">
-          <h3>Prose and voice</h3>
-          <p>Style signals for sentence rhythm, dialogue pressure, sensory texture, and prose habits to avoid.</p>
-        </div>
-        <div class="grid compact">
-          <label>
-            Style targets
-            <textarea name="story_style_targets" rows="5">{{ edit_values.story_style_targets }}</textarea>
-          </label>
-          <label>
-            Dialogue targets
-            <textarea name="story_dialogue_targets" rows="5">{{ edit_values.story_dialogue_targets }}</textarea>
-          </label>
-          <label>
-            Style avoid
-            <textarea name="story_style_avoid" rows="5">{{ edit_values.story_style_avoid }}</textarea>
-          </label>
-          <label>
-            Style reference
-            <textarea name="story_style_reference" rows="5">{{ edit_values.story_style_reference }}</textarea>
-          </label>
-        </div>
+        <details class="compact-details">
+          <summary>World and guardrails</summary>
+          <div class="grid compact">
+            <label>
+              World rules
+              <textarea name="story_world_rules" rows="5">{{ edit_values.story_world_rules }}</textarea>
+            </label>
+            <label>
+              Must include
+              <textarea name="story_must_include" rows="5">{{ edit_values.story_must_include }}</textarea>
+            </label>
+            <label>
+              Avoid
+              <textarea name="story_avoid" rows="5">{{ edit_values.story_avoid }}</textarea>
+            </label>
+            <label>
+              Revision priorities
+              <textarea name="story_revision_priorities" rows="5">{{ edit_values.story_revision_priorities }}</textarea>
+            </label>
+          </div>
+        </details>
+
+        <details class="compact-details">
+          <summary>Prose and voice</summary>
+          <div class="grid compact">
+            <label>
+              Style targets
+              <textarea name="story_style_targets" rows="5">{{ edit_values.story_style_targets }}</textarea>
+            </label>
+            <label>
+              Dialogue targets
+              <textarea name="story_dialogue_targets" rows="5">{{ edit_values.story_dialogue_targets }}</textarea>
+            </label>
+            <label>
+              Style avoid
+              <textarea name="story_style_avoid" rows="5">{{ edit_values.story_style_avoid }}</textarea>
+            </label>
+            <label>
+              Style reference
+              <textarea name="story_style_reference" rows="5">{{ edit_values.story_style_reference }}</textarea>
+            </label>
+          </div>
+        </details>
       </div>
 
-      <div class="form-section">
-        <div class="section-header-copy">
-          <h3>Advanced per-task routing</h3>
-          <p>Optional overrides for planning, drafting, editing, and QA. Leave blank to keep the project default provider/model for everything.</p>
-        </div>
+      <details class="compact-details">
+        <summary>Advanced per-task routing</summary>
+        <p class="field-note">Optional overrides for planning, drafting, editing, and QA. Leave blank to keep the project default provider/model for everything.</p>
         <div class="routing-grid">
           {% for row in edit_task_route_rows %}
             <div class="routing-row">
@@ -275,7 +297,7 @@
             </div>
           {% endfor %}
         </div>
-      </div>
+      </details>
 
       <div class="form-actions">
         <button type="submit">Save project defaults</button>
@@ -584,7 +606,7 @@
 
       <label class="toggle-card run-mode-card">
         <span class="toggle-input">
-          <input data-developmental-rewrite-toggle type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled or run_values.quality_profile in ["strict", "publication"] %}checked{% endif %}>
+          <input data-developmental-rewrite-toggle type="checkbox" name="developmental_rewrite_enabled" value="1" {% if run_values.developmental_rewrite_enabled or run_values.quality_profile in ["strict", "publication", "autonomous"] %}checked{% endif %}>
           <strong>Include developmental rewrite planning</strong>
         </span>
         <span class="field-note">Standard for polished book runs. After manuscript QA, produce a structural rewrite report, revised outline, and QA comparison before the final chapter edit pass.</span>
@@ -648,63 +670,47 @@
         </ul>
       {% endif %}
     </section>
-    <div class="run-flow">
-      <div class="section-header-copy">
-        <h3>What a v2 run produces</h3>
-        <p>A healthy run should finish every requested chapter, run editorial QA, and export a manuscript plus QA report.</p>
-      </div>
+    <details class="compact-details run-flow" open>
+      <summary>Novel process</summary>
+      <p class="field-note">The worker follows a writerly path: design the story, draft scenes, revise structure, polish prose, then export.</p>
       <ol class="run-flow-list">
         <li class="run-flow-item">
           <span class="run-flow-number">1</span>
           <div>
-            <strong>Build a story bible</strong>
-            <p class="field-note">The model turns your premise and story brief into theme, cast, world rules, and an ending promise.</p>
+            <strong>Design the story engine</strong>
+            <p class="field-note">Story bible plus outline turn premise, promise, character pressure, world rules, and ending into a chapter map.</p>
           </div>
         </li>
         <li class="run-flow-item">
           <span class="run-flow-number">2</span>
           <div>
-            <strong>Generate a structured outline</strong>
-            <p class="field-note">Each chapter gets an objective, conflict turn, reveal, and ending state.</p>
+            <strong>Plan and draft scenes</strong>
+            <p class="field-note">Every chapter gets a scene contract, prose draft, critique pass, and continuity checkpoint.</p>
           </div>
         </li>
         <li class="run-flow-item">
           <span class="run-flow-number">3</span>
           <div>
-            <strong>Draft and revise every chapter</strong>
-            <p class="field-note">Each chapter gets a plan, prose, one critique pass, and a continuity update checkpoint.</p>
+            <strong>Run manuscript QA</strong>
+            <p class="field-note">The report diagnoses continuity, repetition, scene purpose, character agency, and reader-facing revision questions.</p>
           </div>
         </li>
         <li class="run-flow-item">
           <span class="run-flow-number">4</span>
           <div>
-            <strong>Run editorial QA before export</strong>
-            <p class="field-note">The QA report calls out repetition, continuity drift, and ending issues instead of silently shipping them.</p>
+            <strong>Revise structure first</strong>
+            <p class="field-note">Developmental planning and targeted chapter revisions fix story architecture before line polish.</p>
           </div>
         </li>
         <li class="run-flow-item">
           <span class="run-flow-number">5</span>
           <div>
-            <strong>Plan a developmental rewrite</strong>
-            <p class="field-note">Standard full-manuscript planning converts QA risks into structural actions, a revised outline, and a before/after QA comparison.</p>
-          </div>
-        </li>
-        <li class="run-flow-item">
-          <span class="run-flow-number">6</span>
-          <div>
-            <strong>Apply targeted developmental revisions</strong>
-            <p class="field-note">Chapters marked rewrite, bridge, merge, cut, or reorder get a bounded structural pass before line editing.</p>
-          </div>
-        </li>
-        <li class="run-flow-item">
-          <span class="run-flow-number">7</span>
-          <div>
-            <strong>Run a final chapter edit</strong>
-            <p class="field-note">Each saved chapter gets a polish pass for clarity, sentence rhythm, transitions, and concrete on-page consequences before final QA/export.</p>
+            <strong>Polish and export</strong>
+            <p class="field-note">Final chapter edits, final QA, and manuscript artifacts complete the run.</p>
           </div>
         </li>
       </ol>
-    </div>
+    </details>
     <div class="detail-list">
       <div class="detail-item">
         <span class="detail-label">Base URL</span>

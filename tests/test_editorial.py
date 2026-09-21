@@ -316,6 +316,24 @@ def test_chapter_lint_flags_unknown_proper_nouns_and_repeated_opening() -> None:
     assert any("unapproved proper nouns" in item.lower() for item in result.soft_warnings)
 
 
+def test_cast_given_names_and_surnames_are_not_new_entities() -> None:
+    bible = _story_bible()
+    bible["cast"][0]["name"] = "Mara Vale"
+    bible["cast"][1]["name"] = "Ivo Chen"
+    chapter = ChapterDraft(
+        chapter_number=1, title="Evidence", outline_summary="The hearing starts.",
+        content=("Mara Vale opened the door. Ivo Chen entered. Ivo carried the ledger. "
+                 "Chen signed the receipt. Vale took it. Ivo waited while Chen read. "
+                 "Vale locked the door. Zorath knocked. Zorath demanded the ledger."),
+        status=ChapterStatus.PENDING,
+    )
+    result = lint_chapter(chapter, _outline_entry(), _plan(), bible, _ledger(), [])
+    warnings = [warning for warning in result.soft_warnings if "unapproved proper nouns" in warning]
+    assert warnings
+    assert "zorath" in warnings[0]
+    assert all(name not in warnings[0] for name in ("ivo", "chen", "vale"))
+
+
 def test_canonical_entity_collision_detection_finds_alias_drift() -> None:
     collisions = detect_canonical_entity_collisions(
         _story_bible()["canon_registry"],

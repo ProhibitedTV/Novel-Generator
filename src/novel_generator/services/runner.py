@@ -37,7 +37,8 @@ def recover_incomplete_runs(settings: Settings) -> None:
             logger.info("Recovered %s interrupted runs.", count)
 
 
-def run_worker_loop(settings: Settings) -> None:
+def install_generation_runtime() -> int:
+    """Install the same generation safeguards for workers and one-shot verification runs."""
     # Install schema shaping before telemetry. The telemetry wrapper therefore measures the actual
     # chat messages rather than counting the private JSON-schema marker that provider clients strip
     # and translate into their native structured-output controls.
@@ -63,6 +64,11 @@ def run_worker_loop(settings: Settings) -> None:
             "Installed %s long-form context, headroom, pacing, continuity, editorial-reconciliation, publication-guard, structured-output, telemetry, and truncation-recovery runtime transforms.",
             runtime_transforms,
         )
+    return runtime_transforms
+
+
+def run_worker_loop(settings: Settings) -> None:
+    install_generation_runtime()
 
     session_factory = build_session_factory(settings)
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
