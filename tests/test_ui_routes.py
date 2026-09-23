@@ -321,9 +321,9 @@ def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch)
     response = client.get(f"/projects/{project_id}")
 
     assert response.status_code == 200
-    assert "64 chapters will use 8 outline chunks" in response.text
+    assert "64 chapters will use 16 outline chunks" in response.text
     assert "High chapter counts make checkpoint resume" in response.text
-    assert "653 minimum" in response.text
+    assert "661 minimum" in response.text
 
 
 def test_project_detail_preflight_chunks_32_chapter_runs(client, monkeypatch) -> None:
@@ -333,8 +333,8 @@ def test_project_detail_preflight_chunks_32_chapter_runs(client, monkeypatch) ->
     response = client.get(f"/projects/{project_id}")
 
     assert response.status_code == 200
-    assert "32 chapters will use 4 outline chunks" in response.text
-    assert "329 minimum" in response.text
+    assert "32 chapters will use 8 outline chunks" in response.text
+    assert "333 minimum" in response.text
 
 
 def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:

@@ -1,8 +1,11 @@
 from types import SimpleNamespace
+import json
+import pytest
 
 from novel_generator.models import ChapterStatus, RunStatus
 from novel_generator.services.local_verification import verification_report
 from novel_generator.services.autonomous_editorial import _hash
+from novel_generator.services.local_verification import load_project_spec
 
 
 def _run(tmp_path):
@@ -54,3 +57,26 @@ def test_automatic_acceptance_must_match_current_manuscript(tmp_path):
     assert verification_report(run, tmp_path)["autonomous_checks_passed"]
     run.chapters[0].content = "A different ending."
     assert not verification_report(run, tmp_path)["autonomous_checks_passed"]
+
+
+def test_custom_story_keeps_brief_and_targets_but_routes_only_to_ollama(tmp_path):
+    path = tmp_path / "story.json"
+    path.write_text(json.dumps({"title": "A Different Book", "premise": "A botanist negotiates peace between rival gardens.",
+        "requested_chapters": 24, "desired_word_count": 60000, "min_words_per_chapter": 2000,
+        "max_words_per_chapter": 3000, "preferred_provider_name": "openai",
+        "story_brief": {"ending_target": "Both gardens survive; the botanist leaves."},
+        "task_routing": {"chapter_draft": {"provider_name": "openai", "model_name": "remote"}}}))
+    project = load_project_spec(path, "local-model")
+    assert project.preferred_provider_name == "ollama"
+    assert project.preferred_model == "local-model"
+    assert project.desired_word_count == 60000
+    assert project.story_brief.ending_target == "Both gardens survive; the botanist leaves."
+    assert not any(project.task_routing.model_dump().values())
+
+
+def test_custom_story_rejects_unreachable_length_before_startup(tmp_path):
+    path = tmp_path / "story.json"
+    path.write_text(json.dumps({"title": "Story", "premise": "A botanist saves a garden.",
+        "requested_chapters": 2, "desired_word_count": 60000, "min_words_per_chapter": 100, "max_words_per_chapter": 200}))
+    with pytest.raises(ValueError, match="unreachable"):
+        load_project_spec(path, "local-model")

@@ -440,6 +440,7 @@ def claim_next_queued_run(session: Session, worker_id: str | None = None) -> Gen
     stmt = (
         select(GenerationRun)
         .where(GenerationRun.status == RunStatus.QUEUED, GenerationRun.cancel_requested.is_(False))
+        .where(GenerationRun.current_step != "provider_wait")
         .order_by(GenerationRun.created_at.asc())
         .limit(1)
     )

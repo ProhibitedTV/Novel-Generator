@@ -16,6 +16,7 @@ from .editorial_reconciliation_runtime import install_editorial_reconciliation_r
 from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
+from .run_recovery import release_provider_retries
 from .publication_guard_runtime import install_publication_guard_runtime
 from .recall_runtime import install_recall_runtime
 from .structured_schema_runtime import install_structured_schema_runtime
@@ -74,6 +75,7 @@ def run_worker_loop(settings: Settings) -> None:
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     while True:
         with session_factory() as session:
+            release_provider_retries(session)
             stale_count = recover_running_runs(
                 session,
                 stale_after_seconds=settings.run_stale_after_seconds,

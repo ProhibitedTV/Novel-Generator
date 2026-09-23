@@ -22,6 +22,16 @@ from .runner import install_generation_runtime
 from .autonomous_editorial import _hash
 
 
+def load_project_spec(path: Path, model: str) -> ProjectCreate:
+    """Reuse the application's story contract while keeping qualification local."""
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    payload.update(preferred_provider_name="ollama", preferred_model=model, task_routing={})
+    project = ProjectCreate.model_validate(payload)
+    if not project.requested_chapters * project.min_words_per_chapter <= project.desired_word_count <= project.requested_chapters * project.max_words_per_chapter:
+        raise ValueError("Project word target is unreachable within its chapter word ranges.")
+    return project
+
+
 def verification_report(run, artifacts_dir: Path) -> dict:
     chapters = sorted(run.chapters, key=lambda chapter: chapter.chapter_number)
     expected = list(range(1, run.requested_chapters + 1))
@@ -64,6 +74,9 @@ def verification_report(run, artifacts_dir: Path) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--project-file", type=Path, help="ProjectCreate JSON with your own premise, genre, brief, and word targets; overrides the sample story and size flags.")
+    parser.add_argument("--review-model", help="Installed Ollama model for independent editorial review.")
+    parser.add_argument("--revision-model", help="Installed Ollama model for automatic revision.")
     parser.add_argument("--base-url", default="http://127.0.0.1:11434")
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts") / (
         "local-verification-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")))
@@ -74,6 +87,10 @@ def main() -> int:
     args = parser.parse_args()
     if args.chapters < 1 or args.words_per_chapter < 100:
         parser.error("Use at least one chapter and 100 words per chapter.")
+    try:
+        custom_project = load_project_spec(args.project_file, args.model) if args.project_file else None
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
 
     output = args.output_dir.resolve()
     # A fresh directory makes accidentally reusing a production database impossible.
@@ -93,8 +110,13 @@ def main() -> int:
         configs = ensure_provider_configs(session, settings)
         provider = ProviderManager(settings, configs)
         provider.ensure_model("ollama", args.model)
+        routing = {}
+        for stage, model in (("autonomous_review", args.review_model), ("autonomous_revision", args.revision_model)):
+            if model:
+                provider.ensure_model("ollama", model)
+                routing[stage] = {"provider_name": "ollama", "model_name": model}
         install_generation_runtime()
-        project = create_project(session, ProjectCreate(
+        project = create_project(session, custom_project or ProjectCreate(
             title="The Last Tide Ledger",
             premise=("Harbor surveyor Mara Vale discovers that the tide ledger was falsified to condemn "
                      "the old ferry district. With retired ferryman Ivo Chen she must prove the fraud "
@@ -120,6 +142,7 @@ def main() -> int:
         run = create_run(session, project, RunCreate(
             project_id=project.id, pause_after_outline=False, quality_profile=args.profile,
             developmental_rewrite_enabled=args.profile != "draft",
+            task_routing=routing,
         ))
         session.commit()
         claim_next_queued_run(session, worker_id="local-verification")

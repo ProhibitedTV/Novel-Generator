@@ -33,10 +33,11 @@ class Settings(BaseSettings):
     ollama_structured_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     provider_chat_timeout_seconds: float = Field(default=1800.0, ge=30.0, le=7200.0)
     provider_retry_backoff_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
+    provider_recovery_attempts: int = Field(default=96, ge=0, le=1000)
     run_stale_after_seconds: int = Field(default=3600, ge=60, le=86400)
     chapter_summary_window: int = Field(default=4, ge=1, le=12)
-    autonomous_chapter_repair_attempts: int = Field(default=3, ge=1, le=6)
-    autonomous_manuscript_repair_rounds: int = Field(default=3, ge=1, le=6)
+    autonomous_chapter_repair_attempts: int = Field(default=12, ge=1, le=100)
+    autonomous_manuscript_repair_rounds: int = Field(default=24, ge=1, le=100)
     secret_key: str = "change-me-for-public-deployments"
 
     model_config = SettingsConfigDict(

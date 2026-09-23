@@ -36,10 +36,18 @@ def _grounded_evidence(evidence: str, source: str) -> bool:
     quote = _text(evidence)
     if quote and quote in source:
         return True
+    # Models commonly reformat dialogue quotation marks, including a closing
+    # quote at the end of a partial excerpt. Preserve all other characters and
+    # word order; this is punctuation normalization, never fuzzy word matching.
+    quotation_marks = str.maketrans("", "", "\"'\u2018\u2019\u201c\u201d")
+    quote = _text(quote.translate(quotation_marks))
+    source = _text(source.translate(quotation_marks))
+    if quote and quote in source:
+        return True
     # Editorial quotations may omit intervening text. Every retained excerpt must
     # still occur verbatim, in order; never use fuzzy matching or repair the source.
     pieces = [part.strip() for part in re.split(r"\s*(?:\[\s*(?:\.{3}|\u2026)\s*\]|\.{3}|\u2026)\s*", quote) if part.strip()]
-    if not pieces or any(len(piece.split()) < 3 for piece in pieces):
+    if not pieces or any(len(piece.split()) < 2 for piece in pieces) or sum(len(piece.split()) for piece in pieces) < 6:
         return False
     cursor = 0
     for piece in pieces:
@@ -60,6 +68,12 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
         if issue.chapter_number not in source or not _grounded_evidence(issue.evidence, source[issue.chapter_number]):
             raise ValueError(f"Issue evidence must quote chapter {issue.chapter_number}'s actual prose, not its outline or summary. Unmatched quotation: {issue.evidence[:300]!r}")
     return review
+
+
+def validate_chapter_repair_scope(review):
+    for issue in review.issues:
+        if re.search(r"\b(?:next|following) chapter (?:must|should|needs? to)\b", issue.repair_instruction, re.IGNORECASE):
+            raise ValueError("Chapter review requested work in a future chapter. Judge this chapter against its assigned ending state; report only repairs to this chapter, not advice to the next chapter.")
 
 
 def _record(session, run, kind: str, payload: dict) -> None:
@@ -133,7 +147,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
-    fingerprint = _hash({"contract": 4, "context": context, "provider": provider, "model": model, "scope": scope})
+    fingerprint = _hash({"contract": 6, "context": context, "provider": provider, "model": model, "scope": scope})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
             return validate_review(json.dumps(saved["review"]), chapters)
@@ -146,10 +160,15 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         "Summaries and metadata repeat story facts by design; they are not manuscript prose. "
         "Count prose repetition only within actual manuscript passages, not across reference fields. "
         "For non-final chapter reviews, ending_complete means the assigned scene turn resolves, not the whole book. "
+        "A setup chapter may end on a discovery, decision, or unresolved threat when that is its assigned ending state. "
+        "Do not demand investigation, resolution, or consequences assigned to later chapters. Every repair must be "
+        "actionable within the chapter being reviewed; advice for the next chapter is not a defect in this chapter. "
         "For the final chapter or a whole-book review, it means the central conflict and author ending promise actually resolve "
         "with consequences and aftermath in the final prose. Do not require every subplot to end happily. "
         "Report concrete defects that require correction, not optional aesthetic preferences or suggestions "
         "to add more sensory detail. A coherent passage need not match your personal style. "
+        "A causality defect requires a missing or contradictory cause, not a wish for a slower or more dramatic delivery. "
+        "An unresolved payoff requires a promised event or consequence that is actually absent, not a preference for a different concluding image. "
         "Each failed boolean must be supported by a relevant issue: a stylistic preference does not mean "
         "the ending is incomplete. Do not invent issues to fill the list. Each issue must include an exact short quotation from "
         "the indicated chapter's actual prose and a concrete repair instruction. Missing events can be "
@@ -172,7 +191,10 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     session.commit()
     def parse_review(raw):
         try:
-            return validate_review(raw, chapters)
+            review = validate_review(raw, chapters)
+            if scope in {"chapter", "final_chapter"}:
+                validate_chapter_repair_scope(review)
+            return review
         except ValueError as exc:
             _record(session, run, "autonomous_review_rejected", {
                 "message": "Automatic review failed validation and requires correction.",
@@ -208,14 +230,27 @@ def _length_issues(run, chapter) -> list[EditorialIssue]:
     )]
 
 
+def _repair_priority(issue):
+    if issue.category in {"continuity", "causality", "character", "premature_payoff", "unresolved_payoff"}:
+        return 0
+    return 1 if issue.category == "length" else 2
+
+
 def _repair(session, run, chapter, ledger, issues, settings, client, phase: str) -> None:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
-    attempts = [event for event in _events(run, "autonomous_repair_started")
-                if event.get("chapter_number") == chapter.chapter_number and event.get("phase") == phase]
+    interrupted = {item["started_event_id"] for item in _events(run, "autonomous_repair_interrupted")}
+    attempts = [event.payload for event in run.events
+                if event.event_type == "autonomous_repair_started" and event.id not in interrupted
+                and event.payload.get("chapter_number") == chapter.chapter_number and event.payload.get("phase") == phase]
     limit = settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds
     if len(attempts) >= limit:
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} exhausted its {phase} automatic repair budget. Unresolved checks prevent completion.")
+    # A structural rewrite can invalidate line edits and alter length. Recheck the
+    # resulting text before spending a later attempt on those lower-level issues.
+    priority = min(_repair_priority(issue) for issue in issues)
+    deferred = [issue for issue in issues if _repair_priority(issue) != priority]
+    issues = [issue for issue in issues if _repair_priority(issue) == priority]
     before = chapter.content or ""
     backup = settings.artifacts_dir / run.id / "editorial-history" / f"chapter-{chapter.chapter_number}-{_hash(before)[:16]}.md"
     backup.parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +260,7 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         "chapter_number": chapter.chapter_number, "phase": phase, "attempt": len(attempts) + 1,
         "before_hash": _hash(before), "backup": str(backup.relative_to(settings.artifacts_dir)),
         "issues": [issue.model_dump() for issue in issues],
+        "deferred_issues": [issue.model_dump() for issue in deferred],
     })
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
     context = _context(run, chapter, ledger)
@@ -248,21 +284,21 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
                                                    "repairs": [issue.model_dump() for issue in issues]}, ensure_ascii=False)},
     ]
     messages[0]["content"] += length_instruction
-    from .local_prose_repair import repair_span, repair_messages, apply_repair
-    span = repair_span(before, issues)
-    if span is not None:
-        messages = repair_messages(before, span, issues)
-    _check_context(messages, client, provider)
+    from .local_prose_repair import repair_plan, repair_passages
+    plan = repair_plan(before, issues)
     run.current_step = "autonomous_revision"
     run.current_chapter = chapter.chapter_number
     session.commit()
-    candidate = pipeline.sanitize_chapter_content(pipeline._supervised_provider_chat(
-        session, run, client, provider, model, messages, stage="autonomous_revision",
-        chapter_number=chapter.chapter_number, metadata={"phase": phase, "repair_attempt": len(attempts) + 1,
-                                                       "repair_mode": "passage" if span is not None else "chapter"},
-    ))
-    if span is not None:
-        candidate = apply_repair(before, span, candidate)
+    def generate_repair(messages, passage=1, passage_count=1):
+        pipeline._ensure_not_canceled(session, run)
+        _check_context(messages, client, provider)
+        return pipeline.sanitize_chapter_content(pipeline._supervised_provider_chat(
+            session, run, client, provider, model, messages, stage="autonomous_revision",
+            chapter_number=chapter.chapter_number, metadata={"phase": phase, "repair_attempt": len(attempts) + 1,
+                "repair_mode": "passage" if plan is not None else "chapter",
+                "passage": passage, "passage_count": passage_count},
+        ))
+    candidate = repair_passages(before, plan, generate_repair) if plan is not None else generate_repair(messages)
     if length_instruction and len(candidate.split()) > maximum:
         from .prose_budget import compress_prose
         def compress(messages, passage, passage_count, attempt):
@@ -278,6 +314,8 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         candidate = compress_prose(candidate, target, compress)
     if not candidate.strip() or _text(candidate) == _text(before):
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change.")
+    if any(event.get("before_hash") == _hash(candidate) for event in attempts):
+        raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair returned to an earlier rejected version. Saved prose is preserved; change the repair model before resuming.")
     chapter.content = candidate
     chapter.word_count = len(candidate.split())
     chapter.summary = None
@@ -395,6 +433,7 @@ def save_report(session, run, settings, status: str, **extra) -> None:
               "manuscript_hash": _hash([(chapter.chapter_number, chapter.content) for chapter in run.chapters]),
               "reviews": _events(run, "autonomous_review_completed"),
               "rejected_reviews": _events(run, "autonomous_review_rejected"),
+              "interrupted_repairs": _events(run, "autonomous_repair_interrupted"),
               "repairs": _events(run, "autonomous_repair_started"), **extra}
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     if not any(artifact.kind == "autonomous-quality-report" for artifact in run.artifacts):

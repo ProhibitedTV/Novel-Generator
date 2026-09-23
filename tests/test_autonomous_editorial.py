@@ -141,6 +141,41 @@ def test_evidence_accepts_ordered_excerpts_but_not_fabricated_or_reordered_segme
     assert not editor._grounded_evidence("Mara ... the", source)
 
 
+def test_evidence_tolerates_dialogue_quote_formatting_but_not_changed_facts():
+    source = 'Mara said, “The land is protected. The records cannot be altered.”'
+    assert editor._grounded_evidence("Mara said, 'The land is protected.'", source)
+    assert editor._grounded_evidence("'The land is protected.' ... 'The records cannot be altered.'", source)
+    assert not editor._grounded_evidence("Mara said, 'The land is condemned.'", source)
+    assert not editor._grounded_evidence("'The records can be altered.'", source)
+    assert not editor._grounded_evidence("\"'\u201c\u201d", source)
+
+
+def test_short_opening_excerpt_with_long_grounded_remainder_is_valid():
+    source = "These records from the archive detail the initial agreements between the two valleys."
+    assert editor._grounded_evidence("These records... detail the initial agreements between the two valleys.", source)
+    assert not editor._grounded_evidence("These records... erase the initial agreements between the two valleys.", source)
+
+
+def test_chapter_review_cannot_order_a_future_chapter_to_supply_its_payoff():
+    data = clean_review([1])
+    data["issues"] = [dict(issue(), repair_instruction="The next chapter must resolve the treaty.")]
+    with pytest.raises(ValueError, match="future chapter"):
+        editor.validate_chapter_repair_scope(EditorialReview.model_validate(data))
+
+
+def test_review_validation_retries_are_bounded_and_keep_source(monkeypatch):
+    calls = []
+    def chat(*args, **kwargs):
+        calls.append(args[5])
+        return "invalid"
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    with pytest.raises(ValueError):
+        pipeline._generate_structured_output(None, None, object(), "ollama", "test",
+            lambda: [{"role": "user", "content": PROSE}], json.loads, "review", "autonomous_review")
+    assert len(calls) == 4
+    assert all(messages[0]["content"] == PROSE for messages in calls)
+
+
 def test_autonomous_mode_skips_approval_and_requires_feasible_length(configured_environment):
     with get_session_factory()() as session:
         run = make_run(session)
@@ -249,6 +284,59 @@ def test_final_gate_repairs_and_rebuilds_metadata_before_acceptance(configured_e
         assert len(editor._events(run, "autonomous_quality_passed")) == 1
         assert result.publication_readiness_label == "automated checks passed"
         assert len(editor._events(run, "autonomous_review_completed")) == 4
+
+
+def test_revision_can_progress_beyond_three_attempts(configured_environment, monkeypatch):
+    def review(context, numbers):
+        output = clean_review(numbers)
+        if "version4" not in context["actual_prose"]:
+            output["issues"] = [issue(evidence=context["actual_prose"])]
+        return output
+    install_fake_provider(monkeypatch, review_fn=review)
+    count = 0
+    def chat(*args, **kwargs):
+        nonlocal count
+        count += 1
+        return REPAIRED + f" version{count}"
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
+        assert count == 4
+        assert len(editor._events(run, "autonomous_repair_started")) == 4
+
+
+def test_repair_cycle_preserves_latest_saved_version(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        issues = [EditorialIssue.model_validate(issue())]
+        editor._repair(session, run, chapter, ledger, issues, get_settings(), object(), "draft")
+        monkeypatch.setattr(pipeline, "_supervised_provider_chat", lambda *a, **kw: PROSE)
+        with pytest.raises(editor.AutonomousQualityError, match="earlier rejected"):
+            editor._repair(session, run, chapter, ledger, issues, get_settings(), object(), "draft")
+        assert chapter.content == REPAIRED
+
+
+def test_structural_issues_precede_polish_and_length(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    captured = []
+    def chat(*args, **kwargs):
+        captured.append(json.loads(args[5][1]["content"]))
+        return REPAIRED
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        issues = [EditorialIssue.model_validate(dict(issue(), category=category)) for category in ("prose", "length", "continuity")]
+        editor._repair(session, run, run.chapters[0], ledger, issues, get_settings(), object(), "final")
+        assert [i["category"] for i in captured[0]["repairs"]] == ["continuity"]
+        saved = editor._events(run, "autonomous_repair_started")[-1]
+        assert len(saved["deferred_issues"]) == 2
 
 
 def test_whole_book_context_does_not_duplicate_final_prose(configured_environment):

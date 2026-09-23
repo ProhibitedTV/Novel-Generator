@@ -112,10 +112,10 @@ function setupRunLengthControls(root) {
       const targetWords = readInt(targetInput, 0);
       const minWords = readInt(minInput, 0);
       const maxWords = readInt(maxInput, minWords || 0);
-      const outlineChunks = outlineChunksFor(chapters);
+      const profile = form.querySelector('[name="quality_profile"]:checked')?.value;
+      const outlineChunks = profile === "autonomous" ? Math.ceil(chapters / 4) : outlineChunksFor(chapters);
       const developmentalRewrite = form.querySelector("[data-developmental-rewrite-toggle]")?.checked ? 1 : 0;
       const finalEditCalls = chapters + 1;
-      const profile = form.querySelector('[name="quality_profile"]:checked')?.value;
       const additionalCalls = profile === "autonomous" ? chapters * 4 + 1 : profile === "publication" ? chapters * 2 : 0;
       const minimumCalls = 1 + outlineChunks + chapters * 5 + 1 + developmentalRewrite + finalEditCalls + additionalCalls;
       const average = chapters > 0 && targetWords > 0 ? Math.round(targetWords / chapters) : 0;

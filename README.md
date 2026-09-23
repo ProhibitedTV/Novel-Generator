@@ -238,7 +238,11 @@ Use an exact installed Ollama model name. This writes a fresh database, Markdown
 QA report, and `report.json` under a new `artifacts/local-verification-*` directory. It does not use
 your normal project database or change `.env`. The default is a three-chapter, 1,500-word smoke
 test using automatic editing; `--chapters 24 --words-per-chapter 2500 --profile autonomous` exercises a 60,000-word target.
-Long runs can take hours. `--base-url`, `--context-tokens`, and `--output-dir` are configurable;
+Long runs can take multiple days. Automatic repair defaults allow 12 draft attempts per chapter
+and 24 final repair rounds, with persisted budgets and cycle detection. Use `--project-file`
+with a project JSON for your own premise, genre, and length targets; sample 60,000-word briefs
+are in `examples/novels`. `--review-model` and `--revision-model` select separate installed
+Ollama models for those tasks. `--base-url`, `--context-tokens`, and `--output-dir` are configurable;
 the output directory must not already exist. A zero exit code means all requested chapters,
 continuity checkpoints, and export formats were produced. Inspect the report's actual word count,
 fallback events, final QA, and prose separately before judging consistency or novel-length success.

@@ -44,6 +44,38 @@ def repair_messages(text, span, issues):
     ]
 
 
+def repair_plan(text, issues):
+    """Merge overlapping diagnoses, keeping distant passages independently editable."""
+    groups = []
+    for issue in issues:
+        span = repair_span(text, [issue])
+        if span is None:
+            return None
+        groups.append((span, [issue]))
+    groups.sort(key=lambda group: group[0])
+    merged = []
+    for span, diagnoses in groups:
+        if merged and span[0] < merged[-1][0][1]:
+            combined = merged[-1][1] + diagnoses
+            combined_span = repair_span(text, combined)
+            if combined_span is None:
+                return None
+            merged[-1] = (combined_span, combined)
+        else:
+            merged.append((span, diagnoses))
+    return merged if 0 < len(merged) <= 8 else None
+
+
+def repair_passages(text, plan, generate):
+    """Build an atomic candidate; failures leave the saved chapter untouched."""
+    candidate = text
+    # Descending original offsets remain valid as later passages change length.
+    for number, (span, issues) in enumerate(reversed(plan), 1):
+        replacement = generate(repair_messages(text, span, issues), number, len(plan))
+        candidate = apply_repair(candidate, span, replacement)
+    return candidate
+
+
 def apply_repair(text, span, replacement):
     start, end = span
     replacement = replacement.strip()
