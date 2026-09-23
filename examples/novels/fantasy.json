@@ -1,0 +1,18 @@
+{
+  "title": "The Orchard of Borrowed Winters",
+  "premise": "A village horticulturist discovers that the frost charms protecting her orchard steal growing seasons from a rival valley. She must negotiate a shared water treaty before the final harvest while admitting that her family's prosperity depends on the theft.",
+  "desired_word_count": 60000,
+  "requested_chapters": 24,
+  "min_words_per_chapter": 2000,
+  "max_words_per_chapter": 3000,
+  "story_brief": {
+    "genre_profile": "fantasy_epic",
+    "setting": "Two mountain valleys connected by one reservoir; magic affects temperature but cannot create water or food.",
+    "protagonist": "Sera, a skilled horticulturist who confuses protecting her family with protecting its privileges.",
+    "supporting_cast": ["Dain, the rival valley's irrigation keeper", "Tessa, Sera's younger sister and orchard accountant"],
+    "reader_promise": "Ecological wonder, costly negotiation, and a protagonist who earns trust through restitution.",
+    "ending_target": "The valleys ratify and enact a shared water treaty. Sera dismantles her family's frost monopoly, accepts the loss of the estate, and helps plant the first shared orchard. Show the first difficult season afterward.",
+    "world_rules": ["Frost charms transfer heat between marked trees; they cannot generate energy.", "Destroyed roots cannot be restored by magic."],
+    "avoid": ["An external villain absolving the family", "A newly discovered spell solving the treaty", "A sequel hook replacing resolution"]
+  }
+}

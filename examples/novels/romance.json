@@ -1,0 +1,18 @@
+{
+  "title": "The Rooms We Keep",
+  "premise": "An acoustic engineer returns to renovate her late mother's community music hall with the carpenter whose touring ambitions once ended their relationship. Keeping the hall open forces both to confront the plans they made for each other without asking.",
+  "desired_word_count": 60000,
+  "requested_chapters": 24,
+  "min_words_per_chapter": 2000,
+  "max_words_per_chapter": 3000,
+  "story_brief": {
+    "genre_profile": "romance",
+    "setting": "A contemporary inland town during one summer renovation.",
+    "protagonist": "Lena, an acoustic engineer who uses competence to avoid asking for care.",
+    "supporting_cast": ["Tom, a carpenter and former touring musician who mistakes compromise for surrender", "Ruth, the hall's volunteer treasurer"],
+    "reader_promise": "An adult second-chance romance built through practical collaboration, honest conflict, and reciprocal change.",
+    "ending_target": "Lena and Tom explicitly choose a shared future with room for both careers. The hall reopens under a viable community operating plan. Show them keeping a small promise after the opening night.",
+    "world_rules": ["Repairs need money, permits, labor, and realistic time.", "Neither protagonist can read the other's private thoughts."],
+    "avoid": ["An easily corrected misunderstanding as the sole breakup cause", "A surprise inheritance paying every cost", "One partner abandoning all ambition as proof of love"]
+  }
+}

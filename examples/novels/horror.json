@@ -1,0 +1,18 @@
+{
+  "title": "The Silence Register",
+  "premise": "A night archivist at a rural radio station discovers recordings of residents confessing acts they have not yet committed. Each broadcast makes one confession inevitable. To stop the final transmission she must destroy the station's archive, including the only surviving record of her missing brother.",
+  "desired_word_count": 60000,
+  "requested_chapters": 24,
+  "min_words_per_chapter": 2000,
+  "max_words_per_chapter": 3000,
+  "story_brief": {
+    "genre_profile": "horror",
+    "setting": "An isolated rural radio station and its service area over five winter nights.",
+    "protagonist": "Nell, a night archivist who preserves recordings to avoid accepting loss.",
+    "supporting_cast": ["Arthur, the station engineer", "June, a volunteer emergency dispatcher"],
+    "reader_promise": "Escalating dread grounded in clear supernatural rules and irreversible personal cost.",
+    "ending_target": "Nell stops the final transmission by destroying the archive and permanently loses her brother's recording. Show how she and the surviving residents live with what was already broadcast. The immediate threat ends even if its origin remains uncertain.",
+    "world_rules": ["Only a complete over-the-air broadcast binds a confession to future action.", "Private playback reveals the confession but does not bind it.", "Destroying the source prevents future broadcasts but cannot reverse an already completed one."],
+    "avoid": ["It was all a dream", "Reversing deaths in the finale", "Changing the broadcast rules to manufacture the climax"]
+  }
+}

@@ -539,6 +539,9 @@ def _run_health_context(run: GenerationRun) -> dict[str, Any]:
         tone = "warning"
         title = "Queued and waiting for the worker"
         body = "The run settings are saved. The next healthy sign is a story-bible event from the worker."
+        if run.current_step == "provider_wait":
+            title = "Waiting for the local model — automatic retry scheduled"
+            body = run.error_message or "Saved work is preserved. The worker will retry automatically after the cooldown."
     elif run.status == RunStatus.RUNNING:
         tone = "success" if not fallback_events else "warning"
         title = f"Running: {current_stage['label']}"
@@ -1513,6 +1516,9 @@ def _run_preflight_context(
         if requested_chapters < PREFLIGHT_OUTLINE_CHUNK_THRESHOLD
         else max(1, (requested_chapters + PREFLIGHT_OUTLINE_CHUNK_SIZE - 1) // PREFLIGHT_OUTLINE_CHUNK_SIZE)
     )
+    if profile["value"] == "autonomous":
+        from ..services.outline_recovery import AUTONOMOUS_OUTLINE_BATCH_SIZE
+        outline_chunks = (requested_chapters + AUTONOMOUS_OUTLINE_BATCH_SIZE - 1) // AUTONOMOUS_OUTLINE_BATCH_SIZE
     estimated_model_calls = 1 + outline_chunks + (requested_chapters * 5) + 1 + requested_chapters + 1
     if developmental_rewrite_enabled:
         estimated_model_calls += 1
@@ -1544,7 +1550,7 @@ def _run_preflight_context(
     elif provider_status.available_models and model_name not in provider_status.available_models:
         warnings.append({"tone": "warning", "message": f"Model '{model_name}' is not in the detected model list."})
 
-    if requested_chapters >= PREFLIGHT_OUTLINE_CHUNK_THRESHOLD:
+    if outline_chunks > 1:
         warnings.append(
             {
                 "tone": "warning",

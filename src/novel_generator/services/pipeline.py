@@ -257,33 +257,46 @@ def _generate_structured_output(
         chapter_number=chapter_number,
         metadata={"label": label, "phase": "initial"},
     )
-    try:
-        return parser(raw_output)
-    except Exception as exc:
-        repair_messages = build_json_repair_messages(raw_output, label, str(exc))
-        if stage == "autonomous_review":
-            # Evidence validation cannot be repaired from the invalid JSON alone.
-            # Retain the actual prose and editorial contract on the retry.
-            repair_messages = [*build_messages(),
-                {"role": "assistant", "content": raw_output},
-                {"role": "user", "content": (
-                    f"The review failed validation: {exc}. Re-evaluate against the actual prose above. "
-                    "Return the complete valid review with exact quotations. Do not drop a genuine "
-                    "problem merely to pass validation; correct its evidence and keep its repair instruction."
-                )},
-            ]
-        repaired_output = _supervised_provider_chat(
-            session,
-            run,
-            client,
-            provider_name,
-            model_name,
-            repair_messages,
-            stage=stage,
-            chapter_number=chapter_number,
-            metadata={"label": label, "phase": "repair", "repair_error": str(exc)},
-        )
-        return parser(repaired_output)
+    correction_limit = 3 if stage == "autonomous_review" else 1
+    for correction in range(correction_limit + 1):
+        try:
+            return parser(raw_output)
+        except Exception as exc:
+            if correction == correction_limit:
+                raise
+            repair_messages = build_json_repair_messages(raw_output, label, str(exc))
+            if stage in {"outline", "outline_chunk"}:
+                repair_messages = [*build_messages(),
+                    {"role": "assistant", "content": raw_output},
+                    {"role": "user", "content": (
+                        f"Outline validation failed: {exc}. Return every requested chapter, in the requested range, "
+                        "as valid JSON. Preserve the original story brief, canon, ending, and accepted preceding "
+                        "chapters above. Keep each field concise enough to finish the entire requested batch."
+                    )},
+                ]
+            if stage == "autonomous_review":
+                # Evidence validation cannot be repaired from the invalid JSON alone.
+                # Retain the actual prose and editorial contract on the retry.
+                repair_messages = [*build_messages(),
+                    {"role": "assistant", "content": raw_output},
+                    {"role": "user", "content": (
+                        f"The review failed validation: {exc}. Re-evaluate against the actual prose above. "
+                        "Return the complete valid review with exact quotations. Do not drop a genuine "
+                        "problem merely to pass validation; correct its evidence and keep its repair instruction."
+                    )},
+                ]
+            raw_output = _supervised_provider_chat(
+                session,
+                run,
+                client,
+                provider_name,
+                model_name,
+                repair_messages,
+                stage=stage,
+                chapter_number=chapter_number,
+                metadata={"label": label, "phase": "repair", "repair_error": str(exc), "correction": correction + 1},
+            )
+
 
 
 def _supervised_provider_chat(
@@ -1361,7 +1374,10 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
     )
     session.commit()
     try:
-        if run.requested_chapters >= OUTLINE_CHUNK_THRESHOLD:
+        if autonomous_editorial.enabled(run):
+            from .outline_recovery import generate_outline
+            outline = generate_outline(session, run, story_bible, client, provider_name, model_name)
+        elif run.requested_chapters >= OUTLINE_CHUNK_THRESHOLD:
             outline = _generate_outline_chunks(session, run, story_bible, client, provider_name, model_name)
         else:
             outline = _generate_structured_output(
@@ -1381,7 +1397,7 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
     except Exception as exc:
         fallback = _fallback_outline_entries(project, story_bible, 1, run.requested_chapters, run.requested_chapters)
         if autonomous_editorial.enabled(run):
-            raise autonomous_editorial.AutonomousQualityError("Outline generation failed; autonomous mode requires a validated plot.") from exc
+            raise autonomous_editorial.AutonomousQualityError(f"Outline generation failed; saved batches can be resumed. {exc}") from exc
         run.outline = _validated_outline_or_fallback(session, project, run, story_bible, fallback)
         record_event(
             session,
@@ -3020,6 +3036,9 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
     except RunCanceled:
         return
     except (ProviderError, ProviderTransportError) as exc:
+        from .run_recovery import schedule_provider_retry
+        if schedule_provider_retry(session, run, settings, exc):
+            return
         if run.current_chapter:
             chapter = next((item for item in run.chapters if item.chapter_number == run.current_chapter), None)
             if chapter is not None:
@@ -3035,6 +3054,9 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
         if autonomous_editorial.enabled(run):
             autonomous_editorial.save_report(session, run, settings, "not_passed", error=str(exc))
     except Exception as exc:
+        from .run_recovery import schedule_provider_retry
+        if schedule_provider_retry(session, run, settings, exc):
+            return
         if run.current_chapter:
             chapter = next((item for item in run.chapters if item.chapter_number == run.current_chapter), None)
             if chapter is not None:
