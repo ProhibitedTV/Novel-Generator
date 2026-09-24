@@ -59,7 +59,10 @@ def repair_plan(text, issues):
         [item.start() for item in separators] + [len(text)]) if text[start:end].strip()]
     groups = []
     for issue in issues:
-        if issue.category not in {"prose", "repetition", "causality", "unresolved_payoff", "premature_payoff"}:
+        # Eligibility depends on grounded, bounded source spans, not on which
+        # editorial label the reviewer chooses for a localized defect.
+        # Length changes still require chapter-wide expansion/compression.
+        if issue.category not in {"prose", "repetition", "causality", "unresolved_payoff", "premature_payoff", "character", "continuity"}:
             return None
         references = getattr(issue, "evidence_paragraphs", [])
         if references:
