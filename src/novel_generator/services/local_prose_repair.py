@@ -40,25 +40,43 @@ def repair_messages(text, span, issues):
         )},
         {"role": "user", "content": json.dumps({
             "passage_to_repair": text[start:end], "diagnoses": [issue.model_dump() for issue in issues],
+            "source_paragraph_start": len(re.split(r"\n\s*\n", text[:start].strip())) + 1 if text[:start].strip() else 1,
         }, ensure_ascii=False)},
     ]
 
 
 def repair_plan(text, issues):
     """Merge overlapping diagnoses, keeping distant passages independently editable."""
+    separators = list(re.finditer(r"\r?\n[ \t\r\n]*\r?\n", text))
+    paragraphs = [(start, end) for start, end in zip(
+        [0] + [item.end() for item in separators],
+        [item.start() for item in separators] + [len(text)]) if text[start:end].strip()]
     groups = []
     for issue in issues:
-        span = repair_span(text, [issue])
-        if span is None:
+        if issue.category not in {"prose", "repetition"}:
             return None
-        groups.append((span, [issue]))
+        references = getattr(issue, "evidence_paragraphs", [])
+        if references:
+            if references != sorted(set(references)) or any(index < 1 or index > len(paragraphs) for index in references):
+                return None
+            spans = [paragraphs[index - 1] for index in references]
+        else:
+            words = issue.evidence.split()
+            if not words:
+                return None
+            matches = list(re.finditer(r"\s+".join(re.escape(word) for word in words), text))
+            spans = [(start, end) for start, end in paragraphs
+                     if any(match.start() < end and match.end() > start for match in matches)]
+        if not spans or any(len(text[start:end].split()) > 250 for start, end in spans):
+            return None
+        groups.extend((span, [issue]) for span in spans)
     groups.sort(key=lambda group: group[0])
     merged = []
     for span, diagnoses in groups:
         if merged and span[0] < merged[-1][0][1]:
             combined = merged[-1][1] + diagnoses
-            combined_span = repair_span(text, combined)
-            if combined_span is None:
+            combined_span = (merged[-1][0][0], max(merged[-1][0][1], span[1]))
+            if len(text[slice(*combined_span)].split()) > 250:
                 return None
             merged[-1] = (combined_span, combined)
         else:
@@ -72,6 +90,10 @@ def repair_passages(text, plan, generate):
     # Descending original offsets remain valid as later passages change length.
     for number, (span, issues) in enumerate(reversed(plan), 1):
         replacement = generate(repair_messages(text, span, issues), number, len(plan))
+        if replacement.strip() and " ".join(replacement.split()) == " ".join(text[slice(*span)].split()):
+            # One occurrence can remain when the other repeated occurrences change.
+            # The caller rejects a completely unchanged chapter and re-reviews every edit.
+            continue
         candidate = apply_repair(candidate, span, replacement)
     return candidate
 

@@ -265,19 +265,28 @@ def _repair_priority(issue):
     return 1 if issue.category == "length" else 2
 
 
+def _repair_kind(payload):
+    # Infer the bucket for old checkpoints instead of resetting their budgets.
+    issues = payload.get("issues", [])
+    return "prose" if issues and all(issue["category"] in {"prose", "repetition"} for issue in issues) else "chapter"
+
+
 def _repair(session, run, chapter, ledger, issues, settings, client, phase: str) -> None:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     interrupted = {item["started_event_id"] for item in _events(run, "autonomous_repair_interrupted")}
-    attempts = [event.payload for event in run.events
+    all_attempts = [event.payload for event in run.events
                 if event.event_type == "autonomous_repair_started" and event.id not in interrupted
                 and event.payload.get("chapter_number") == chapter.chapter_number and event.payload.get("phase") == phase]
-    limit = settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds
+    priority = min(_repair_priority(issue) for issue in issues)
+    repair_kind = "prose" if priority == 2 else "chapter"
+    attempts = [attempt for attempt in all_attempts if _repair_kind(attempt) == repair_kind]
+    limit = (settings.autonomous_prose_repair_attempts if repair_kind == "prose" else
+             settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds)
     if len(attempts) >= limit:
-        raise AutonomousQualityError(f"Chapter {chapter.chapter_number} exhausted its {phase} automatic repair budget. Unresolved checks prevent completion.")
+        raise AutonomousQualityError(f"Chapter {chapter.chapter_number} exhausted its {phase} {repair_kind} repair budget. Unresolved checks prevent completion.")
     # A structural rewrite can invalidate line edits and alter length. Recheck the
     # resulting text before spending a later attempt on those lower-level issues.
-    priority = min(_repair_priority(issue) for issue in issues)
     deferred = [issue for issue in issues if _repair_priority(issue) != priority]
     issues = [issue for issue in issues if _repair_priority(issue) == priority]
     before = chapter.content or ""
@@ -287,6 +296,7 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
     _record(session, run, "autonomous_repair_started", {
         "message": f"Automatically repairing chapter {chapter.chapter_number}.",
         "chapter_number": chapter.chapter_number, "phase": phase, "attempt": len(attempts) + 1,
+        "repair_kind": repair_kind,
         "before_hash": _hash(before), "backup": str(backup.relative_to(settings.artifacts_dir)),
         "issues": [issue.model_dump() for issue in issues],
         "deferred_issues": [issue.model_dump() for issue in deferred],
@@ -343,7 +353,7 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         candidate = compress_prose(candidate, target, compress)
     if not candidate.strip() or _text(candidate) == _text(before):
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change.")
-    if any(event.get("before_hash") == _hash(candidate) for event in attempts):
+    if any(event.get("before_hash") == _hash(candidate) for event in all_attempts):
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair returned to an earlier rejected version. Saved prose is preserved; change the repair model before resuming.")
     chapter.content = candidate
     chapter.word_count = len(candidate.split())
@@ -360,12 +370,26 @@ def ensure_chapter(session, run, chapter, ledger, settings, client) -> None:
     """Never carry a known bad chapter into subsequent chapter generation."""
     if not enabled(run):
         return
+    if not draft_checkpoint(run, chapter):
+        _record(session, run, "autonomous_draft_checkpoint", {
+            "message": f"Chapter {chapter.chapter_number} entered automatic editing; resume will preserve its revised prose.",
+            "chapter_number": chapter.chapter_number,
+        })
     while True:
         review = _review(session, run, [chapter], _context(run, chapter, ledger), client, "chapter")
         issues = [*review.issues, *_length_issues(run, chapter)]
         if review.passed and not issues:
             return
         _repair(session, run, chapter, ledger, issues, settings, client, "draft")
+
+
+def draft_checkpoint(run, chapter):
+    if not enabled(run) or not chapter.content:
+        return False
+    return any(event.event_type in {"autonomous_draft_checkpoint", "autonomous_repair_started"}
+               and event.payload.get("chapter_number") == chapter.chapter_number
+               and (event.event_type == "autonomous_draft_checkpoint" or event.payload.get("phase") == "draft")
+               for event in run.events)
 
 
 def _refresh_metadata(session, run, chapters, client):
@@ -458,6 +482,7 @@ def save_report(session, run, settings, status: str, **extra) -> None:
               "quality_profile": run.quality_profile,
               "total_words": sum(len((chapter.content or "").split()) for chapter in run.chapters),
               "repair_limits": {"draft_attempts_per_chapter": settings.autonomous_chapter_repair_attempts,
+                                "prose_attempts_per_chapter_per_phase": settings.autonomous_prose_repair_attempts,
                                 "final_attempts_per_chapter": settings.autonomous_manuscript_repair_rounds},
               "manuscript_hash": _hash([(chapter.chapter_number, chapter.content) for chapter in run.chapters]),
               "reviews": _events(run, "autonomous_review_completed"),

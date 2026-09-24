@@ -360,6 +360,47 @@ def test_structural_issues_precede_polish_and_length(configured_environment, mon
         assert len(saved["deferred_issues"]) == 2
 
 
+def test_prose_budget_is_separate_and_counts_historical_prose_attempts(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        settings = get_settings().model_copy(update={"autonomous_chapter_repair_attempts": 1, "autonomous_prose_repair_attempts": 1})
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        editor._record(session, run, "autonomous_repair_started", {
+            "chapter_number": 1, "phase": "draft", "issues": [issue()], "before_hash": "old-version"})
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category="prose"))
+        editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
+        assert run.chapters[0].content == REPAIRED
+        session.expire_all()
+        with pytest.raises(editor.AutonomousQualityError, match="prose repair budget"):
+            editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
+
+
+def test_draft_resume_skips_legacy_rewrite_and_rechecks_latest_prose(configured_environment, monkeypatch):
+    class ReachedReview(Exception):
+        pass
+    monkeypatch.setattr(pipeline, "_checkpointed_plan", lambda chapter: object())
+    def unexpected(*args, **kwargs):
+        pytest.fail("Resume repeated a pre-editorial generation stage")
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", unexpected)
+    def review(session, run, chapter, *args):
+        assert chapter.content == REPAIRED
+        raise ReachedReview
+    monkeypatch.setattr(editor, "ensure_chapter", review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        chapter.content = REPAIRED
+        run.continuity_ledger = pipeline._build_initial_ledger(pipeline._story_bible_from_run(run)).model_dump()
+        editor._record(session, run, "autonomous_repair_started", {
+            "chapter_number": 1, "phase": "draft", "issues": [issue()]})
+        assert editor.draft_checkpoint(run, chapter)
+        with pytest.raises(ReachedReview):
+            pipeline._draft_chapter(session, run, chapter, pipeline._outline_entry(run, 1),
+                pipeline._story_bible_from_run(run), get_settings(), object())
+
+
 def test_whole_book_context_does_not_duplicate_final_prose(configured_environment):
     with get_session_factory()() as session:
         run = make_run(session)

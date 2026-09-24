@@ -66,3 +66,22 @@ def test_local_plan_rejects_ungrounded_issue_or_too_many_passages():
     assert repair_plan("One.", [issue("missing")]) is None
     paragraphs = [f"Passage {number}." for number in range(9)]
     assert repair_plan("\n\n".join(paragraphs), [issue(p) for p in paragraphs]) is None
+
+
+def test_repeated_quote_edits_each_occurrence_without_rewriting_middle():
+    text = "She said, 'You do not understand.'\n\nThe gate remained locked.\n\nHe said, 'You do not understand.'"
+    diagnosis = issue("You do not understand.")
+    diagnosis.model_dump = lambda: {}
+    plan = repair_plan(text, [diagnosis])
+    assert len(plan) == 2
+    replies = iter(["He said, 'The mechanism is more complex than that.'", "She said, 'You do not understand.'"])
+    candidate = repair_passages(text, plan, lambda *args: next(replies))
+    assert candidate == "She said, 'You do not understand.'\n\nThe gate remained locked.\n\nHe said, 'The mechanism is more complex than that.'"
+
+
+def test_numbered_evidence_repairs_separate_paragraphs_without_omission_matching():
+    text = "First speech.\n\nUntouched action.\n\nSecond speech."
+    diagnosis = issue("First speech. [...] Second speech.")
+    diagnosis.evidence_paragraphs = [1, 3]
+    plan = repair_plan(text, [diagnosis])
+    assert [text[slice(*span)] for span, _ in plan] == ["First speech.", "Second speech."]
