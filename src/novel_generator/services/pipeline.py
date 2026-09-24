@@ -281,7 +281,8 @@ def _generate_structured_output(
                     {"role": "assistant", "content": raw_output},
                     {"role": "user", "content": (
                         f"The review failed validation: {exc}. Re-evaluate against the actual prose above. "
-                        "Return the complete valid review with exact quotations. Do not drop a genuine "
+                        "Return the complete valid review with valid evidence_paragraphs when the source is numbered, "
+                        "or exact quotations for unnumbered excerpts. Do not drop a genuine "
                         "problem merely to pass validation; correct its evidence and keep its repair instruction."
                     )},
                 ]

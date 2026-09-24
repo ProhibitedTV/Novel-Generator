@@ -58,13 +58,30 @@ def _grounded_evidence(evidence: str, source: str) -> bool:
     return True
 
 
+def _paragraphs(text):
+    return [paragraph for paragraph in re.split(r"\n\s*\n", text.strip()) if paragraph.strip()]
+
+
+def _numbered_prose(text, chapter_number):
+    return "\n\n".join(f"[Chapter {chapter_number}, paragraph {index}]\n{paragraph}"
+                       for index, paragraph in enumerate(_paragraphs(text), 1))
+
+
 def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     review = EditorialReview.model_validate(extract_json_payload(raw))
     expected = sorted(chapter.chapter_number for chapter in chapters)
     if sorted(review.reviewed_chapters) != expected:
         raise ValueError(f"Review must cover exactly chapters {expected}, without duplicates.")
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
+    paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
     for issue in review.issues:
+        if issue.evidence_paragraphs:
+            references = issue.evidence_paragraphs
+            available = paragraphs.get(issue.chapter_number, [])
+            if references != sorted(set(references)) or any(index < 1 or index > len(available) for index in references):
+                raise ValueError("Evidence paragraph references must be valid, unique, and in source order for the indicated chapter.")
+            issue.evidence = " [...] ".join(available[index - 1] for index in references)
+            continue
         if issue.chapter_number not in source or not _grounded_evidence(issue.evidence, source[issue.chapter_number]):
             raise ValueError(f"Issue evidence must quote chapter {issue.chapter_number}'s actual prose, not its outline or summary. Unmatched quotation: {issue.evidence[:300]!r}")
     return review
@@ -147,7 +164,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
-    fingerprint = _hash({"contract": 6, "context": context, "provider": provider, "model": model, "scope": scope})
+    fingerprint = _hash({"contract": 7, "context": context, "provider": provider, "model": model, "scope": scope})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
             return validate_review(json.dumps(saved["review"]), chapters)
@@ -183,8 +200,20 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             "requires a resolved confrontation and aftermath. Quote the actual stopping point and "
             "request the missing resolution as an unresolved_payoff issue."
         )
+    instruction += (
+        "\nActual prose is labeled by chapter and paragraph. When labels are available, use evidence_paragraphs: give the "
+        "supporting paragraph numbers in ascending order and set evidence to 'Source paragraphs'. "
+        "The application will attach their exact text; do not copy or reconstruct dialogue. Numbers must belong to the issue's chapter. "
+        "If a reference excerpt has no paragraph labels, use an exact short quotation instead. "
+        "Paragraph labels are navigation aids, not manuscript text. Do not invent or paraphrase quotations."
+    )
+    review_context = dict(context)
+    if "actual_prose" in context:
+        review_context["actual_prose"] = _numbered_prose(context["actual_prose"], context["chapter_number"])
+    if "final_chapter_actual_prose" in context:
+        review_context["final_chapter_actual_prose"] = _numbered_prose(context["final_chapter_actual_prose"], max(chapter.chapter_number for chapter in chapters))
     messages = [{"role": "system", "content": instruction},
-                {"role": "user", "content": json.dumps({"scope": scope, **context}, ensure_ascii=False)}]
+                {"role": "user", "content": json.dumps({"scope": scope, **review_context}, ensure_ascii=False)}]
     _check_context(messages, client, provider)
     run.current_step = "autonomous_review"
     run.current_chapter = chapters[0].chapter_number if len(chapters) == 1 else None

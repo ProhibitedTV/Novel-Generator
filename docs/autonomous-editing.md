@@ -22,6 +22,12 @@ a complete chapter revision. Both paths require another review before generation
 continues. Reviews must cover all
 requested chapters, explicitly answer every required check, and quote real prose
 for each problem; missing checks and invented quotations cannot count as passes.
+Review prompts label the actual prose by chapter and paragraph. Reviewers can
+cite `evidence_paragraphs` instead of copying dialogue: the application validates
+the references and attaches the exact source paragraphs to the diagnosis.
+Invalid, repeated, or reversed references are rejected. The stored manuscript
+does not contain these review-only labels, and prose is not duplicated in the
+review prompt. Direct quotations remain supported for unnumbered excerpts.
 Omission markers in quotations are supported only when every retained excerpt
 appears verbatim in the correct chapter and in order.
 Dialogue quotation-mark formatting may differ; cited words and their order
