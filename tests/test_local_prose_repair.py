@@ -108,3 +108,29 @@ def test_ellipsis_quotes_map_only_grounded_passages():
     assert len(repair_plan(text, [diagnosis])) == 2
     diagnosis.evidence += ' ... Invented ending.'
     assert repair_plan(text, [diagnosis]) is None
+
+
+def test_oversized_response_is_corrected_without_changing_surroundings():
+    text = 'Opening.\n\nThe pump broke.\n\nEnding.'
+    diagnosis = issue('The pump broke.', 'causality')
+    diagnosis.model_dump = lambda: {}
+    responses = iter(['word ' * 100, 'Vibration from the gate broke the pump.'])
+    calls = []
+    def generate(messages, *args):
+        calls.append(messages)
+        return next(responses)
+    assert repair_passages(text, repair_plan(text, [diagnosis]), generate) == (
+        'Opening.\n\nVibration from the gate broke the pump.\n\nEnding.')
+    assert '1-30 words' in calls[1][-1]['content']
+
+
+def test_invalid_passage_retries_are_bounded():
+    diagnosis = issue('The pump broke.', 'causality')
+    diagnosis.model_dump = lambda: {}
+    calls = []
+    def generate(*args):
+        calls.append(1)
+        return 'word ' * 100
+    with pytest.raises(ValueError, match='expanded'):
+        repair_passages('The pump broke.', repair_plan('The pump broke.', [diagnosis]), generate)
+    assert len(calls) == 3

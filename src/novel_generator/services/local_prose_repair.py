@@ -31,6 +31,7 @@ def repair_span(text, issues):
 
 def repair_messages(text, span, issues, context=None):
     start, end = span
+    maximum = max(30, 2 * len(text[start:end].split()))
     return [
         {"role": "system", "content": (
             "Edit only the supplied passage to fix the diagnosed defect. Return the corrected passage "
@@ -44,6 +45,7 @@ def repair_messages(text, span, issues, context=None):
         {"role": "user", "content": json.dumps({
             "passage_to_repair": text[start:end], "diagnoses": [issue.model_dump() for issue in issues],
             "source_paragraph_start": len(re.split(r"\n\s*\n", text[:start].strip())) + 1 if text[:start].strip() else 1,
+            "maximum_output_words": maximum,
             "read_only_context": context,
         }, ensure_ascii=False)},
     ]
@@ -106,12 +108,26 @@ def repair_passages(text, plan, generate, context=None):
     candidate = text
     # Descending original offsets remain valid as later passages change length.
     for number, (span, issues) in enumerate(reversed(plan), 1):
-        replacement = generate(repair_messages(text, span, issues, context), number, len(plan))
-        if replacement.strip() and " ".join(replacement.split()) == " ".join(text[slice(*span)].split()):
-            # One occurrence can remain when the other repeated occurrences change.
-            # The caller rejects a completely unchanged chapter and re-reviews every edit.
-            continue
-        candidate = apply_repair(candidate, span, replacement)
+        messages = repair_messages(text, span, issues, context)
+        for attempt in range(3):
+            replacement = generate(messages, number, len(plan))
+            if replacement.strip() and " ".join(replacement.split()) == " ".join(text[slice(*span)].split()):
+                # The caller still rejects a completely unchanged chapter.
+                break
+            try:
+                candidate = apply_repair(candidate, span, replacement)
+                break
+            except ValueError as exc:
+                if attempt == 2:
+                    raise
+                # Keep the source/diagnosis, but do not feed oversized output back
+                # into context or truncate prose mechanically.
+                messages = repair_messages(text, span, issues, context)
+                messages.append({"role": "user", "content": (
+                    f"Your previous response was rejected: {exc} It contained {len(replacement.split())} words. "
+                    f"Return only the repaired passage, 1-{max(30, 2 * len(text[slice(*span)].split()))} words. "
+                    "Do not return the surrounding chapter."
+                )})
     return candidate
 
 
