@@ -87,7 +87,7 @@ def test_numbered_evidence_repairs_separate_paragraphs_without_omission_matching
     assert [text[slice(*span)] for span, _ in plan] == ["First speech.", "Second speech."]
 
 
-@pytest.mark.parametrize('category', ['causality', 'unresolved_payoff', 'premature_payoff'])
+@pytest.mark.parametrize('category', ['causality', 'unresolved_payoff', 'premature_payoff', 'character', 'continuity'])
 def test_causal_edit_preserves_prior_repairs_and_receives_context(category):
     import json
     text = "The gate cracked.\n\nRepaired dialogue stays.\n\nThe pump broke."

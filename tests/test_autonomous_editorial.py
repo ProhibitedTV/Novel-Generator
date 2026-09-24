@@ -257,6 +257,7 @@ def test_local_repair_preserves_neighbors_and_requires_fresh_review(configured_e
 
 
 def test_repair_budget_survives_resume_and_rejects_no_progress(configured_environment, monkeypatch):
+    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *args: None)
     def review(context, numbers):
         output = clean_review(numbers)
         output["issues"] = [issue(evidence=context["actual_prose"])]
@@ -355,7 +356,7 @@ def test_structural_issues_precede_polish_and_length(configured_environment, mon
         ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
         issues = [EditorialIssue.model_validate(dict(issue(), category=category)) for category in ("prose", "length", "continuity")]
         editor._repair(session, run, run.chapters[0], ledger, issues, get_settings(), object(), "final")
-        assert [i["category"] for i in captured[0]["repairs"]] == ["continuity"]
+        assert [i["category"] for i in captured[0]["diagnoses"]] == ["continuity"]
         saved = editor._events(run, "autonomous_repair_started")[-1]
         assert len(saved["deferred_issues"]) == 2
 
@@ -377,7 +378,8 @@ def test_prose_budget_is_separate_and_counts_historical_prose_attempts(configure
             editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
 
 
-def test_targeted_budget_survives_resume_after_chapter_budget_exhausted(configured_environment, monkeypatch):
+@pytest.mark.parametrize("categories", [("causality",), ("character", "causality"), ("continuity",)])
+def test_targeted_budget_survives_resume_after_chapter_budget_exhausted(configured_environment, monkeypatch, categories):
     from novel_generator.services.autonomous_contracts import EditorialIssue
     install_fake_provider(monkeypatch)
     with get_session_factory()() as session:
@@ -386,13 +388,14 @@ def test_targeted_budget_survives_resume_after_chapter_budget_exhausted(configur
         ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
         editor._record(session, run, "autonomous_repair_started", {
             "chapter_number": 1, "phase": "draft", "issues": [issue()], "before_hash": "old"})
-        diagnosis = EditorialIssue.model_validate(dict(issue(), category="causality", evidence=PROSE))
-        editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
+        diagnoses = [EditorialIssue.model_validate(dict(issue(), category=category, evidence=PROSE)) for category in categories]
+        editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), "draft")
         assert editor._events(run, "autonomous_repair_started")[-1]["repair_kind"] == "targeted"
         session.expire_all()
-        diagnosis.evidence = REPAIRED
+        for diagnosis in diagnoses:
+            diagnosis.evidence = REPAIRED
         with pytest.raises(editor.AutonomousQualityError, match="targeted repair budget"):
-            editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
+            editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), "draft")
 
 
 def test_draft_resume_skips_legacy_rewrite_and_rechecks_latest_prose(configured_environment, monkeypatch):
