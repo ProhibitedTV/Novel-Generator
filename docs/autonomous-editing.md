@@ -60,12 +60,13 @@ different local model can review and revise the draft. Leave all stage providers
 on Ollama to keep manuscript processing local. Configure sufficient context for
 the full chapter plus canon and adjacent prose.
 
-Two environment settings bound the extra work:
+Three environment settings bound the extra work:
 
 - `AUTONOMOUS_CHAPTER_REPAIR_ATTEMPTS=12`: repair attempts per chapter during drafting.
+- `AUTONOMOUS_PROSE_REPAIR_ATTEMPTS=12`: separate prose/repetition repair attempts per chapter in each draft/final phase.
 - `AUTONOMOUS_MANUSCRIPT_REPAIR_ROUNDS=24`: final repair sweeps and the maximum final repair attempts per chapter.
 
-Both accept values from 1 through 100. These are work budgets, not time limits;
+All accept values from 1 through 100. These are work budgets, not time limits;
 a run may take multiple days. Attempts are persisted before generation;
 restarting or resuming does not erase the used budget. A final-stage checkpoint
 resumes acceptance checks without repeating earlier drafting and editing. An unchanged or empty
@@ -73,6 +74,18 @@ revision stops with diagnostics. A provider interruption can be resumed using
 the remaining budget. A chapter that exhausts its budget requires a new run or
 an explicitly increased configured limit, ideally with a more capable local
 model. Restart the worker after configuration changes.
+
+The draft editor also saves a handoff checkpoint. Once automatic editing starts,
+resume skips the earlier drafting and general revision passes and rechecks the
+latest saved prose directly. Existing repair history supplies this checkpoint
+for older runs. Historical prose-only repairs count toward the prose budget;
+other repairs count toward the chapter budget. Neither counter is reset.
+
+Repeated evidence phrases are mapped to every matching paragraph instead of
+forcing a whole-chapter rewrite. Numbered paragraph references also support
+separate edits even when the evidence uses omission markers. One occurrence may
+remain unchanged while the redundant occurrences are revised; an entirely
+unchanged chapter is still rejected, and all accepted edits receive fresh reviews.
 
 Repairs address structure, causality, character, and ending defects first, then
 length, then prose and repetition. Deferred issues remain in diagnostics and the

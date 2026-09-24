@@ -1636,172 +1636,59 @@ def _draft_chapter(
         )
         session.commit()
 
-    _ensure_not_canceled(session, run)
-    if not (chapter.content or "").strip():
-        draft_provider_name, draft_model_name = _resolve_stage_route(client, run, "chapter_draft")
-        run.current_step = "chapter_draft"
-        record_event(
-            session,
-            run,
-            "chapter_drafting",
-            {
-                "chapter_number": chapter.chapter_number,
-                "title": chapter.title,
-                "provider_name": draft_provider_name,
-                "model_name": draft_model_name,
-            },
-        )
-        session.commit()
-
-        chapter.content = sanitize_chapter_content(
-            _supervised_provider_chat(
-                session,
-                run,
-                client,
-                draft_provider_name,
-                draft_model_name,
-                build_chapter_draft_messages(
-                    project,
-                    run,
-                    chapter,
-                    outline_entry,
-                    story_bible,
-                    ledger,
-                    run.summary_context or "",
-                    plan,
-                ),
-                stage="chapter_draft",
-                chapter_number=chapter.chapter_number,
-                metadata={"label": f"chapter {chapter.chapter_number} draft"},
-            )
-        )
-        if not chapter.content.strip():
-            raise RuntimeError(f"Chapter {chapter.chapter_number} draft was empty.")
-        chapter.word_count = len((chapter.content or "").split())
-        session.commit()
-    else:
-        chapter.word_count = len((chapter.content or "").split())
-        record_event(
-            session,
-            run,
-            "chapter_draft_checkpoint_reused",
-            {"message": f"Reused saved draft for chapter {chapter.chapter_number}.", "chapter_number": chapter.chapter_number},
-        )
-        session.commit()
-
-    _expand_chapter_to_minimum(
-        session,
-        run,
-        chapter,
-        outline_entry,
-        story_bible,
-        ledger,
-        plan,
-        client,
-        reason="post_draft",
-    )
-
-    _ensure_not_canceled(session, run)
-    run.current_step = "chapter_revision"
-    lint_result = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
-    combined_critique = _checkpointed_critique(chapter)
-    critique_provider_name, critique_model_name = _resolve_stage_route(client, run, "chapter_critique")
-    if combined_critique is None:
-        try:
-            critique = _generate_structured_output(
-                session,
-                run,
-                client,
-                critique_provider_name,
-                critique_model_name,
-                lambda: build_chapter_critique_messages(
-                    project,
-                    chapter,
-                    outline_entry,
-                    story_bible,
-                    ledger,
-                    plan,
-                    lint_result.combined_findings(),
-                ),
-                parse_chapter_critique,
-                f"chapter {chapter.chapter_number} critique",
-                "chapter_critique",
-                chapter.chapter_number,
-            )
-        except Exception as exc:
-            critique = _fallback_chapter_critique(chapter, lint_result)
+    if not autonomous_editorial.draft_checkpoint(run, chapter):
+        _ensure_not_canceled(session, run)
+        if not (chapter.content or "").strip():
+            draft_provider_name, draft_model_name = _resolve_stage_route(client, run, "chapter_draft")
+            run.current_step = "chapter_draft"
             record_event(
                 session,
                 run,
-                "chapter_critique_fallback",
+                "chapter_drafting",
                 {
-                    "message": f"Chapter {chapter.chapter_number} critique used local lint fallback.",
                     "chapter_number": chapter.chapter_number,
-                    "error": str(exc),
+                    "title": chapter.title,
+                    "provider_name": draft_provider_name,
+                    "model_name": draft_model_name,
                 },
             )
-        combined_critique = _apply_quality_profile_to_critique(
-            run,
-            _combine_chapter_feedback(critique, lint_result),
-        )
-        _persist_structured_qa(chapter, combined_critique)
-        session.commit()
-    else:
-        record_event(
-            session,
-            run,
-            "chapter_critique_checkpoint_reused",
-            {
-                "message": f"Reused saved critique for chapter {chapter.chapter_number}.",
-                "chapter_number": chapter.chapter_number,
-            },
-        )
-        session.commit()
+            session.commit()
 
-    if combined_critique.revision_required:
-        record_event(
-            session,
-            run,
-            "chapter_revision_started",
-            {
-                "chapter_number": chapter.chapter_number,
-                "title": chapter.title,
-                "repair_scope": combined_critique.repair_scope,
-                "provider_name": critique_provider_name,
-                "model_name": critique_model_name,
-            },
-        )
-        session.commit()
-        revision_provider_name, revision_model_name = _resolve_stage_route(client, run, "chapter_revision")
-        chapter.content = sanitize_chapter_content(
-            _supervised_provider_chat(
+            chapter.content = sanitize_chapter_content(
+                _supervised_provider_chat(
+                    session,
+                    run,
+                    client,
+                    draft_provider_name,
+                    draft_model_name,
+                    build_chapter_draft_messages(
+                        project,
+                        run,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        ledger,
+                        run.summary_context or "",
+                        plan,
+                    ),
+                    stage="chapter_draft",
+                    chapter_number=chapter.chapter_number,
+                    metadata={"label": f"chapter {chapter.chapter_number} draft"},
+                )
+            )
+            if not chapter.content.strip():
+                raise RuntimeError(f"Chapter {chapter.chapter_number} draft was empty.")
+            chapter.word_count = len((chapter.content or "").split())
+            session.commit()
+        else:
+            chapter.word_count = len((chapter.content or "").split())
+            record_event(
                 session,
                 run,
-                client,
-                revision_provider_name,
-                revision_model_name,
-                build_chapter_revision_messages(
-                    project,
-                    chapter,
-                    outline_entry,
-                    story_bible,
-                    ledger,
-                    plan,
-                    combined_critique,
-                    combined_critique.blocking_issues + combined_critique.soft_warnings,
-                ),
-                stage="chapter_revision",
-                chapter_number=chapter.chapter_number,
-                metadata={
-                    "label": f"chapter {chapter.chapter_number} revision",
-                    "repair_scope": combined_critique.repair_scope,
-                },
+                "chapter_draft_checkpoint_reused",
+                {"message": f"Reused saved draft for chapter {chapter.chapter_number}.", "chapter_number": chapter.chapter_number},
             )
-        )
-        if not chapter.content.strip():
-            raise RuntimeError(f"Chapter {chapter.chapter_number} revision was empty.")
-        chapter.word_count = len((chapter.content or "").split())
-        session.commit()
+            session.commit()
 
         _expand_chapter_to_minimum(
             session,
@@ -1812,49 +1699,164 @@ def _draft_chapter(
             ledger,
             plan,
             client,
-            reason="post_revision",
+            reason="post_draft",
         )
 
-        final_lint = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
-        try:
-            final_critique = _generate_structured_output(
-                session,
+        _ensure_not_canceled(session, run)
+        run.current_step = "chapter_revision"
+        lint_result = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
+        combined_critique = _checkpointed_critique(chapter)
+        critique_provider_name, critique_model_name = _resolve_stage_route(client, run, "chapter_critique")
+        if combined_critique is None:
+            try:
+                critique = _generate_structured_output(
+                    session,
+                    run,
+                    client,
+                    critique_provider_name,
+                    critique_model_name,
+                    lambda: build_chapter_critique_messages(
+                        project,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        ledger,
+                        plan,
+                        lint_result.combined_findings(),
+                    ),
+                    parse_chapter_critique,
+                    f"chapter {chapter.chapter_number} critique",
+                    "chapter_critique",
+                    chapter.chapter_number,
+                )
+            except Exception as exc:
+                critique = _fallback_chapter_critique(chapter, lint_result)
+                record_event(
+                    session,
+                    run,
+                    "chapter_critique_fallback",
+                    {
+                        "message": f"Chapter {chapter.chapter_number} critique used local lint fallback.",
+                        "chapter_number": chapter.chapter_number,
+                        "error": str(exc),
+                    },
+                )
+            combined_critique = _apply_quality_profile_to_critique(
                 run,
-                client,
-                critique_provider_name,
-                critique_model_name,
-                lambda: build_chapter_critique_messages(
-                    project,
-                    chapter,
-                    outline_entry,
-                    story_bible,
-                    ledger,
-                    plan,
-                    final_lint.combined_findings(),
-                ),
-                parse_chapter_critique,
-                f"chapter {chapter.chapter_number} post-repair critique",
-                "chapter_critique",
-                chapter.chapter_number,
+                _combine_chapter_feedback(critique, lint_result),
             )
-        except Exception as exc:
-            final_critique = _fallback_chapter_critique(chapter, final_lint)
+            _persist_structured_qa(chapter, combined_critique)
+            session.commit()
+        else:
             record_event(
                 session,
                 run,
-                "chapter_critique_fallback",
+                "chapter_critique_checkpoint_reused",
                 {
-                    "message": f"Chapter {chapter.chapter_number} post-repair critique used local lint fallback.",
+                    "message": f"Reused saved critique for chapter {chapter.chapter_number}.",
                     "chapter_number": chapter.chapter_number,
-                    "error": str(exc),
                 },
             )
-        combined_critique = _apply_quality_profile_to_critique(
-            run,
-            _combine_chapter_feedback(final_critique, final_lint),
-        )
-        _persist_structured_qa(chapter, combined_critique)
-        session.commit()
+            session.commit()
+
+        if combined_critique.revision_required:
+            record_event(
+                session,
+                run,
+                "chapter_revision_started",
+                {
+                    "chapter_number": chapter.chapter_number,
+                    "title": chapter.title,
+                    "repair_scope": combined_critique.repair_scope,
+                    "provider_name": critique_provider_name,
+                    "model_name": critique_model_name,
+                },
+            )
+            session.commit()
+            revision_provider_name, revision_model_name = _resolve_stage_route(client, run, "chapter_revision")
+            chapter.content = sanitize_chapter_content(
+                _supervised_provider_chat(
+                    session,
+                    run,
+                    client,
+                    revision_provider_name,
+                    revision_model_name,
+                    build_chapter_revision_messages(
+                        project,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        ledger,
+                        plan,
+                        combined_critique,
+                        combined_critique.blocking_issues + combined_critique.soft_warnings,
+                    ),
+                    stage="chapter_revision",
+                    chapter_number=chapter.chapter_number,
+                    metadata={
+                        "label": f"chapter {chapter.chapter_number} revision",
+                        "repair_scope": combined_critique.repair_scope,
+                    },
+                )
+            )
+            if not chapter.content.strip():
+                raise RuntimeError(f"Chapter {chapter.chapter_number} revision was empty.")
+            chapter.word_count = len((chapter.content or "").split())
+            session.commit()
+
+            _expand_chapter_to_minimum(
+                session,
+                run,
+                chapter,
+                outline_entry,
+                story_bible,
+                ledger,
+                plan,
+                client,
+                reason="post_revision",
+            )
+
+            final_lint = lint_chapter(chapter, outline_entry, plan, story_bible, ledger, prior_chapters)
+            try:
+                final_critique = _generate_structured_output(
+                    session,
+                    run,
+                    client,
+                    critique_provider_name,
+                    critique_model_name,
+                    lambda: build_chapter_critique_messages(
+                        project,
+                        chapter,
+                        outline_entry,
+                        story_bible,
+                        ledger,
+                        plan,
+                        final_lint.combined_findings(),
+                    ),
+                    parse_chapter_critique,
+                    f"chapter {chapter.chapter_number} post-repair critique",
+                    "chapter_critique",
+                    chapter.chapter_number,
+                )
+            except Exception as exc:
+                final_critique = _fallback_chapter_critique(chapter, final_lint)
+                record_event(
+                    session,
+                    run,
+                    "chapter_critique_fallback",
+                    {
+                        "message": f"Chapter {chapter.chapter_number} post-repair critique used local lint fallback.",
+                        "chapter_number": chapter.chapter_number,
+                        "error": str(exc),
+                    },
+                )
+            combined_critique = _apply_quality_profile_to_critique(
+                run,
+                _combine_chapter_feedback(final_critique, final_lint),
+            )
+            _persist_structured_qa(chapter, combined_critique)
+            session.commit()
+
 
     autonomous_editorial.ensure_chapter(session, run, chapter, ledger, settings, client)
     _ensure_not_canceled(session, run)
