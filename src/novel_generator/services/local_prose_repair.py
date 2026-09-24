@@ -59,7 +59,7 @@ def repair_plan(text, issues):
         [item.start() for item in separators] + [len(text)]) if text[start:end].strip()]
     groups = []
     for issue in issues:
-        if issue.category not in {"prose", "repetition", "causality"}:
+        if issue.category not in {"prose", "repetition", "causality", "unresolved_payoff", "premature_payoff"}:
             return None
         references = getattr(issue, "evidence_paragraphs", [])
         if references:
