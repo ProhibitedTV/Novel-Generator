@@ -85,3 +85,26 @@ def test_numbered_evidence_repairs_separate_paragraphs_without_omission_matching
     diagnosis.evidence_paragraphs = [1, 3]
     plan = repair_plan(text, [diagnosis])
     assert [text[slice(*span)] for span, _ in plan] == ["First speech.", "Second speech."]
+
+
+def test_causal_edit_preserves_prior_repairs_and_receives_context():
+    import json
+    text = "The gate cracked.\n\nRepaired dialogue stays.\n\nThe pump broke."
+    diagnosis = issue('“The pump broke.”', 'causality')
+    diagnosis.model_dump = lambda: {}
+    plan = repair_plan(text, [diagnosis])
+    def generate(messages, *args):
+        request = json.loads(messages[1]['content'])
+        assert request['read_only_context'] == {'actual_prose': text}
+        assert request['passage_to_repair'] == 'The pump broke.'
+        return 'The gate’s vibration fractured the pump.'
+    assert repair_passages(text, plan, generate, {'actual_prose': text}) == (
+        'The gate cracked.\n\nRepaired dialogue stays.\n\nThe gate’s vibration fractured the pump.')
+
+
+def test_ellipsis_quotes_map_only_grounded_passages():
+    text = 'She said, “Stay here.”\n\nUnchanged.\n\nHe said, “Stay here.”'
+    diagnosis = issue('She said, "Stay here." ... He said, "Stay here."')
+    assert len(repair_plan(text, [diagnosis])) == 2
+    diagnosis.evidence += ' ... Invented ending.'
+    assert repair_plan(text, [diagnosis]) is None

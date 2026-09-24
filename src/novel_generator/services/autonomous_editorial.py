@@ -266,6 +266,8 @@ def _repair_priority(issue):
 
 
 def _repair_kind(payload):
+    if payload.get("repair_kind") == "targeted":
+        return "targeted"
     # Infer the bucket for old checkpoints instead of resetting their budgets.
     issues = payload.get("issues", [])
     return "prose" if issues and all(issue["category"] in {"prose", "repetition"} for issue in issues) else "chapter"
@@ -279,17 +281,22 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
                 if event.event_type == "autonomous_repair_started" and event.id not in interrupted
                 and event.payload.get("chapter_number") == chapter.chapter_number and event.payload.get("phase") == phase]
     priority = min(_repair_priority(issue) for issue in issues)
+    deferred = [issue for issue in issues if _repair_priority(issue) != priority]
+    issues = [issue for issue in issues if _repair_priority(issue) == priority]
+    before = chapter.content or ""
+    from .local_prose_repair import repair_plan, repair_passages
+    plan = repair_plan(before, issues)
     repair_kind = "prose" if priority == 2 else "chapter"
+    if priority == 0 and plan is not None:
+        repair_kind = "targeted"
     attempts = [attempt for attempt in all_attempts if _repair_kind(attempt) == repair_kind]
-    limit = (settings.autonomous_prose_repair_attempts if repair_kind == "prose" else
+    limit = (settings.autonomous_targeted_repair_attempts if repair_kind == "targeted" else
+             settings.autonomous_prose_repair_attempts if repair_kind == "prose" else
              settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds)
     if len(attempts) >= limit:
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} exhausted its {phase} {repair_kind} repair budget. Unresolved checks prevent completion.")
     # A structural rewrite can invalidate line edits and alter length. Recheck the
     # resulting text before spending a later attempt on those lower-level issues.
-    deferred = [issue for issue in issues if _repair_priority(issue) != priority]
-    issues = [issue for issue in issues if _repair_priority(issue) == priority]
-    before = chapter.content or ""
     backup = settings.artifacts_dir / run.id / "editorial-history" / f"chapter-{chapter.chapter_number}-{_hash(before)[:16]}.md"
     backup.parent.mkdir(parents=True, exist_ok=True)
     backup.write_text(before, encoding="utf-8")
@@ -323,8 +330,6 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
                                                    "repairs": [issue.model_dump() for issue in issues]}, ensure_ascii=False)},
     ]
     messages[0]["content"] += length_instruction
-    from .local_prose_repair import repair_plan, repair_passages
-    plan = repair_plan(before, issues)
     run.current_step = "autonomous_revision"
     run.current_chapter = chapter.chapter_number
     session.commit()
@@ -337,7 +342,7 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
                 "repair_mode": "passage" if plan is not None else "chapter",
                 "passage": passage, "passage_count": passage_count},
         ))
-    candidate = repair_passages(before, plan, generate_repair) if plan is not None else generate_repair(messages)
+    candidate = repair_passages(before, plan, generate_repair, context=context) if plan is not None else generate_repair(messages)
     if length_instruction and len(candidate.split()) > maximum:
         from .prose_budget import compress_prose
         def compress(messages, passage, passage_count, attempt):
@@ -482,6 +487,7 @@ def save_report(session, run, settings, status: str, **extra) -> None:
               "quality_profile": run.quality_profile,
               "total_words": sum(len((chapter.content or "").split()) for chapter in run.chapters),
               "repair_limits": {"draft_attempts_per_chapter": settings.autonomous_chapter_repair_attempts,
+                                "targeted_attempts_per_chapter_per_phase": settings.autonomous_targeted_repair_attempts,
                                 "prose_attempts_per_chapter_per_phase": settings.autonomous_prose_repair_attempts,
                                 "final_attempts_per_chapter": settings.autonomous_manuscript_repair_rounds},
               "manuscript_hash": _hash([(chapter.chapter_number, chapter.content) for chapter in run.chapters]),

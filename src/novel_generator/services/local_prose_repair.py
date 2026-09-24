@@ -29,18 +29,22 @@ def repair_span(text, issues):
     return start, end
 
 
-def repair_messages(text, span, issues):
+def repair_messages(text, span, issues, context=None):
     start, end = span
     return [
         {"role": "system", "content": (
             "Edit only the supplied passage to fix the diagnosed defect. Return the corrected passage "
             "as prose only, with no heading, explanation, or surrounding scenes. Preserve its unique "
             "facts, actions, and speaker attribution. For repetition, keep the statement once and "
-            "remove its redundant occurrence; do not paraphrase the duplicate into another repetition."
+            "remove its redundant occurrence; do not paraphrase the duplicate into another repetition. "
+            "Use read_only_context to understand causes and established facts, but never reproduce "
+            "or modify it. For causality, make the missing causal connection explicit inside the "
+            "supplied passage without inventing new events or changing the chapter's stopping state."
         )},
         {"role": "user", "content": json.dumps({
             "passage_to_repair": text[start:end], "diagnoses": [issue.model_dump() for issue in issues],
             "source_paragraph_start": len(re.split(r"\n\s*\n", text[:start].strip())) + 1 if text[:start].strip() else 1,
+            "read_only_context": context,
         }, ensure_ascii=False)},
     ]
 
@@ -53,7 +57,7 @@ def repair_plan(text, issues):
         [item.start() for item in separators] + [len(text)]) if text[start:end].strip()]
     groups = []
     for issue in issues:
-        if issue.category not in {"prose", "repetition"}:
+        if issue.category not in {"prose", "repetition", "causality"}:
             return None
         references = getattr(issue, "evidence_paragraphs", [])
         if references:
@@ -67,6 +71,19 @@ def repair_plan(text, issues):
             matches = list(re.finditer(r"\s+".join(re.escape(word) for word in words), text))
             spans = [(start, end) for start, end in paragraphs
                      if any(match.start() < end and match.end() > start for match in matches)]
+            if not spans:
+                # Match the same quotation formatting accepted by the reviewer,
+                # but only when every excerpt maps to actual source paragraphs.
+                marks = str.maketrans("", "", "\"'‘’“”")
+                normalize = lambda value: " ".join(value.translate(marks).split())
+                pieces = [normalize(part) for part in re.split(r"\s*(?:\[\s*(?:\.{3}|…)\s*\]|\.{3}|…)\s*", issue.evidence) if part.strip()]
+                spans = []
+                for piece in pieces:
+                    found = [span for span in paragraphs if piece and piece in normalize(text[slice(*span)])]
+                    if not found:
+                        return None
+                    spans.extend(found)
+                spans = sorted(set(spans))
         if not spans or any(len(text[start:end].split()) > 250 for start, end in spans):
             return None
         groups.extend((span, [issue]) for span in spans)
@@ -84,12 +101,12 @@ def repair_plan(text, issues):
     return merged if 0 < len(merged) <= 8 else None
 
 
-def repair_passages(text, plan, generate):
+def repair_passages(text, plan, generate, context=None):
     """Build an atomic candidate; failures leave the saved chapter untouched."""
     candidate = text
     # Descending original offsets remain valid as later passages change length.
     for number, (span, issues) in enumerate(reversed(plan), 1):
-        replacement = generate(repair_messages(text, span, issues), number, len(plan))
+        replacement = generate(repair_messages(text, span, issues, context), number, len(plan))
         if replacement.strip() and " ".join(replacement.split()) == " ".join(text[slice(*span)].split()):
             # One occurrence can remain when the other repeated occurrences change.
             # The caller rejects a completely unchanged chapter and re-reviews every edit.

@@ -377,6 +377,24 @@ def test_prose_budget_is_separate_and_counts_historical_prose_attempts(configure
             editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
 
 
+def test_targeted_budget_survives_resume_after_chapter_budget_exhausted(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        settings = get_settings().model_copy(update={"autonomous_chapter_repair_attempts": 1, "autonomous_targeted_repair_attempts": 1})
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        editor._record(session, run, "autonomous_repair_started", {
+            "chapter_number": 1, "phase": "draft", "issues": [issue()], "before_hash": "old"})
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category="causality", evidence=PROSE))
+        editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
+        assert editor._events(run, "autonomous_repair_started")[-1]["repair_kind"] == "targeted"
+        session.expire_all()
+        diagnosis.evidence = REPAIRED
+        with pytest.raises(editor.AutonomousQualityError, match="targeted repair budget"):
+            editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), "draft")
+
+
 def test_draft_resume_skips_legacy_rewrite_and_rechecks_latest_prose(configured_environment, monkeypatch):
     class ReachedReview(Exception):
         pass
