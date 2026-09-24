@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -68,6 +69,9 @@ def install_fake_provider(monkeypatch, *, review_fn=None, revision=REPAIRED):
         else:
             assert stage == "autonomous_review"
             context = json.loads(build_messages()[-1]["content"])
+            for field in ("actual_prose", "final_chapter_actual_prose"):
+                if field in context:
+                    context[field] = re.sub(r"^\[Chapter \d+, paragraph \d+\]\n", "", context[field], flags=re.MULTILINE)
             numbers = ([context["chapter_number"]] if context["scope"] != "whole_book"
                        else [item["chapter_number"] for item in context["chapter_map"]])
             output = review_fn(context, numbers) if review_fn else clean_review(numbers)
@@ -161,6 +165,23 @@ def test_chapter_review_cannot_order_a_future_chapter_to_supply_its_payoff():
     data["issues"] = [dict(issue(), repair_instruction="The next chapter must resolve the treaty.")]
     with pytest.raises(ValueError, match="future chapter"):
         editor.validate_chapter_repair_scope(EditorialReview.model_validate(data))
+
+
+def test_paragraph_evidence_is_attached_from_source_not_model_text():
+    chapters = [SimpleNamespace(chapter_number=1, content="Yes.\n\nShe closed the ledger.\n\nNo.")]
+    data = clean_review([1])
+    data["issues"] = [dict(issue(evidence="Model text is ignored for valid paragraph references."), evidence_paragraphs=[1, 3])]
+    review = editor.validate_review(json.dumps(data), chapters)
+    assert review.issues[0].evidence == "Yes. [...] No."
+    assert editor._numbered_prose(chapters[0].content, 1).count("She closed the ledger.") == 1
+
+
+@pytest.mark.parametrize("references", [[0], [4], [2, 1], [1, 1]])
+def test_invalid_paragraph_references_are_rejected(references):
+    data = clean_review([1])
+    data["issues"] = [dict(issue(), evidence_paragraphs=references)]
+    with pytest.raises(ValueError, match="paragraph references"):
+        editor.validate_review(json.dumps(data), [SimpleNamespace(chapter_number=1, content=PROSE)])
 
 
 def test_review_validation_retries_are_bounded_and_keep_source(monkeypatch):

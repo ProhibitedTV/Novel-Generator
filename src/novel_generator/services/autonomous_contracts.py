@@ -12,6 +12,7 @@ class EditorialIssue(BaseModel):
     category: Literal["continuity", "causality", "character", "premature_payoff", "unresolved_payoff", "repetition", "prose", "length"]
     problem: str = Field(min_length=1)
     evidence: str = Field(min_length=1, description="Exact short quotation from this chapter's actual prose.")
+    evidence_paragraphs: list[int] = Field(default_factory=list, description="Numbered source paragraphs supporting this issue. Prefer these references to copying dialogue.")
     repair_instruction: str = Field(min_length=1)
 
 
