@@ -148,3 +148,5 @@ eligible to run. `PROVIDER_RECOVERY_ATTEMPTS=96` limits these recoveries per run
 invalid output, and editorial failures do not trigger transport recovery. An
 unsaved automatic revision interrupted by transport does not consume an editorial
 repair attempt; the interruption still counts toward the transport recovery limit.
+
+Evidence-anchored causal repairs now edit only cited paragraphs, using the chapter context as read-only input. These repairs have a persistent, separate `AUTONOMOUS_TARGETED_REPAIR_ATTEMPTS` budget (default 12 per chapter per phase). Historical full-chapter attempts remain counted; no budgets are reset. Every candidate still receives a full review, and ungrounded or oversized repairs fall back to the existing chapter budget. Quotation formatting and omitted excerpts can map to separate source paragraphs without changing intervening prose.
