@@ -31,6 +31,7 @@ def repair(text, plan, context, generate):
         {"role": "system", "content": (
             'Return JSON only: {"edits":[{"id":1,"text":"replacement prose"}]}. '
             "Return every supplied passage id exactly once. Edit all passages together to resolve ALL diagnoses. "
+            "Passage ids are edit slots, NOT paragraph numbers mentioned in diagnoses. "
             "A repeated event must occur ONCE, at its appropriate chronological position; later passages may "
             "show consequences but must not replay the event. Do not insert the same repair in every passage. "
             "Use an empty text string to remove a wholly redundant passage; retain unique facts elsewhere. "
@@ -56,7 +57,9 @@ def repair(text, plan, context, generate):
                     raise ValueError("Each edit needs a unique integer id and string text.")
                 edits[row['id']] = row['text'].strip()
             if set(edits) != set(range(1, len(plan) + 1)):
-                raise ValueError("Return exactly every supplied passage id; no missing or extra ids.")
+                raise ValueError(f"Required edit ids are {list(range(1, len(plan) + 1))}; received {list(edits)}. "
+                                 "Use passage ids from the passages array, not source paragraph numbers. "
+                                 "Include unchanged passages too; use empty text for deletions.")
             if sum(len(value.split()) for value in edits.values()) > maximum:
                 raise ValueError(f"Replacement prose exceeds {maximum} total words.")
             if not any(edits.values()):
