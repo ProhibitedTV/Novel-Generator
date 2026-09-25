@@ -75,6 +75,13 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
     for issue in review.issues:
+        if not issue.evidence_paragraphs:
+            # Some local models serialize explicit source labels inside evidence
+            # instead of its dedicated array. Treat those as references, never
+            # as fuzzy quotations; the source text is still attached below.
+            labels = re.findall(r"\bParagraph\s+(\d+)\s*:", issue.evidence, re.IGNORECASE)
+            if labels:
+                issue.evidence_paragraphs = sorted({int(label) for label in labels})
         if issue.evidence_paragraphs:
             references = issue.evidence_paragraphs
             available = paragraphs.get(issue.chapter_number, [])
@@ -164,7 +171,9 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
-    fingerprint = _hash({"contract": 7, "context": context, "provider": provider, "model": model, "scope": scope})
+    adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
+    fingerprint = _hash({"contract": 9, "context": context, "provider": provider, "model": model, "scope": scope,
+                         "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
             return validate_review(json.dumps(saved["review"]), chapters)
@@ -237,6 +246,38 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         parse_review, "automatic editorial review", "autonomous_review",
         run.current_chapter,
     )
+    prior_repairs = [item for item in _events(run, "autonomous_repair_started")
+                     if item.get("chapter_number") == run.current_chapter]
+    if review.issues and scope in {"chapter", "final_chapter"} and len(prior_repairs) >= 2:
+        # A separate decision pass checks a repeatedly revised chapter against
+        # the actual contract, rather than endlessly following new preferences.
+        proposed = review.model_dump()
+        adjudication = [
+            {"role": "system", "content": instruction + (
+                "\nYou are adjudicating a proposed review after repeated revisions. Independently check "
+                "each proposed defect against the supplied actual prose and this chapter's assigned ending. "
+                "Reject an allegation when the prose already provides its requested cause, action, or consequence. "
+                "Wanting the same cause stated more explicitly or in a different paragraph is a preference, "
+                "not a missing cause. A repeated topic is not a repeated event if the argument advances. "
+                "Do not require a setup chapter to resolve the book's central crisis. Do not invent alternate "
+                "defects to justify earlier failed flags. Retain genuine contradictions, actual duplicate "
+                "passages, unfulfilled assigned events, and broken prose. Re-evaluate ALL four booleans "
+                "against the source; return a complete evidence-grounded EditorialReview, not commentary."
+            )},
+            {"role": "user", "content": json.dumps({"scope": scope, **review_context,
+                "proposed_review_to_verify": proposed}, ensure_ascii=False)},
+        ]
+        _check_context(adjudication, client, adjudicator_provider)
+        review = pipeline._generate_structured_output(
+            session, run, client, adjudicator_provider, adjudicator_model, lambda: adjudication,
+            parse_review, "editorial defect adjudication", "autonomous_review", run.current_chapter,
+        )
+        _record(session, run, "autonomous_review_adjudicated", {
+            "message": "Rechecked proposed defects against revised prose and assigned chapter scope.",
+            "chapter_number": run.current_chapter, "proposed_review": proposed,
+            "provider_name": adjudicator_provider, "model_name": adjudicator_model,
+            "review": review.model_dump(), "fingerprint": fingerprint,
+        })
     _record(session, run, "autonomous_review_completed", {
         "message": f"Automatic {scope} review {'passed' if review.passed else 'requested repairs'}.",
         "scope": scope, "fingerprint": fingerprint, "review": review.model_dump(),
@@ -266,8 +307,8 @@ def _repair_priority(issue):
 
 
 def _repair_kind(payload):
-    if payload.get("repair_kind") == "targeted":
-        return "targeted"
+    if payload.get("repair_kind") in {"targeted", "coordinated"}:
+        return payload["repair_kind"]
     # Infer the bucket for old checkpoints instead of resetting their budgets.
     issues = payload.get("issues", [])
     return "prose" if issues and all(issue["category"] in {"prose", "repetition"} for issue in issues) else "chapter"
@@ -281,16 +322,29 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
                 if event.event_type == "autonomous_repair_started" and event.id not in interrupted
                 and event.payload.get("chapter_number") == chapter.chapter_number and event.payload.get("phase") == phase]
     priority = min(_repair_priority(issue) for issue in issues)
+    all_issues = issues
     deferred = [issue for issue in issues if _repair_priority(issue) != priority]
     issues = [issue for issue in issues if _repair_priority(issue) == priority]
     before = chapter.content or ""
     from .local_prose_repair import repair_plan, repair_passages
     plan = repair_plan(before, issues)
+    # Related causal and repetition diagnoses must be resolved in one candidate,
+    # not starved behind alternating structural edits.
+    combined = [issue for issue in all_issues if issue.category != "length"]
+    combined_plan = repair_plan(before, combined, max_passages=16)
+    coordinated = combined_plan is not None and (len(combined_plan) > 1 or
+        any(_repair_kind(attempt) == "coordinated" for attempt in all_attempts))
+    if coordinated:
+        issues = combined
+        plan = combined_plan
+        deferred = [issue for issue in all_issues if issue.category == "length"]
     repair_kind = "prose" if priority == 2 else "chapter"
     if priority == 0 and plan is not None:
         repair_kind = "targeted"
+    if coordinated:
+        repair_kind = "coordinated"
     attempts = [attempt for attempt in all_attempts if _repair_kind(attempt) == repair_kind]
-    limit = (settings.autonomous_targeted_repair_attempts if repair_kind == "targeted" else
+    limit = (settings.autonomous_targeted_repair_attempts if repair_kind in {"targeted", "coordinated"} else
              settings.autonomous_prose_repair_attempts if repair_kind == "prose" else
              settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds)
     if len(attempts) >= limit:
@@ -309,6 +363,10 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         "deferred_issues": [issue.model_dump() for issue in deferred],
     })
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
+    if coordinated:
+        # Joint edits need the full drafting model's reasoning capacity rather
+        # than an optional lightweight line-edit route.
+        provider, model = pipeline._resolve_stage_route(client, run, "chapter_draft")
     context = _context(run, chapter, ledger)
     length_instruction = ""
     if any(issue.category == "length" for issue in issues):
@@ -339,10 +397,14 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         return pipeline.sanitize_chapter_content(pipeline._supervised_provider_chat(
             session, run, client, provider, model, messages, stage="autonomous_revision",
             chapter_number=chapter.chapter_number, metadata={"phase": phase, "repair_attempt": len(attempts) + 1,
-                "repair_mode": "passage" if plan is not None else "chapter",
+                "repair_mode": "coordinated" if coordinated else "passage" if plan is not None else "chapter",
                 "passage": passage, "passage_count": passage_count},
         ))
-    candidate = repair_passages(before, plan, generate_repair, context=context) if plan is not None else generate_repair(messages)
+    if coordinated:
+        from .coordinated_repair import repair
+        candidate = repair(before, plan, context, generate_repair)
+    else:
+        candidate = repair_passages(before, plan, generate_repair, context=context) if plan is not None else generate_repair(messages)
     if length_instruction and len(candidate.split()) > maximum:
         from .prose_budget import compress_prose
         def compress(messages, passage, passage_count, attempt):

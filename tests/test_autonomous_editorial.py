@@ -131,8 +131,8 @@ def test_missing_boolean_checks_and_unevidenced_failures_are_not_passes():
     review = clean_review([1])
     review["ending_complete"] = False
     review["issues"] = [dict(issue(), category="prose")]
-    with pytest.raises(ValueError, match="ending or causal"):
-        EditorialReview.model_validate(review)
+    result = EditorialReview.model_validate(review)
+    assert result.ending_complete is False and not result.passed
     schema = response_schema_for_stage("autonomous_review")
     assert set(clean_review([1])) <= set(schema["required"])
 
@@ -257,7 +257,7 @@ def test_local_repair_preserves_neighbors_and_requires_fresh_review(configured_e
 
 
 def test_repair_budget_survives_resume_and_rejects_no_progress(configured_environment, monkeypatch):
-    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *args: None)
+    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *args, **kwargs: None)
     def review(context, numbers):
         output = clean_review(numbers)
         output["issues"] = [issue(evidence=context["actual_prose"])]
@@ -359,6 +359,32 @@ def test_structural_issues_precede_polish_and_length(configured_environment, mon
         assert [i["category"] for i in captured[0]["diagnoses"]] == ["continuity"]
         saved = editor._events(run, "autonomous_repair_started")[-1]
         assert len(saved["deferred_issues"]) == 2
+
+
+def test_coordinated_repairs_do_not_starve_repetition_and_keep_budget(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.chapters[0].content = 'The pump broke.\n\nUntouched action.\n\nThe pump broke again.'
+        session.commit()
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnoses = [EditorialIssue.model_validate(dict(issue(), category=category,
+            evidence='Source paragraphs', evidence_paragraphs=[1, 3])) for category in ('causality', 'repetition')]
+        def chat(*args, **kwargs):
+            request = json.loads(args[5][1]['content'])
+            assert {d['category'] for d in request['diagnoses']} == {'causality', 'repetition'}
+            return json.dumps({'edits': [{'id': 1, 'text': 'Gate vibration broke the pump.'}, {'id': 2, 'text': ''}]})
+        monkeypatch.setattr(pipeline, '_supervised_provider_chat', chat)
+        settings = get_settings().model_copy(update={'autonomous_targeted_repair_attempts': 1})
+        editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), 'draft')
+        assert run.chapters[0].content == 'Gate vibration broke the pump.\n\nUntouched action.\n\n'
+        event = editor._events(run, 'autonomous_repair_started')[-1]
+        assert event['repair_kind'] == 'coordinated' and not event['deferred_issues']
+        session.expire_all()
+        for diagnosis in diagnoses:
+            diagnosis.evidence_paragraphs = [1]
+        with pytest.raises(editor.AutonomousQualityError, match='coordinated repair budget'):
+            editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), 'draft')
 
 
 def test_prose_budget_is_separate_and_counts_historical_prose_attempts(configured_environment, monkeypatch):
@@ -526,3 +552,34 @@ def test_real_pipeline_withholds_manuscript_exports_until_gate_passes(configured
             assert not {"markdown", "docx"} & kinds
         else:
             assert {"markdown", "docx", "qa-report"} <= kinds
+
+
+def test_explicit_paragraph_labels_are_resolved_and_range_checked():
+    chapter = SimpleNamespace(chapter_number=1, content="Original first.\n\nOriginal second.")
+    review = clean_review([1])
+    review['issues'] = [issue(evidence='Paragraph 2: paraphrased by reviewer')]
+    parsed = editor.validate_review(json.dumps(review), [chapter])
+    assert parsed.issues[0].evidence == 'Original second.'
+    assert parsed.issues[0].evidence_paragraphs == [2]
+    review['issues'][0]['evidence'] = 'Paragraph 9: missing source'
+    with pytest.raises(ValueError, match='valid, unique'):
+        editor.validate_review(json.dumps(review), [chapter])
+
+
+def test_repeated_reviews_are_adjudicated_without_automatic_acceptance(configured_environment, monkeypatch):
+    def review(context, numbers):
+        result = clean_review(numbers)
+        if 'proposed_review_to_verify' not in context:
+            result['issues'] = [issue()]
+        return result
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        for n in range(2):
+            editor._record(session, run, 'autonomous_repair_started', {'chapter_number': 1, 'phase': 'draft'})
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
+        assert run.chapters[0].content == PROSE
+        assert calls.count(('autonomous_review', 1)) == 2
+        saved = editor._events(run, 'autonomous_review_adjudicated')[-1]
+        assert saved['proposed_review']['issues'] and not saved['review']['issues']

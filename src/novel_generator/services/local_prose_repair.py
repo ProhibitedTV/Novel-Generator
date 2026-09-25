@@ -51,7 +51,7 @@ def repair_messages(text, span, issues, context=None):
     ]
 
 
-def repair_plan(text, issues):
+def repair_plan(text, issues, max_passages=8):
     """Merge overlapping diagnoses, keeping distant passages independently editable."""
     separators = list(re.finditer(r"\r?\n[ \t\r\n]*\r?\n", text))
     paragraphs = [(start, end) for start, end in zip(
@@ -103,7 +103,7 @@ def repair_plan(text, issues):
             merged[-1] = (combined_span, combined)
         else:
             merged.append((span, diagnoses))
-    return merged if 0 < len(merged) <= 8 else None
+    return merged if 0 < len(merged) <= max_passages else None
 
 
 def repair_passages(text, plan, generate, context=None):

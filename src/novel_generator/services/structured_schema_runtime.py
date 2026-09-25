@@ -18,7 +18,7 @@ from ..schemas import (
     StructuredOutlineEntry,
 )
 from .continuity_lifecycle import LIVE_SNAPSHOT_FIELDS
-from .autonomous_contracts import EditorialReview
+from .autonomous_contracts import EditorialReview, CoordinatedEdits
 
 
 _INSTALLED = False
@@ -29,6 +29,7 @@ _SCHEMA_NAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
 def _adapter_for_stage(stage: str) -> TypeAdapter[Any] | None:
     mapping: dict[str, Any] = {
         "autonomous_review": EditorialReview,
+        "autonomous_revision": CoordinatedEdits,
         "story_bible": StoryBible,
         "outline": list[StructuredOutlineEntry],
         "outline_chunk": list[StructuredOutlineEntry],
