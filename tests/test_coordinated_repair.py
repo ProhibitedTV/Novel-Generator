@@ -63,3 +63,10 @@ def test_cosmetic_change_cannot_pass_as_repetition_repair():
     result = repair(text, plan, {}, generate)
     assert len(calls) == 2 and result.count(phrase) == 1
     assert 'was not reduced' in calls[-1][-1]['content']
+
+
+def test_coordinated_selection_can_cover_ten_small_passages():
+    text = '\n\n'.join(f'Passage {i}.' for i in range(10))
+    issue = SimpleNamespace(category='repetition', evidence_paragraphs=list(range(1, 11)))
+    assert repair_plan(text, [issue]) is None
+    assert len(repair_plan(text, [issue], max_passages=16)) == 10

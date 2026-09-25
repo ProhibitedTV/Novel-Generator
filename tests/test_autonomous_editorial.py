@@ -257,7 +257,7 @@ def test_local_repair_preserves_neighbors_and_requires_fresh_review(configured_e
 
 
 def test_repair_budget_survives_resume_and_rejects_no_progress(configured_environment, monkeypatch):
-    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *args: None)
+    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *args, **kwargs: None)
     def review(context, numbers):
         output = clean_review(numbers)
         output["issues"] = [issue(evidence=context["actual_prose"])]

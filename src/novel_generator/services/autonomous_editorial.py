@@ -297,7 +297,7 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
     # Related causal and repetition diagnoses must be resolved in one candidate,
     # not starved behind alternating structural edits.
     combined = [issue for issue in all_issues if issue.category != "length"]
-    combined_plan = repair_plan(before, combined)
+    combined_plan = repair_plan(before, combined, max_passages=16)
     coordinated = combined_plan is not None and (len(combined_plan) > 1 or
         any(_repair_kind(attempt) == "coordinated" for attempt in all_attempts))
     if coordinated:
