@@ -361,6 +361,32 @@ def test_structural_issues_precede_polish_and_length(configured_environment, mon
         assert len(saved["deferred_issues"]) == 2
 
 
+def test_coordinated_repairs_do_not_starve_repetition_and_keep_budget(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.chapters[0].content = 'The pump broke.\n\nUntouched action.\n\nThe pump broke again.'
+        session.commit()
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnoses = [EditorialIssue.model_validate(dict(issue(), category=category,
+            evidence='Source paragraphs', evidence_paragraphs=[1, 3])) for category in ('causality', 'repetition')]
+        def chat(*args, **kwargs):
+            request = json.loads(args[5][1]['content'])
+            assert {d['category'] for d in request['diagnoses']} == {'causality', 'repetition'}
+            return json.dumps({'edits': [{'id': 1, 'text': 'Gate vibration broke the pump.'}, {'id': 2, 'text': ''}]})
+        monkeypatch.setattr(pipeline, '_supervised_provider_chat', chat)
+        settings = get_settings().model_copy(update={'autonomous_targeted_repair_attempts': 1})
+        editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), 'draft')
+        assert run.chapters[0].content == 'Gate vibration broke the pump.\n\nUntouched action.\n\n'
+        event = editor._events(run, 'autonomous_repair_started')[-1]
+        assert event['repair_kind'] == 'coordinated' and not event['deferred_issues']
+        session.expire_all()
+        for diagnosis in diagnoses:
+            diagnosis.evidence_paragraphs = [1]
+        with pytest.raises(editor.AutonomousQualityError, match='coordinated repair budget'):
+            editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), 'draft')
+
+
 def test_prose_budget_is_separate_and_counts_historical_prose_attempts(configured_environment, monkeypatch):
     from novel_generator.services.autonomous_contracts import EditorialIssue
     install_fake_provider(monkeypatch)

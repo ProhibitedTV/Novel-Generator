@@ -266,8 +266,8 @@ def _repair_priority(issue):
 
 
 def _repair_kind(payload):
-    if payload.get("repair_kind") == "targeted":
-        return "targeted"
+    if payload.get("repair_kind") in {"targeted", "coordinated"}:
+        return payload["repair_kind"]
     # Infer the bucket for old checkpoints instead of resetting their budgets.
     issues = payload.get("issues", [])
     return "prose" if issues and all(issue["category"] in {"prose", "repetition"} for issue in issues) else "chapter"
@@ -281,16 +281,29 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
                 if event.event_type == "autonomous_repair_started" and event.id not in interrupted
                 and event.payload.get("chapter_number") == chapter.chapter_number and event.payload.get("phase") == phase]
     priority = min(_repair_priority(issue) for issue in issues)
+    all_issues = issues
     deferred = [issue for issue in issues if _repair_priority(issue) != priority]
     issues = [issue for issue in issues if _repair_priority(issue) == priority]
     before = chapter.content or ""
     from .local_prose_repair import repair_plan, repair_passages
     plan = repair_plan(before, issues)
+    # Related causal and repetition diagnoses must be resolved in one candidate,
+    # not starved behind alternating structural edits.
+    combined = [issue for issue in all_issues if issue.category != "length"]
+    combined_plan = repair_plan(before, combined)
+    coordinated = combined_plan is not None and (len(combined_plan) > 1 or
+        any(_repair_kind(attempt) == "coordinated" for attempt in all_attempts))
+    if coordinated:
+        issues = combined
+        plan = combined_plan
+        deferred = [issue for issue in all_issues if issue.category == "length"]
     repair_kind = "prose" if priority == 2 else "chapter"
     if priority == 0 and plan is not None:
         repair_kind = "targeted"
+    if coordinated:
+        repair_kind = "coordinated"
     attempts = [attempt for attempt in all_attempts if _repair_kind(attempt) == repair_kind]
-    limit = (settings.autonomous_targeted_repair_attempts if repair_kind == "targeted" else
+    limit = (settings.autonomous_targeted_repair_attempts if repair_kind in {"targeted", "coordinated"} else
              settings.autonomous_prose_repair_attempts if repair_kind == "prose" else
              settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds)
     if len(attempts) >= limit:
@@ -339,10 +352,14 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         return pipeline.sanitize_chapter_content(pipeline._supervised_provider_chat(
             session, run, client, provider, model, messages, stage="autonomous_revision",
             chapter_number=chapter.chapter_number, metadata={"phase": phase, "repair_attempt": len(attempts) + 1,
-                "repair_mode": "passage" if plan is not None else "chapter",
+                "repair_mode": "coordinated" if coordinated else "passage" if plan is not None else "chapter",
                 "passage": passage, "passage_count": passage_count},
         ))
-    candidate = repair_passages(before, plan, generate_repair, context=context) if plan is not None else generate_repair(messages)
+    if coordinated:
+        from .coordinated_repair import repair
+        candidate = repair(before, plan, context, generate_repair)
+    else:
+        candidate = repair_passages(before, plan, generate_repair, context=context) if plan is not None else generate_repair(messages)
     if length_instruction and len(candidate.split()) > maximum:
         from .prose_budget import compress_prose
         def compress(messages, passage, passage_count, attempt):
