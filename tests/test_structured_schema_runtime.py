@@ -30,6 +30,14 @@ def test_continuity_schema_requires_explicit_live_snapshots() -> None:
             "civilian_pressure_points", "emotional_open_loops"} <= set(schema["required"])
 
 
+def test_coordinated_edit_schema_constrains_ollama_response_shape():
+    schema = response_schema_for_stage('autonomous_revision')
+    assert schema['required'] == ['edits']
+    assert schema['additionalProperties'] is False
+    assert schema['$defs']['PassageEdit']['required'] == ['id', 'text']
+    assert schema['properties']['edits']['maxItems'] == 16
+
+
 def test_schema_marker_round_trips_and_is_removed_from_provider_messages() -> None:
     marker = make_schema_marker("chapter_critique")
     assert marker is not None

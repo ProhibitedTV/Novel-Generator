@@ -171,7 +171,9 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
-    fingerprint = _hash({"contract": 8, "context": context, "provider": provider, "model": model, "scope": scope})
+    adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
+    fingerprint = _hash({"contract": 9, "context": context, "provider": provider, "model": model, "scope": scope,
+                         "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
             return validate_review(json.dumps(saved["review"]), chapters)
@@ -265,14 +267,15 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             {"role": "user", "content": json.dumps({"scope": scope, **review_context,
                 "proposed_review_to_verify": proposed}, ensure_ascii=False)},
         ]
-        _check_context(adjudication, client, provider)
+        _check_context(adjudication, client, adjudicator_provider)
         review = pipeline._generate_structured_output(
-            session, run, client, provider, model, lambda: adjudication,
+            session, run, client, adjudicator_provider, adjudicator_model, lambda: adjudication,
             parse_review, "editorial defect adjudication", "autonomous_review", run.current_chapter,
         )
         _record(session, run, "autonomous_review_adjudicated", {
             "message": "Rechecked proposed defects against revised prose and assigned chapter scope.",
             "chapter_number": run.current_chapter, "proposed_review": proposed,
+            "provider_name": adjudicator_provider, "model_name": adjudicator_model,
             "review": review.model_dump(), "fingerprint": fingerprint,
         })
     _record(session, run, "autonomous_review_completed", {

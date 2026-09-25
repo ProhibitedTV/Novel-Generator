@@ -5,6 +5,17 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 
 
+class PassageEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: int = Field(ge=1)
+    text: str
+
+
+class CoordinatedEdits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    edits: list[PassageEdit] = Field(min_length=1, max_length=16)
+
+
 class EditorialIssue(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
