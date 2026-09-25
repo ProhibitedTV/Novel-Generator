@@ -322,6 +322,10 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         "deferred_issues": [issue.model_dump() for issue in deferred],
     })
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
+    if coordinated:
+        # Joint edits need the full drafting model's reasoning capacity rather
+        # than an optional lightweight line-edit route.
+        provider, model = pipeline._resolve_stage_route(client, run, "chapter_draft")
     context = _context(run, chapter, ledger)
     length_instruction = ""
     if any(issue.category == "length" for issue in issues):

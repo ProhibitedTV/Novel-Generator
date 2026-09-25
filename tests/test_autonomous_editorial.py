@@ -131,8 +131,8 @@ def test_missing_boolean_checks_and_unevidenced_failures_are_not_passes():
     review = clean_review([1])
     review["ending_complete"] = False
     review["issues"] = [dict(issue(), category="prose")]
-    with pytest.raises(ValueError, match="ending or causal"):
-        EditorialReview.model_validate(review)
+    result = EditorialReview.model_validate(review)
+    assert result.ending_complete is False and not result.passed
     schema = response_schema_for_stage("autonomous_review")
     assert set(clean_review([1])) <= set(schema["required"])
 

@@ -31,9 +31,9 @@ class EditorialReview(BaseModel):
     def require_actionable_failures(self):
         if not all((self.plot_coherent, self.canon_consistent, self.prose_clean, self.ending_complete)) and not self.issues:
             raise ValueError("Every failed check needs an evidenced issue and repair instruction.")
-        categories = {issue.category for issue in self.issues}
-        if not self.ending_complete and not categories.intersection({"unresolved_payoff", "premature_payoff", "causality"}):
-            raise ValueError("A failed ending check needs an ending or causal issue, not an unrelated stylistic suggestion.")
+        # Keep failed checks false, but allow grounded repairs to proceed even
+        # when the reviewer classifies an ending defect as repetition/prose.
+        # Forcing a new category here encouraged invented closure requirements.
         return self
 
     @property
