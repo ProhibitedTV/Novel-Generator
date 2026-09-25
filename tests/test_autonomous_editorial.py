@@ -564,3 +564,22 @@ def test_explicit_paragraph_labels_are_resolved_and_range_checked():
     review['issues'][0]['evidence'] = 'Paragraph 9: missing source'
     with pytest.raises(ValueError, match='valid, unique'):
         editor.validate_review(json.dumps(review), [chapter])
+
+
+def test_repeated_reviews_are_adjudicated_without_automatic_acceptance(configured_environment, monkeypatch):
+    def review(context, numbers):
+        result = clean_review(numbers)
+        if 'proposed_review_to_verify' not in context:
+            result['issues'] = [issue()]
+        return result
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        for n in range(2):
+            editor._record(session, run, 'autonomous_repair_started', {'chapter_number': 1, 'phase': 'draft'})
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
+        assert run.chapters[0].content == PROSE
+        assert calls.count(('autonomous_review', 1)) == 2
+        saved = editor._events(run, 'autonomous_review_adjudicated')[-1]
+        assert saved['proposed_review']['issues'] and not saved['review']['issues']

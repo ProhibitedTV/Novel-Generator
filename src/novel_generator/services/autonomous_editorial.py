@@ -171,7 +171,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
-    fingerprint = _hash({"contract": 7, "context": context, "provider": provider, "model": model, "scope": scope})
+    fingerprint = _hash({"contract": 8, "context": context, "provider": provider, "model": model, "scope": scope})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
             return validate_review(json.dumps(saved["review"]), chapters)
@@ -244,6 +244,37 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         parse_review, "automatic editorial review", "autonomous_review",
         run.current_chapter,
     )
+    prior_repairs = [item for item in _events(run, "autonomous_repair_started")
+                     if item.get("chapter_number") == run.current_chapter]
+    if review.issues and scope in {"chapter", "final_chapter"} and len(prior_repairs) >= 2:
+        # A separate decision pass checks a repeatedly revised chapter against
+        # the actual contract, rather than endlessly following new preferences.
+        proposed = review.model_dump()
+        adjudication = [
+            {"role": "system", "content": instruction + (
+                "\nYou are adjudicating a proposed review after repeated revisions. Independently check "
+                "each proposed defect against the supplied actual prose and this chapter's assigned ending. "
+                "Reject an allegation when the prose already provides its requested cause, action, or consequence. "
+                "Wanting the same cause stated more explicitly or in a different paragraph is a preference, "
+                "not a missing cause. A repeated topic is not a repeated event if the argument advances. "
+                "Do not require a setup chapter to resolve the book's central crisis. Do not invent alternate "
+                "defects to justify earlier failed flags. Retain genuine contradictions, actual duplicate "
+                "passages, unfulfilled assigned events, and broken prose. Re-evaluate ALL four booleans "
+                "against the source; return a complete evidence-grounded EditorialReview, not commentary."
+            )},
+            {"role": "user", "content": json.dumps({"scope": scope, **review_context,
+                "proposed_review_to_verify": proposed}, ensure_ascii=False)},
+        ]
+        _check_context(adjudication, client, provider)
+        review = pipeline._generate_structured_output(
+            session, run, client, provider, model, lambda: adjudication,
+            parse_review, "editorial defect adjudication", "autonomous_review", run.current_chapter,
+        )
+        _record(session, run, "autonomous_review_adjudicated", {
+            "message": "Rechecked proposed defects against revised prose and assigned chapter scope.",
+            "chapter_number": run.current_chapter, "proposed_review": proposed,
+            "review": review.model_dump(), "fingerprint": fingerprint,
+        })
     _record(session, run, "autonomous_review_completed", {
         "message": f"Automatic {scope} review {'passed' if review.passed else 'requested repairs'}.",
         "scope": scope, "fingerprint": fingerprint, "review": review.model_dump(),
