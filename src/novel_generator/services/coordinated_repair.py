@@ -1,7 +1,15 @@
 """Atomic edits for coupled defects spanning multiple source passages."""
 import json
+import re
+from collections import Counter
 
 from .prompts import extract_json_payload
+
+
+def repeated_phrases(text):
+    words = re.findall(r"\w+", text.lower())
+    counts = Counter(tuple(words[i:i + 12]) for i in range(len(words) - 11))
+    return {phrase: count for phrase, count in counts.items() if count > 1}
 
 
 def repair(text, plan, context, generate):
@@ -14,6 +22,11 @@ def repair(text, plan, context, generate):
             if data not in diagnoses:
                 diagnoses.append(data)
     maximum = max(60, int(sum(len(p['source'].split()) for p in passages) * 1.25))
+    repeats = repeated_phrases(text) if any(d['category'] == 'repetition' for d in diagnoses) else {}
+    # Require progress only on repeated phrases actually present in selected
+    # passages; unrelated material outside the edit set cannot be changed.
+    selected_words = ' '.join(re.findall(r'\w+', ' '.join(p['source'] for p in passages).lower()))
+    repeats = {phrase: count for phrase, count in repeats.items() if ' '.join(phrase) in selected_words}
     messages = [
         {"role": "system", "content": (
             'Return JSON only: {"edits":[{"id":1,"text":"replacement prose"}]}. '
@@ -22,6 +35,7 @@ def repair(text, plan, context, generate):
             "show consequences but must not replay the event. Do not insert the same repair in every passage. "
             "Use an empty text string to remove a wholly redundant passage; retain unique facts elsewhere. "
             "Keep unchanged passage text when appropriate. Everything outside these passages is read-only. "
+            "If several selected passages repeat the same dialogue, retain that dialogue in only one passage. "
             "Respect the assigned chapter ending; a non-final chapter need not resolve the whole book. "
             "Do not follow editorial suggestions that would contradict the author brief or assigned ending. "
             "Preserve speaker identity, chronology, and voice. Return prose inside JSON strings, no commentary."
@@ -53,6 +67,11 @@ def repair(text, plan, context, generate):
                 candidate = candidate[:start] + edits[index] + candidate[end:]
             if ' '.join(candidate.split()) == ' '.join(text.split()):
                 raise ValueError("No change was made to the diagnosed prose.")
+            if repeats:
+                remaining = repeated_phrases(candidate)
+                if sum(remaining.get(p, 1) - 1 for p in repeats) >= sum(c - 1 for c in repeats.values()):
+                    examples = [' '.join(p) for p in list(repeats)[:3]]
+                    raise ValueError(f"The diagnosed repeated wording was not reduced. Keep each once or remove redundant passages: {examples}")
             return candidate
         except (ValueError, TypeError, KeyError) as exc:
             if attempt == 2:

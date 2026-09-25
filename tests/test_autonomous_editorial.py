@@ -552,3 +552,15 @@ def test_real_pipeline_withholds_manuscript_exports_until_gate_passes(configured
             assert not {"markdown", "docx"} & kinds
         else:
             assert {"markdown", "docx", "qa-report"} <= kinds
+
+
+def test_explicit_paragraph_labels_are_resolved_and_range_checked():
+    chapter = SimpleNamespace(chapter_number=1, content="Original first.\n\nOriginal second.")
+    review = clean_review([1])
+    review['issues'] = [issue(evidence='Paragraph 2: paraphrased by reviewer')]
+    parsed = editor.validate_review(json.dumps(review), [chapter])
+    assert parsed.issues[0].evidence == 'Original second.'
+    assert parsed.issues[0].evidence_paragraphs == [2]
+    review['issues'][0]['evidence'] = 'Paragraph 9: missing source'
+    with pytest.raises(ValueError, match='valid, unique'):
+        editor.validate_review(json.dumps(review), [chapter])

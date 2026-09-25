@@ -75,6 +75,13 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
     for issue in review.issues:
+        if not issue.evidence_paragraphs:
+            # Some local models serialize explicit source labels inside evidence
+            # instead of its dedicated array. Treat those as references, never
+            # as fuzzy quotations; the source text is still attached below.
+            labels = re.findall(r"\bParagraph\s+(\d+)\s*:", issue.evidence, re.IGNORECASE)
+            if labels:
+                issue.evidence_paragraphs = sorted({int(label) for label in labels})
         if issue.evidence_paragraphs:
             references = issue.evidence_paragraphs
             available = paragraphs.get(issue.chapter_number, [])

@@ -47,3 +47,19 @@ def test_invalid_json_is_corrected_against_original_source():
     text, plan = setup()
     responses = iter(['not JSON', json.dumps({'edits': [{'id': 1, 'text': 'The gate broke the pump.'}, {'id': 2, 'text': ''}]})])
     assert 'Unchanged dialogue.' in repair(text, plan, {}, lambda *args: next(responses))
+
+
+def test_cosmetic_change_cannot_pass_as_repetition_repair():
+    phrase = 'The gate sent a tremor through the stone foundation and broke the pump.'
+    text = phrase + '\n\nIntervening action.\n\n' + phrase
+    issue = SimpleNamespace(category='repetition', evidence_paragraphs=[1, 3])
+    issue.model_dump = lambda: {'category': 'repetition', 'problem': 'Repeated event.'}
+    plan = repair_plan(text, [issue])
+    calls = []
+    def generate(messages, *args):
+        calls.append(messages)
+        return json.dumps({'edits': [{'id': 1, 'text': phrase},
+            {'id': 2, 'text': phrase + ' Dust fell.' if len(calls) == 1 else ''}]})
+    result = repair(text, plan, {}, generate)
+    assert len(calls) == 2 and result.count(phrase) == 1
+    assert 'was not reduced' in calls[-1][-1]['content']
