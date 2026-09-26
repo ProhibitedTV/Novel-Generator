@@ -18,7 +18,7 @@ services:
       - app_data:/app/data
       - app_artifacts:/app/artifacts
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/health/live"]
       interval: 20s
       timeout: 5s
       retries: 5

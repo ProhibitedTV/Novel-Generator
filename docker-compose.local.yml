@@ -1,0 +1,21 @@
+# Preserve the existing workstation database and artifacts when moving the
+# local app into Docker. Use with: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+services:
+  web:
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////app/data/novel_generator.db
+      ARTIFACTS_DIR: /app/artifacts
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+  worker:
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite:////app/data/novel_generator.db
+      ARTIFACTS_DIR: /app/artifacts
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts

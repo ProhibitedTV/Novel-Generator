@@ -10,5 +10,9 @@ __pycache__
 .coverage
 htmlcov
 artifacts
+data
+logs
+.env
+.env.*
 novel_generator.db
 tests

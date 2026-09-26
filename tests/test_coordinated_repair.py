@@ -70,3 +70,19 @@ def test_coordinated_selection_can_cover_ten_small_passages():
     issue = SimpleNamespace(category='repetition', evidence_paragraphs=list(range(1, 11)))
     assert repair_plan(text, [issue]) is None
     assert len(repair_plan(text, [issue], max_passages=16)) == 10
+
+
+def test_oversized_valid_edits_are_compressed_instead_of_regenerated():
+    text, plan = setup()
+    calls = []
+    def generate(messages, *args):
+        calls.append(messages)
+        if len(calls) == 1:
+            return json.dumps({'edits': [{'id': 1, 'text': 'word ' * 100}, {'id': 2, 'text': ''}]})
+        request = json.loads(messages[1]['content'])
+        assert request['proposed_edits'][0]['text'].startswith('word word')
+        assert request['maximum_total_replacement_words'] == 60
+        assert request['required_ids'] == [1, 2]
+        assert 'read_only_context' not in request
+        return json.dumps({'edits': [{'id': 1, 'text': 'Gate vibration broke the pump.'}, {'id': 2, 'text': ''}]})
+    assert repair(text, plan, {}, generate).count('pump') == 1

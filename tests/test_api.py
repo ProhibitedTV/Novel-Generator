@@ -439,3 +439,13 @@ def test_openai_compatible_provider_can_be_enabled_and_used_for_run_routing(clie
     assert payload["provider_name"] == "openai_compatible"
     assert payload["model_name"] == "editor-model"
     assert payload["task_routing"]["manuscript_qa"]["model_name"] == "qa-model"
+
+
+def test_liveness_does_not_probe_providers(client, monkeypatch):
+    from novel_generator.services.providers import ProviderManager
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Liveness must not contact model providers")
+    monkeypatch.setattr(ProviderManager, "health", unexpected)
+    response = client.get('/api/health/live')
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
