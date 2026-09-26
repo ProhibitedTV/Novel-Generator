@@ -554,14 +554,19 @@ def test_real_pipeline_withholds_manuscript_exports_until_gate_passes(configured
             assert {"markdown", "docx", "qa-report"} <= kinds
 
 
-def test_explicit_paragraph_labels_are_resolved_and_range_checked():
+@pytest.mark.parametrize('label,invalid', [
+    ('Paragraph 2: paraphrased by reviewer', 'Paragraph 9: missing source'),
+    ('Paraphrased dialogue (P2)', 'Missing dialogue (P9)'),
+    ('Paraphrased dialogue [P2]', 'Missing dialogue [P0]'),
+])
+def test_explicit_paragraph_labels_are_resolved_and_range_checked(label, invalid):
     chapter = SimpleNamespace(chapter_number=1, content="Original first.\n\nOriginal second.")
     review = clean_review([1])
-    review['issues'] = [issue(evidence='Paragraph 2: paraphrased by reviewer')]
+    review['issues'] = [issue(evidence=label)]
     parsed = editor.validate_review(json.dumps(review), [chapter])
     assert parsed.issues[0].evidence == 'Original second.'
     assert parsed.issues[0].evidence_paragraphs == [2]
-    review['issues'][0]['evidence'] = 'Paragraph 9: missing source'
+    review['issues'][0]['evidence'] = invalid
     with pytest.raises(ValueError, match='valid, unique'):
         editor.validate_review(json.dumps(review), [chapter])
 

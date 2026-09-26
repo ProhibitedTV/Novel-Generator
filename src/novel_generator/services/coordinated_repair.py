@@ -21,7 +21,18 @@ def repair(text, plan, context, generate):
             data = issue.model_dump()
             if data not in diagnoses:
                 diagnoses.append(data)
-    maximum = max(60, int(sum(len(p['source'].split()) for p in passages) * 1.25))
+    selected_count = sum(len(p['source'].split()) for p in passages)
+    maximum = max(60, int(selected_count * 1.25))
+    # The edit target guides compression; the configured chapter ceiling is the
+    # acceptance constraint. Permit bounded growth needed to supply missing
+    # causes or actions, without allowing one edit to replace an entire chapter.
+    hard_maximum = maximum
+    word_range = context.get('chapter_word_range')
+    if word_range:
+        available = word_range[1] - (len(text.split()) - selected_count)
+        hard_maximum = max(maximum, min(max(60, selected_count * 2), available))
+    best_candidate = None
+    best_count = None
     repeats = repeated_phrases(text) if any(d['category'] == 'repetition' for d in diagnoses) else {}
     # Require progress only on repeated phrases actually present in selected
     # passages; unrelated material outside the edit set cannot be changed.
@@ -62,9 +73,6 @@ def repair(text, plan, context, generate):
                                  "Use passage ids from the passages array, not source paragraph numbers. "
                                  "Include unchanged passages too; use empty text for deletions.")
             count = sum(len(value.split()) for value in edits.values())
-            if count > maximum:
-                oversized_edits = payload
-                raise ValueError(f"Replacement prose is {count} words; maximum is {maximum} total words.")
             if not any(edits.values()):
                 raise ValueError("Do not delete every selected passage.")
             candidate = text
@@ -78,9 +86,19 @@ def repair(text, plan, context, generate):
                 if sum(remaining.get(p, 1) - 1 for p in repeats) >= sum(c - 1 for c in repeats.values()):
                     examples = [' '.join(p) for p in list(repeats)[:3]]
                     raise ValueError(f"The diagnosed repeated wording was not reduced. Keep each once or remove redundant passages: {examples}")
+            if count > maximum:
+                # Retain only validated candidates. A later malformed response
+                # must not discard an earlier usable repair. All returned prose
+                # still goes through the chapter and manuscript quality gates.
+                if count <= hard_maximum and (best_count is None or count < best_count):
+                    best_candidate, best_count = candidate, count
+                oversized_edits = payload
+                raise ValueError(f"Replacement prose is {count} words; target maximum is {maximum} total words.")
             return candidate
         except (ValueError, TypeError, KeyError) as exc:
             if attempt == 2:
+                if best_candidate is not None:
+                    return best_candidate
                 raise ValueError(f"Coordinated repair could not produce valid edits: {exc}") from exc
             if oversized_edits is not None:
                 # Compress the already valid edit set, rather than asking the
