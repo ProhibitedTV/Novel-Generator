@@ -86,3 +86,39 @@ def test_oversized_valid_edits_are_compressed_instead_of_regenerated():
         assert 'read_only_context' not in request
         return json.dumps({'edits': [{'id': 1, 'text': 'Gate vibration broke the pump.'}, {'id': 2, 'text': ''}]})
     assert repair(text, plan, {}, generate).count('pump') == 1
+
+
+def budgeted_repair_source():
+    # Match the live failure: 237 selected words, 2,860 chapter words, and a
+    # 3,000-word ceiling. A 320-word replacement fits the actual chapter limit.
+    selected = 'old ' * 237
+    text = selected + '\n\n' + 'untouched ' * 2623
+    return text, [((0, len(selected)), [])]
+
+
+def test_compression_retains_shortest_valid_candidate_within_chapter_budget():
+    text, plan = budgeted_repair_source()
+    calls = []
+    def generate(*args):
+        calls.append(1)
+        count = [340, 320, 330][len(calls) - 1]
+        return json.dumps({'edits': [{'id': 1, 'text': 'repaired ' * count}]})
+    result = repair(text, plan, {'chapter_word_range': [2000, 3000]}, generate)
+    assert len(calls) == 3
+    assert len(result.split()) == 2943
+    assert result.endswith('untouched ' * 2623)
+
+
+@pytest.mark.parametrize('ceiling,count', [(3000, 378), (9000, 475)])
+def test_chapter_slack_and_passage_growth_both_bound_fallback(ceiling, count):
+    text, plan = budgeted_repair_source()
+    with pytest.raises(ValueError, match='could not produce valid edits'):
+        repair(text, plan, {'chapter_word_range': [2000, ceiling]},
+               lambda *args: json.dumps({'edits': [{'id': 1, 'text': 'expanded ' * count}]}))
+
+
+def test_later_invalid_response_does_not_discard_valid_candidate():
+    text, plan = budgeted_repair_source()
+    responses = iter([json.dumps({'edits': [{'id': 1, 'text': 'repaired ' * 320}]}), '{}', 'bad JSON'])
+    result = repair(text, plan, {'chapter_word_range': [2000, 3000]}, lambda *args: next(responses))
+    assert len(result.split()) == 2943

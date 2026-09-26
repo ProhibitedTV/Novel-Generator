@@ -80,6 +80,8 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
             # instead of its dedicated array. Treat those as references, never
             # as fuzzy quotations; the source text is still attached below.
             labels = re.findall(r"\bParagraph\s+(\d+)\s*:", issue.evidence, re.IGNORECASE)
+            labels += re.findall(r"\(P\s*(\d+)\)", issue.evidence, re.IGNORECASE)
+            labels += re.findall(r"\[P\s*(\d+)\]", issue.evidence, re.IGNORECASE)
             if labels:
                 issue.evidence_paragraphs = sorted({int(label) for label in labels})
         if issue.evidence_paragraphs:
