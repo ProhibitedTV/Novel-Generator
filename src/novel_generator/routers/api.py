@@ -139,6 +139,12 @@ def _same_settings_payload(run, *, pause_after_outline: bool = True) -> RunCreat
     )
 
 
+@router.get("/health/live")
+def liveness() -> dict:
+    """Process liveness must not wait for model inference or external providers."""
+    return {"status": "ok"}
+
+
 @router.get("/health")
 def health(db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)) -> dict:
     manager = _provider_manager(settings, db)

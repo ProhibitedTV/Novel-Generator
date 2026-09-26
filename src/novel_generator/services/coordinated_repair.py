@@ -45,6 +45,7 @@ def repair(text, plan, context, generate):
             "maximum_total_replacement_words": maximum, "read_only_context": context}, ensure_ascii=False)},
     ]
     for attempt in range(3):
+        oversized_edits = None
         raw = generate(messages, 1, len(plan))
         try:
             payload = extract_json_payload(raw)
@@ -60,8 +61,10 @@ def repair(text, plan, context, generate):
                 raise ValueError(f"Required edit ids are {list(range(1, len(plan) + 1))}; received {list(edits)}. "
                                  "Use passage ids from the passages array, not source paragraph numbers. "
                                  "Include unchanged passages too; use empty text for deletions.")
-            if sum(len(value.split()) for value in edits.values()) > maximum:
-                raise ValueError(f"Replacement prose exceeds {maximum} total words.")
+            count = sum(len(value.split()) for value in edits.values())
+            if count > maximum:
+                oversized_edits = payload
+                raise ValueError(f"Replacement prose is {count} words; maximum is {maximum} total words.")
             if not any(edits.values()):
                 raise ValueError("Do not delete every selected passage.")
             candidate = text
@@ -79,5 +82,22 @@ def repair(text, plan, context, generate):
         except (ValueError, TypeError, KeyError) as exc:
             if attempt == 2:
                 raise ValueError(f"Coordinated repair could not produce valid edits: {exc}") from exc
-            messages = messages[:2] + [{"role": "user", "content": f"Correct the response: {exc}"}]
+            if oversized_edits is not None:
+                # Compress the already valid edit set, rather than asking the
+                # model to regenerate the same overlong answer from the chapter.
+                messages = [
+                    {"role": "system", "content": (
+                        'Return JSON only: {"edits":[{"id":1,"text":"prose"}]}. '
+                        "Shorten the proposed edits to meet the total word limit. Preserve every id, "
+                        "essential facts, speaker identity, causal links, and intended repairs. "
+                        "Remove redundant explanations. Empty strings are allowed for redundant passages. "
+                        "Do not add commentary or copy the surrounding chapter."
+                    )},
+                    {"role": "user", "content": json.dumps({"proposed_edits": oversized_edits['edits'],
+                        "maximum_total_replacement_words": maximum,
+                        "target_total_words": max(1, int(maximum * 0.85)),
+                        "required_ids": list(range(1, len(plan) + 1))}, ensure_ascii=False)},
+                ]
+            else:
+                messages = messages[:2] + [{"role": "user", "content": f"Correct the response: {exc}"}]
     raise AssertionError("Unreachable")
