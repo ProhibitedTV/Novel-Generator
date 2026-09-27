@@ -383,8 +383,16 @@ def test_coordinated_repairs_do_not_starve_repetition_and_keep_budget(configured
         session.expire_all()
         for diagnosis in diagnoses:
             diagnosis.evidence_paragraphs = [1]
-        with pytest.raises(editor.AutonomousQualityError, match='coordinated repair budget'):
-            editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), 'draft')
+        def rewrite(*args, **kwargs):
+            request = json.loads(args[5][1]['content'])
+            assert {d['category'] for d in request['repairs']} == {'causality', 'repetition'}
+            assert kwargs['metadata']['repair_mode'] == 'chapter'
+            return 'The broken gate shook the foundation. The pump failed. She shut the intake.'
+        monkeypatch.setattr(pipeline, '_supervised_provider_chat', rewrite)
+        editor._repair(session, run, run.chapters[0], ledger, diagnoses, settings, object(), 'draft')
+        event = editor._events(run, 'autonomous_repair_started')[-1]
+        assert event['repair_kind'] == 'chapter' and event['escalated_from'] == 'coordinated'
+        assert len(editor._events(run, 'autonomous_repair_escalated')) == 1
 
 
 def test_prose_budget_is_separate_and_counts_historical_prose_attempts(configured_environment, monkeypatch):
@@ -588,3 +596,74 @@ def test_repeated_reviews_are_adjudicated_without_automatic_acceptance(configure
         assert calls.count(('autonomous_review', 1)) == 2
         saved = editor._events(run, 'autonomous_review_adjudicated')[-1]
         assert saved['proposed_review']['issues'] and not saved['review']['issues']
+
+
+@pytest.mark.parametrize('phase', ['draft', 'final'])
+@pytest.mark.parametrize('kind,category', [('targeted', 'continuity'), ('prose', 'prose')])
+def test_exhausted_local_strategy_escalates_with_persisted_chapter_limit(configured_environment, monkeypatch, phase, kind, category):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    calls = install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        settings = get_settings().model_copy(update={
+            'autonomous_targeted_repair_attempts': 1, 'autonomous_prose_repair_attempts': 1,
+            'autonomous_chapter_repair_attempts': 1, 'autonomous_manuscript_repair_rounds': 1})
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category=category))
+        editor._record(session, run, 'autonomous_repair_started', {
+            'chapter_number': 1, 'phase': phase, 'repair_kind': kind,
+            'issues': [diagnosis.model_dump()], 'before_hash': 'older'})
+        editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), phase)
+        assert run.chapters[0].content == REPAIRED
+        saved = editor._events(run, 'autonomous_repair_started')[-1]
+        assert saved['repair_kind'] == 'chapter' and saved['escalated_from'] == kind
+        # A prose-only whole-chapter rewrite must remain in the chapter bucket.
+        assert editor._repair_kind(saved) == 'chapter'
+        session.expire_all()
+        diagnosis.evidence = REPAIRED
+        with pytest.raises(editor.AutonomousQualityError, match='chapter rewrite budget is exhausted'):
+            editor._repair(session, run, run.chapters[0], ledger, [diagnosis], settings, object(), phase)
+        assert calls.count(('autonomous_revision', 1)) == 1
+        assert run.chapters[0].content == REPAIRED
+
+
+def test_malformed_joint_edits_escalate_without_saving_partial_prose(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    calls = []
+    with get_session_factory()() as session:
+        run = make_run(session)
+        original = 'The pump broke.\n\nUntouched action.\n\nThe pump broke again.'
+        run.chapters[0].content = original
+        session.commit()
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category='repetition', evidence='Source paragraphs', evidence_paragraphs=[1, 3]))
+        def chat(*args, **kwargs):
+            calls.append(kwargs['metadata']['repair_mode'])
+            assert run.chapters[0].content == original
+            if calls[-1] == 'coordinated':
+                return json.dumps({'edits': [{'id': 1, 'text': 'Partial edit must not be saved.'}]})
+            return REPAIRED
+        monkeypatch.setattr(pipeline, '_supervised_provider_chat', chat)
+        editor._repair(session, run, run.chapters[0], ledger, [diagnosis], get_settings(), object(), 'draft')
+        assert calls == ['coordinated'] * 3 + ['chapter']
+        assert run.chapters[0].content == REPAIRED
+        assert len(editor._events(run, 'autonomous_repair_completed')) == 1
+        assert 'Required edit ids' in editor._events(run, 'autonomous_repair_rejected')[-1]['reason']
+
+
+def test_escalated_rewrite_still_requires_successful_review(configured_environment, monkeypatch):
+    def review(context, numbers):
+        result = clean_review(numbers)
+        result['issues'] = [issue(evidence=context['actual_prose'])]
+        return result
+    install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        editor._record(session, run, 'autonomous_repair_started', {
+            'chapter_number': 1, 'phase': 'draft', 'repair_kind': 'targeted', 'before_hash': 'old'})
+        settings = get_settings().model_copy(update={'autonomous_targeted_repair_attempts': 1, 'autonomous_chapter_repair_attempts': 1})
+        with pytest.raises(editor.AutonomousQualityError, match='chapter rewrite budget is exhausted'):
+            editor.ensure_chapter(session, run, run.chapters[0], ledger, settings, object())
+        assert run.chapters[0].content == REPAIRED
+        assert not editor._events(run, 'autonomous_quality_passed')

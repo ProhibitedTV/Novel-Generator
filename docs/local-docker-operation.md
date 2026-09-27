@@ -14,6 +14,10 @@ In Provider Settings, the saved Ollama URL must be `http://host.docker.internal:
 
 `/api/health/live` checks web-process liveness without waiting for external model providers. `/api/health` retains detailed database/provider diagnostics. A healthy web process is not proof that a book has completed.
 
+Autonomous repair limits apply to strategies. Exhausted targeted, coordinated, or prose repairs automatically escalate to a complete chapter rewrite using the drafting model. Invalid passage edits, unchanged local edits, and local edits that repeat a rejected version also escalate without replacing the saved text. The activity log records the strategy change. Every rewrite must pass the same editorial and length checks before the chapter advances.
+
+Attempt history survives restarts. Escalation uses the remaining chapter rewrite allowance (`AUTONOMOUS_CHAPTER_REPAIR_ATTEMPTS` during drafting and `AUTONOMOUS_MANUSCRIPT_REPAIR_ROUNDS` during final editing); it does not reset counters. If that allowance is also exhausted, or a full rewrite cannot produce usable new prose, the run preserves its checkpoints and stops rather than exporting an unresolved manuscript. The current defaults are 12 attempts per drafting strategy and 24 manuscript repair rounds.
+
 For an isolated, real-model pipeline qualification inside the same image:
 
 ```powershell
