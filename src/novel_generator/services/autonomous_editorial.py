@@ -309,14 +309,14 @@ def _repair_priority(issue):
 
 
 def _repair_kind(payload):
-    if payload.get("repair_kind") in {"targeted", "coordinated"}:
+    if payload.get("repair_kind") in {"targeted", "coordinated", "prose", "chapter"}:
         return payload["repair_kind"]
     # Infer the bucket for old checkpoints instead of resetting their budgets.
     issues = payload.get("issues", [])
     return "prose" if issues and all(issue["category"] in {"prose", "repetition"} for issue in issues) else "chapter"
 
 
-def _repair(session, run, chapter, ledger, issues, settings, client, phase: str) -> None:
+def _repair(session, run, chapter, ledger, issues, settings, client, phase: str, *, escalate_from=None) -> None:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     interrupted = {item["started_event_id"] for item in _events(run, "autonomous_repair_interrupted")}
@@ -349,8 +349,22 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
     limit = (settings.autonomous_targeted_repair_attempts if repair_kind in {"targeted", "coordinated"} else
              settings.autonomous_prose_repair_attempts if repair_kind == "prose" else
              settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds)
+    if escalate_from or (len(attempts) >= limit and repair_kind != "chapter"):
+        escalate_from = escalate_from or repair_kind
+        repair_kind, plan, coordinated = "chapter", None, False
+        issues, deferred = all_issues, []
+        attempts = [attempt for attempt in all_attempts if _repair_kind(attempt) == "chapter"]
+        limit = settings.autonomous_chapter_repair_attempts if phase == "draft" else settings.autonomous_manuscript_repair_rounds
     if len(attempts) >= limit:
+        if escalate_from:
+            raise AutonomousQualityError(f"Chapter {chapter.chapter_number} exhausted its {phase} {escalate_from} repair budget or could not produce usable edits, and its chapter rewrite budget is exhausted. Unresolved checks prevent completion.")
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} exhausted its {phase} {repair_kind} repair budget. Unresolved checks prevent completion.")
+    if escalate_from:
+        _record(session, run, "autonomous_repair_escalated", {
+            "message": f"Chapter {chapter.chapter_number}: switching from {escalate_from} repairs to a complete chapter rewrite.",
+            "chapter_number": chapter.chapter_number, "phase": phase,
+            "from_strategy": escalate_from, "to_strategy": "chapter", "attempt": len(attempts) + 1,
+        })
     # A structural rewrite can invalidate line edits and alter length. Recheck the
     # resulting text before spending a later attempt on those lower-level issues.
     backup = settings.artifacts_dir / run.id / "editorial-history" / f"chapter-{chapter.chapter_number}-{_hash(before)[:16]}.md"
@@ -360,13 +374,14 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
         "message": f"Automatically repairing chapter {chapter.chapter_number}.",
         "chapter_number": chapter.chapter_number, "phase": phase, "attempt": len(attempts) + 1,
         "repair_kind": repair_kind,
+        "escalated_from": escalate_from,
         "before_hash": _hash(before), "backup": str(backup.relative_to(settings.artifacts_dir)),
         "issues": [issue.model_dump() for issue in issues],
         "deferred_issues": [issue.model_dump() for issue in deferred],
     })
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
-    if coordinated:
-        # Joint edits need the full drafting model's reasoning capacity rather
+    if coordinated or escalate_from:
+        # Joint edits and escalated rewrites need the drafting model rather
         # than an optional lightweight line-edit route.
         provider, model = pipeline._resolve_stage_route(client, run, "chapter_draft")
     context = _context(run, chapter, ledger)
@@ -402,11 +417,25 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
                 "repair_mode": "coordinated" if coordinated else "passage" if plan is not None else "chapter",
                 "passage": passage, "passage_count": passage_count},
         ))
-    if coordinated:
-        from .coordinated_repair import repair
-        candidate = repair(before, plan, context, generate_repair)
-    else:
-        candidate = repair_passages(before, plan, generate_repair, context=context) if plan is not None else generate_repair(messages)
+    def retry_as_chapter(reason):
+        _record(session, run, "autonomous_repair_rejected", {
+            "message": "Local repair produced no usable candidate; escalating automatically without changing saved prose.",
+            "chapter_number": chapter.chapter_number, "phase": phase,
+            "repair_kind": repair_kind, "reason": str(reason), "before_hash": _hash(before),
+        })
+        _repair(session, run, chapter, ledger, all_issues, settings, client, phase, escalate_from=repair_kind)
+
+    try:
+        if coordinated:
+            from .coordinated_repair import repair
+            candidate = repair(before, plan, context, generate_repair)
+        else:
+            candidate = repair_passages(before, plan, generate_repair, context=context) if plan is not None else generate_repair(messages)
+    except ValueError as exc:
+        if plan is None:
+            raise
+        retry_as_chapter(exc)
+        return
     if length_instruction and len(candidate.split()) > maximum:
         from .prose_budget import compress_prose
         def compress(messages, passage, passage_count, attempt):
@@ -421,8 +450,14 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str)
             ))
         candidate = compress_prose(candidate, target, compress)
     if not candidate.strip() or _text(candidate) == _text(before):
+        if repair_kind != "chapter":
+            retry_as_chapter("No usable change was made.")
+            return
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change.")
     if any(event.get("before_hash") == _hash(candidate) for event in all_attempts):
+        if repair_kind != "chapter":
+            retry_as_chapter("The local edit returned to an earlier rejected version.")
+            return
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair returned to an earlier rejected version. Saved prose is preserved; change the repair model before resuming.")
     chapter.content = candidate
     chapter.word_count = len(candidate.split())
