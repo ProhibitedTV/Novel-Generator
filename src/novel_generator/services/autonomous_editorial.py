@@ -188,20 +188,76 @@ def _check_context(messages: list[dict], client, provider_name: str) -> None:
         raise AutonomousQualityError("Automatic editorial context exceeds the configured model window. Increase context or reduce chapter size; no prose was silently truncated.")
 
 
+def _adjudication_messages(scope, context, review, controls):
+    # Passing the first review's flags and desired repair made the verifier copy
+    # its answer. Supply allegations, not an answer-shaped example to imitate.
+    source = {key: value for key, value in context.items() if key not in {
+        "legacy_qa_concerns_to_verify_against_evidence", "ending_debt_to_verify_against_actual_prose",
+    }}
+    allegations = [{key: getattr(issue, key) for key in
+        ("chapter_number", "category", "problem", "evidence", "evidence_paragraphs")}
+        for issue in review.issues]
+    instruction = (
+        "You are independently verifying editorial allegations, not rewriting a previous review. "
+        "Read the supplied actual prose before deciding whether each allegation is true. Search the ENTIRE supplied source "
+        "for counterevidence, including intervening paragraphs and scene changes. A character can leave a place and later return; "
+        "travel between scenes is not inherently contradictory. Receiving an object in an intervening paragraph can explain later possession. "
+        "A quotation establishes that words occur, not that a defect exists. Reject a claim when the source already supplies the requested "
+        "cause, action, transfer, or consequence. Do not require the same fact to be restated in another paragraph. "
+        "Keep genuine incompatible facts, impossible causes, broken grammar, duplicate passages, or absent promised outcomes blocking. "
+        "Do not invent replacement defects to justify a rejected allegation. Optional aesthetic improvements belong in optional_suggestions. "
+        "Independently decide ALL four booleans and provide evidence-grounded issues only for confirmed defects. "
+        "Use evidence_paragraphs from the indicated chapter when source labels are available, with evidence='Source paragraphs'; "
+        "otherwise quote exact source words. Return valid JSON only, matching this contract: "
+        + json.dumps(EditorialReview.model_json_schema())
+    )
+    if scope == "adjacent_chapters":
+        instruction += (
+            " Only compare factual continuity, character identity, and causes across these complete chapters. "
+            "Only continuity, character, and causality issues are allowed. Set prose_clean and ending_complete to true; "
+            "separate audits cover those checks. optional_suggestions must be empty. Explain both incompatible claims and their chapters."
+        )
+    elif scope == "whole_book" or context.get("is_final_chapter"):
+        instruction += (
+            " This is the end of the book: require the author's central resolution, cost, and promised aftermath on page. "
+            "If they are already depicted, do not demand a longer or differently worded depiction. Beginning a new life does not "
+            "require completing a lifetime project. Judge current prose, not a stale outline or QA diagnosis."
+        )
+    else:
+        instruction += (
+            " Judge this chapter's assigned scene turn. A non-final setup may end on discovery, decision, or threat; "
+            "do not require events assigned to future chapters."
+        )
+    messages = [{"role": "system", "content": instruction}, {"role": "user", "content": json.dumps(
+        {"scope": scope, **source, "proposed_review_to_verify": allegations}, ensure_ascii=False)}]
+    if controls:
+        from .provider_controls import make_ollama_controls_marker
+        messages.insert(0, make_ollama_controls_marker(**controls))
+    return messages
+
+
 def _review(session, run, chapters, context: dict, client, scope: str) -> EditorialReview:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
     adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
     controls = {}
-    if scope == "adjacent_chapters" and provider == "ollama":
+    adjudication_controls = {}
+    if provider == "ollama" or adjudicator_provider == "ollama":
         from ..settings import get_settings
         config = getattr(client, "settings", None) or get_settings()
+    if scope == "adjacent_chapters" and provider == "ollama":
         if getattr(config, "ollama_continuity_think", None) is not None:
             controls["think"] = config.ollama_continuity_think
         if getattr(config, "ollama_continuity_temperature", None) is not None:
             controls["temperature"] = config.ollama_continuity_temperature
-    fingerprint = _hash({"contract": 13, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    if adjudicator_provider == "ollama":
+        if getattr(config, "ollama_adjudication_think", None) is not None:
+            adjudication_controls["think"] = config.ollama_adjudication_think
+        if getattr(config, "ollama_adjudication_temperature", None) is not None:
+            adjudication_controls["temperature"] = config.ollama_adjudication_temperature
+    fingerprint = _hash({"contract": 14, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+                         "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
@@ -310,35 +366,14 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         parse_review, "automatic editorial review", "autonomous_review",
         run.current_chapter,
     )
-    affected = {issue.chapter_number for issue in review.issues} if scope == "whole_book" else {run.current_chapter}
+    affected = {issue.chapter_number for issue in review.issues}
     prior_repairs = [item for item in _events(run, "autonomous_repair_started")
                      if item.get("chapter_number") in affected]
-    if review.issues and scope in {"chapter", "final_chapter", "whole_book"} and len(prior_repairs) >= 2:
+    if review.issues and scope in {"chapter", "final_chapter", "whole_book", "adjacent_chapters"} and len(prior_repairs) >= 2:
         # A separate decision pass checks a repeatedly revised chapter against
         # the actual contract, rather than endlessly following new preferences.
         proposed = review.model_dump()
-        scope_instruction = (
-            "Do not treat legacy QA findings or ending-debt metadata as proof that a current defect remains. "
-            "Verify them against the actual final prose. When a promised action, cost, and aftermath are already depicted, "
-            "do not require a longer, more explicit, or differently worded depiction. Beginning a new life does not require "
-            "completing the character's lifetime project. Keep any actually absent central resolution or promised consequence. "
-        ) if scope == "whole_book" else "Do not require a setup chapter to resolve the book's central crisis. "
-        adjudication = [
-            {"role": "system", "content": instruction + (
-                "\nYou are adjudicating a proposed review after repeated revisions. Independently check "
-                "each proposed defect against the supplied actual prose and the assigned chapter or book ending. "
-                "Reject an allegation when the prose already provides its requested cause, action, or consequence. "
-                "Wanting the same cause stated more explicitly or in a different paragraph is a preference, "
-                "not a missing cause. A repeated topic is not a repeated event if the argument advances. "
-                "Reclassify aesthetic preferences as optional_suggestions rather than retaining them as defects. "
-                + scope_instruction + "Do not invent alternate "
-                "defects to justify earlier failed flags. Retain genuine contradictions, actual duplicate "
-                "passages, unfulfilled assigned events, and broken prose. Re-evaluate ALL four booleans "
-                "against the source; return a complete evidence-grounded EditorialReview, not commentary."
-            )},
-            {"role": "user", "content": json.dumps({"scope": scope, **review_context,
-                "proposed_review_to_verify": proposed}, ensure_ascii=False)},
-        ]
+        adjudication = _adjudication_messages(scope, review_context, review, adjudication_controls)
         _check_context(adjudication, client, adjudicator_provider)
         review = pipeline._generate_structured_output(
             session, run, client, adjudicator_provider, adjudicator_model, lambda: adjudication,
@@ -349,6 +384,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             "chapter_number": run.current_chapter, "proposed_review": proposed,
             "scope": scope, "reviewed_chapters": [chapter.chapter_number for chapter in chapters],
             "provider_name": adjudicator_provider, "model_name": adjudicator_model,
+            "controls": adjudication_controls,
             "review": review.model_dump(), "fingerprint": fingerprint,
         })
     _record(session, run, "autonomous_review_completed", {
