@@ -8,11 +8,12 @@ import pytest
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import ChapterStatus, RunStatus
-from novel_generator.repositories import create_chapters_from_outline, create_project, create_run
+from novel_generator.repositories import create_chapters_from_outline, create_project, create_run, ensure_provider_configs
 from novel_generator.schemas import ChapterContinuityUpdate, ManuscriptQaReport, ProjectCreate, RunCreate
 from novel_generator.services import autonomous_editorial as editor, pipeline
 from novel_generator.services.autonomous_contracts import EditorialReview
 from novel_generator.services.prompts import parse_story_bible
+from novel_generator.services.providers import ProviderManager
 from novel_generator.services.structured_schema_runtime import response_schema_for_stage
 from novel_generator.settings import get_settings
 from test_pipeline import _story_bible_json, _outline_json
@@ -649,6 +650,33 @@ def test_malformed_joint_edits_escalate_without_saving_partial_prose(configured_
         assert run.chapters[0].content == REPAIRED
         assert len(editor._events(run, 'autonomous_repair_completed')) == 1
         assert 'Required edit ids' in editor._events(run, 'autonomous_repair_rejected')[-1]['reason']
+
+
+@pytest.mark.parametrize('strategy', ['coordinated', 'escalated'])
+@pytest.mark.parametrize('explicit_editor', [False, True])
+def test_demanding_repairs_honor_the_selected_editor_route(configured_environment, monkeypatch, strategy, explicit_editor):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.task_routing = {'chapter_draft': {'provider_name': 'ollama', 'model_name': 'draft-model'}}
+        if explicit_editor:
+            run.task_routing['autonomous_revision'] = {'provider_name': 'ollama', 'model_name': 'editor-model'}
+        run.chapters[0].content = 'The pump broke.\n\nUntouched action.\n\nThe pump broke again.'
+        session.commit()
+        client = ProviderManager(get_settings(), ensure_provider_configs(session, get_settings()))
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category='repetition', evidence='Source paragraphs', evidence_paragraphs=[1, 3]))
+        models = []
+        def chat(session, run, client, provider, model, messages, **kwargs):
+            models.append(model)
+            if strategy == 'coordinated':
+                return json.dumps({'edits': [{'id': 1, 'text': 'Gate vibration broke the pump.'}, {'id': 2, 'text': ''}]})
+            return REPAIRED
+        monkeypatch.setattr(pipeline, '_supervised_provider_chat', chat)
+        editor._repair(session, run, run.chapters[0], ledger, [diagnosis], get_settings(), client, 'draft',
+                       escalate_from='targeted' if strategy == 'escalated' else None)
+        assert models == ['editor-model' if explicit_editor else 'draft-model']
+        assert run.chapters[0].content != 'The pump broke.\n\nUntouched action.\n\nThe pump broke again.'
 
 
 def test_escalated_rewrite_still_requires_successful_review(configured_environment, monkeypatch):

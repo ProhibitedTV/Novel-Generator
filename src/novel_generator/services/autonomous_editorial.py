@@ -380,9 +380,9 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         "deferred_issues": [issue.model_dump() for issue in deferred],
     })
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
-    if coordinated or escalate_from:
-        # Joint edits and escalated rewrites need the drafting model rather
-        # than an optional lightweight line-edit route.
+    if (coordinated or escalate_from) and not (run.task_routing or {}).get("autonomous_revision"):
+        # Use the drafting route as a default for demanding repairs, but honor
+        # an explicitly selected editor. It may be stronger than the drafter.
         provider, model = pipeline._resolve_stage_route(client, run, "chapter_draft")
     context = _context(run, chapter, ledger)
     length_instruction = ""
