@@ -177,3 +177,20 @@ def test_ollama_chat_uses_json_mode_and_low_temperature_for_structured_prompt() 
     assert result == '{"ok":true}'
     assert seen_payload["format"] == "json"
     assert seen_payload["options"] == {"num_ctx": 32768, "num_predict": 4096, "temperature": 0.15}
+
+
+@pytest.mark.parametrize('think', [False, True, None])
+def test_thinking_control_preserves_answer_budget_and_separates_reasoning(think):
+    seen = {}
+    def handler(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={'message': {'thinking': 'Private reasoning', 'content': 'Manuscript prose'}, 'done': True})
+    client = OllamaClient(base_url='http://ollama.test', timeout_seconds=1, max_retries=0,
+                          num_predict=4096, think=think,
+                          client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler), base_url='http://ollama.test'))
+    assert client.chat('thinking-model', [{'role': 'user', 'content': 'Write a scene.'}]) == 'Manuscript prose'
+    assert seen['options']['num_predict'] == 4096
+    if think is None:
+        assert 'think' not in seen
+    else:
+        assert seen['think'] is think

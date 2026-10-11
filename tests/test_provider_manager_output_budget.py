@@ -29,6 +29,7 @@ def test_provider_manager_propagates_ollama_context_and_output_budgets() -> None
     assert client.num_ctx == 49152
     assert client.num_predict == 6144
     assert client.structured_temperature == 0.12
+    assert client.think is False
 
 
 def test_provider_manager_propagates_openai_compatible_context_hint_and_output_budget() -> None:
