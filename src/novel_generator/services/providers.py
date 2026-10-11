@@ -103,6 +103,7 @@ class ProviderManager:
                 num_ctx=self.settings.ollama_num_ctx,
                 num_predict=self.settings.ollama_num_predict,
                 structured_temperature=self.settings.ollama_structured_temperature,
+                think=self.settings.ollama_think,
             )
         elif key == "openai_compatible":
             client = OpenAICompatibleClient(

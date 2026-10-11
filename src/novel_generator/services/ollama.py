@@ -139,6 +139,7 @@ class OllamaClient:
         num_predict: int | None = None,
         structured_temperature: float = 0.2,
         client_factory: Callable[[], httpx.Client] | None = None,
+        think: bool | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
@@ -150,6 +151,7 @@ class OllamaClient:
         self.structured_temperature = structured_temperature
         self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
+        self.think = think
 
     def _default_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(self.timeout_seconds)
@@ -226,6 +228,8 @@ class OllamaClient:
             "messages": clean_messages,
             "stream": stream,
         }
+        if self.think is not None:
+            payload["think"] = self.think
         options: dict[str, int | float] = {}
         if self.num_ctx:
             options["num_ctx"] = self.num_ctx

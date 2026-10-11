@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     ollama_num_ctx: int = Field(default=32768, ge=2048, le=262144)
     ollama_num_predict: int = Field(default=8192, ge=256, le=65536)
     ollama_structured_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
+    # Reserve bounded generation budgets for manuscript/JSON output. Reasoning
+    # models can otherwise spend the entire allowance in message.thinking.
+    ollama_think: bool | None = False
     provider_chat_timeout_seconds: float = Field(default=1800.0, ge=30.0, le=7200.0)
     provider_retry_backoff_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
     provider_recovery_attempts: int = Field(default=96, ge=0, le=1000)
