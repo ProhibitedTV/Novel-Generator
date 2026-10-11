@@ -343,6 +343,30 @@ def test_paragraph_evidence_is_attached_from_source_not_model_text():
     assert editor._numbered_prose(chapters[0].content, 1).count("She closed the ledger.") == 1
 
 
+@pytest.mark.parametrize("evidence", [
+    "The channel collapsed. (Para 1) ... Not all of it. (Para 3)",
+    "The channel collapsed. (Para. 1) ... Not all of it. [Paragraph 3]",
+    "[Chapter 10, paragraph 1] ... [Chapter 10, paragraph 3]",
+    "Paragraph 1: First statement ... Paragraph 3: Second statement",
+    "(P1) ... [P3]",
+])
+def test_local_model_inline_source_labels_attach_exact_paragraphs(evidence):
+    data = clean_review([10])
+    data["issues"] = [issue(number=10, evidence=evidence)]
+    review = editor.validate_review(json.dumps(data), [SimpleNamespace(chapter_number=10,
+        content="The feeder channel collapsed three days ago.\n\nShe inspected the ruin.\n\nPart of its arch remained suspended.")])
+    assert review.issues[0].evidence_paragraphs == [1, 3]
+    assert review.issues[0].evidence == "The feeder channel collapsed three days ago. [...] Part of its arch remained suspended."
+
+
+@pytest.mark.parametrize("evidence", ["(Para 4)", "(Para 3) ... (Para 1)", "[Chapter 9, paragraph 1]"])
+def test_inline_source_labels_cannot_invent_or_reorder_source(evidence):
+    data = clean_review([10])
+    data["issues"] = [issue(number=10, evidence=evidence)]
+    with pytest.raises(ValueError, match="paragraph"):
+        editor.validate_review(json.dumps(data), [SimpleNamespace(chapter_number=10, content="One.\n\nTwo.\n\nThree.")])
+
+
 @pytest.mark.parametrize("references", [[0], [4], [2, 1], [1, 1]])
 def test_invalid_paragraph_references_are_rejected(references):
     data = clean_review([1])
