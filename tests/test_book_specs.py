@@ -207,10 +207,29 @@ def test_nonfiction_cannot_bypass_source_audit_even_when_general_review_passes(m
 
 def test_source_audit_constraints_keep_other_checks_separate_and_require_full_coverage():
     from novel_generator.services.structured_schema_runtime import extract_schema_marker
-    _, schema, _ = extract_schema_marker([editor._coverage_marker([2], "source_accuracy")])
+    _, schema, _ = extract_schema_marker([editor._coverage_marker([2], "source_accuracy", paragraph_count=12)])
     assert schema["properties"]["reviewed_chapters"]["const"] == [2]
     assert schema["properties"]["ending_complete"]["const"] is True
     assert schema["$defs"]["EditorialIssue"]["properties"]["category"]["const"] == "factual"
+    issue_schema = schema["$defs"]["EditorialIssue"]
+    assert "evidence_paragraphs" in issue_schema["required"]
+    assert issue_schema["properties"]["evidence"]["const"] == "Source paragraphs"
+    assert issue_schema["properties"]["evidence_paragraphs"]["minItems"] == 1
+    assert issue_schema["properties"]["evidence_paragraphs"]["items"]["enum"] == list(range(1, 13))
+
+
+def test_formatted_factual_evidence_attaches_source_for_bounded_repairs():
+    from novel_generator.services.local_prose_repair import repair_plan
+    text = "> * **Open Loan Count:** 1\n\nSupported information stays.\n\nThe Borrower Card tracks a user's identity and limits."
+    payload = dict(reviewed_chapters=[1], plot_coherent=True, canon_consistent=False, prose_clean=True,
+        ending_complete=True, issues=[dict(chapter_number=1, category="factual",
+            problem="The source specifies only an ID and contact detail.", evidence="Source paragraphs",
+            evidence_paragraphs=[1, 3], repair_instruction="Remove the unsupported field and limit claim.")])
+    review = editor.validate_review(json.dumps(payload), [SimpleNamespace(chapter_number=1, content=text)])
+    assert not review.passed
+    plan = repair_plan(text, review.issues)
+    assert [text[slice(*span)] for span, _ in plan] == [
+        "> * **Open Loan Count:** 1", "The Borrower Card tracks a user's identity and limits."]
 
 
 def test_assembly_strips_duplicate_markdown_chapter_heading_without_removing_section_headings():

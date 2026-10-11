@@ -41,6 +41,8 @@ def repair_messages(text, span, issues, context=None):
             "Use read_only_context to understand causes and established facts, but never reproduce "
             "or modify it. For causality, make the missing causal connection explicit inside the "
             "supplied passage without inventing new events or changing the chapter's stopping state."
+            " For factual issues, correct the unsupported claim using the source_material in the author brief; "
+            "remove invented mandatory steps or fields. Preserve supported facts and clearly labeled hypothetical examples."
         )},
         {"role": "user", "content": json.dumps({
             "passage_to_repair": text[start:end], "diagnoses": [issue.model_dump() for issue in issues],
@@ -62,7 +64,7 @@ def repair_plan(text, issues, max_passages=8):
         # Eligibility depends on grounded, bounded source spans, not on which
         # editorial label the reviewer chooses for a localized defect.
         # Length changes still require chapter-wide expansion/compression.
-        if issue.category not in {"prose", "repetition", "causality", "unresolved_payoff", "premature_payoff", "character", "continuity"}:
+        if issue.category not in {"prose", "repetition", "causality", "unresolved_payoff", "premature_payoff", "character", "continuity", "factual"}:
             return None
         references = getattr(issue, "evidence_paragraphs", [])
         if references:

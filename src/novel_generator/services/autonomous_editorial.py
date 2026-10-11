@@ -68,7 +68,7 @@ def _numbered_prose(text, chapter_number):
                        for index, paragraph in enumerate(_paragraphs(text), 1))
 
 
-def _coverage_marker(chapter_numbers, scope=None):
+def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
     from .structured_schema_runtime import make_schema_marker, response_schema_for_stage
     schema = response_schema_for_stage("autonomous_review")
     schema["properties"]["reviewed_chapters"]["const"] = sorted(chapter_numbers)
@@ -76,7 +76,16 @@ def _coverage_marker(chapter_numbers, scope=None):
     if scope == "source_accuracy":
         for check in ("plot_coherent", "prose_clean", "ending_complete"):
             schema["properties"][check]["const"] = True
-        schema["$defs"]["EditorialIssue"]["properties"]["category"]["const"] = "factual"
+        issue = schema["$defs"]["EditorialIssue"]
+        issue["properties"]["category"]["const"] = "factual"
+        # This audit always supplies numbered complete prose. Constrain the
+        # decoder to references so Markdown stripping, abbreviated quotations,
+        # and reordered excerpts cannot prevent a genuine factual repair.
+        issue["required"] = list(dict.fromkeys([*issue["required"], "evidence_paragraphs"]))
+        issue["properties"]["evidence"]["const"] = "Source paragraphs"
+        issue["properties"]["evidence_paragraphs"]["minItems"] = 1
+        if paragraph_count is not None:
+            issue["properties"]["evidence_paragraphs"]["items"]["enum"] = list(range(1, paragraph_count + 1))
         schema["properties"]["optional_suggestions"]["maxItems"] = 0
     return make_schema_marker("autonomous_review", schema=schema)
 
@@ -268,7 +277,8 @@ def _adjudication_messages(scope, context, review, controls):
     if controls:
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
-    messages.insert(-1, _coverage_marker(review.reviewed_chapters, scope))
+    messages.insert(-1, _coverage_marker(review.reviewed_chapters, scope,
+        paragraph_count=len(_paragraphs(context["actual_prose"])) if scope == "source_accuracy" else None))
     return messages
 
 
@@ -292,7 +302,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    fingerprint = _hash({"contract": 16, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 17, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
@@ -377,7 +387,8 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     if controls:
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
-    messages.insert(-1, _coverage_marker([chapter.chapter_number for chapter in chapters], scope))
+    messages.insert(-1, _coverage_marker([chapter.chapter_number for chapter in chapters], scope,
+        paragraph_count=len(_paragraphs(chapters[0].content or "")) if scope == "source_accuracy" else None))
     _check_context(messages, client, provider)
     run.current_step = "autonomous_review"
     run.current_chapter = chapters[0].chapter_number if len(chapters) == 1 else None

@@ -33,7 +33,8 @@ def load_project_spec(path: Path, model: str) -> ProjectCreate:
 
 
 def verification_report(run, artifacts_dir: Path) -> dict:
-    brief = getattr(getattr(run, "project", None), "story_brief", None) or {}
+    from .book_specs import run_book_brief
+    brief = run_book_brief(run)
     chapters = sorted(run.chapters, key=lambda chapter: chapter.chapter_number)
     expected = list(range(1, run.requested_chapters + 1))
     complete = (
