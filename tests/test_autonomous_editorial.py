@@ -343,6 +343,36 @@ def test_paragraph_evidence_is_attached_from_source_not_model_text():
     assert editor._numbered_prose(chapters[0].content, 1).count("She closed the ledger.") == 1
 
 
+def test_repeated_definition_hints_preserve_source_numbers_across_section_headings():
+    definition = 'The Loan Record contains the item ID and borrower ID, checkout and return dates, agreed due date, checkout and return conditions, and volunteer initials. These fields describe one specific transaction and keep its history intact.'
+    text = 'Introduction.\n\n### The Loan Record\n' + definition + '\n\nIntervening information.\n\n' + definition
+    assert editor._repeated_passages(text) == [{'source_paragraphs': [2, 4], 'actual_excerpt': definition}]
+    assert editor._repeated_passages('A refrain.\n\nA refrain.') == []
+
+
+def test_repeat_hints_do_not_alter_prose_or_automatically_reject_poetic_repetition(configured_environment):
+    from novel_generator.schemas import ContinuityLedger
+    with get_session_factory()() as session:
+        run = make_run(session)
+        repeated = ' '.join(['refrain'] * 30)
+        run.chapters[0].content = repeated + '\n\n' + repeated
+        run.story_bible = {**run.story_bible, 'book_spec': {'content_kind': 'poetry', 'book_type': 'refrain sequence'}}
+        context = editor._context(run, run.chapters[0], ContinuityLedger(current_patch_status='Opening', world_state='Opening'))
+        assert context['repeated_passages_to_verify'][0]['source_paragraphs'] == [1, 2]
+        assert context['actual_prose'] == run.chapters[0].content
+        assert editor.validate_review(json.dumps(clean_review([1])), run.chapters).passed
+
+
+def test_book_repeat_hints_identify_nonadjacent_source_paragraphs_without_inventing_content():
+    repeated = ' '.join(f'word{i}' for i in range(35))
+    chapters = [SimpleNamespace(chapter_number=1, content='Opening.\n\n' + repeated),
+        SimpleNamespace(chapter_number=2, content='Independent middle.'),
+        SimpleNamespace(chapter_number=3, content=repeated + '\n\nEnding.')]
+    assert editor._book_repeated_passages(chapters) == [{
+        'source_locations': [{'chapter_number': 1, 'paragraph': 2}, {'chapter_number': 3, 'paragraph': 1}],
+        'actual_excerpt': repeated}]
+
+
 def test_book_coverage_is_constrained_in_provider_schema_without_accepting_incomplete_reviews():
     from novel_generator.services.structured_schema_runtime import extract_schema_marker, make_schema_marker
     numbers = list(range(1, 25))
