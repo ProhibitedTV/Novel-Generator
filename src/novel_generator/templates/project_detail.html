@@ -31,7 +31,8 @@
     <div><dt>Target words</dt><dd>{{ project.desired_word_count }}</dd></div>
     <div><dt>Requested chapters</dt><dd>{{ project.requested_chapters }}</dd></div>
     <div><dt>Chapter range</dt><dd>{{ project.min_words_per_chapter }}-{{ project.max_words_per_chapter }}</dd></div>
-    <div><dt>Genre profile</dt><dd>{{ project_genre_profile.label }}</dd></div>
+    <div><dt>Genre / topic</dt><dd>{{ project.story_brief.get("genre_description") or project_genre_profile.label }}</dd></div>
+    <div><dt>Book form</dt><dd>{{ project.story_brief.get("book_type", "novel") }} · {{ project.story_brief.get("structure", "continuous") }}</dd></div>
     <div><dt>Preferred provider</dt><dd>{{ project.preferred_provider_name }}</dd></div>
     <div><dt>Preferred model</dt><dd class="long-value">{{ project.preferred_model }}</dd></div>
   </dl>
@@ -164,8 +165,8 @@
 
       <div class="form-section story-brief-shell">
         <div class="section-header-copy">
-          <h3>Story engine</h3>
-          <p>Keep the novelist anchors close: promise, pressure, character, conflict, and ending.</p>
+          <h3>Book brief</h3>
+          <p>Keep the form, audience, reader promise, and coverage close. Character details apply to narrative books.</p>
         </div>
         <div class="grid compact">
           <label>
@@ -177,6 +178,34 @@
                 </option>
               {% endfor %}
             </select>
+          </label>
+          <label>
+            Genre or topic description
+            <input type="text" name="story_genre_description" value="{{ edit_values.story_genre_description }}" placeholder="Literary western, historical comedy, gardening guide, or your own blend">
+          </label>
+          <label>
+            Book type
+            <input type="text" name="story_book_type" value="{{ edit_values.story_book_type }}" placeholder="Novel, novella, anthology, memoir, handbook, poetry sequence…">
+          </label>
+          <label>
+            Content
+            <select name="story_content_kind">
+              {% for value, label in [('fiction', 'Fiction'), ('nonfiction', 'Nonfiction'), ('poetry', 'Poetry'), ('drama', 'Drama / script')] %}
+              <option value="{{ value }}" {% if edit_values.story_content_kind == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Structure
+            <select name="story_structure">
+              {% for value, label in [('continuous', 'Continuous book'), ('episodic', 'Episodes / installments'), ('collection', 'Independent pieces'), ('instructional', 'Learning sequence'), ('reference', 'Reference sections'), ('custom', 'Author-defined structure')] %}
+              <option value="{{ value }}" {% if edit_values.story_structure == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            Intended audience
+            <input type="text" name="story_audience" value="{{ edit_values.story_audience }}" placeholder="Who is this book for? Include age and reading level when relevant.">
           </label>
           <label>
             Setting
@@ -206,6 +235,14 @@
           <textarea name="story_ending_target" rows="3">{{ edit_values.story_ending_target }}</textarea>
         </label>
 
+        <label>
+          Genre and form requirements (one per line)
+          <textarea name="story_genre_requirements" rows="3" placeholder="Define the specific promises this book must deliver.">{{ edit_values.story_genre_requirements }}</textarea>
+        </label>
+        <label>
+          Source material for nonfiction
+          <textarea name="story_source_material" rows="5" placeholder="Paste the factual source content with source names or citations. URLs alone are not retrieved. Fiction may leave this empty.">{{ edit_values.story_source_material }}</textarea>
+        </label>
         <details class="compact-details">
           <summary>Character engine</summary>
           <div class="grid compact">

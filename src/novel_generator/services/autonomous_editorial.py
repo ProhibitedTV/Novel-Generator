@@ -14,6 +14,7 @@ from .context_memory import compile_memory_packet
 from .continuity_lifecycle import LIVE_SNAPSHOT_FIELDS, apply_continuity_lifecycle
 from .ending_debt import compile_ending_debt_audit
 from .prompts import extract_json_payload, parse_continuity_update
+from .book_specs import contract_text, uses_book_contract, run_book_brief, review_instruction, source_review_instruction
 
 
 class AutonomousQualityError(RuntimeError):
@@ -67,6 +68,28 @@ def _numbered_prose(text, chapter_number):
                        for index, paragraph in enumerate(_paragraphs(text), 1))
 
 
+def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
+    from .structured_schema_runtime import make_schema_marker, response_schema_for_stage
+    schema = response_schema_for_stage("autonomous_review")
+    schema["properties"]["reviewed_chapters"]["const"] = sorted(chapter_numbers)
+    schema["$defs"]["EditorialIssue"]["properties"]["chapter_number"]["enum"] = sorted(chapter_numbers)
+    if scope == "source_accuracy":
+        for check in ("plot_coherent", "prose_clean", "ending_complete"):
+            schema["properties"][check]["const"] = True
+        issue = schema["$defs"]["EditorialIssue"]
+        issue["properties"]["category"]["const"] = "factual"
+        # This audit always supplies numbered complete prose. Constrain the
+        # decoder to references so Markdown stripping, abbreviated quotations,
+        # and reordered excerpts cannot prevent a genuine factual repair.
+        issue["required"] = list(dict.fromkeys([*issue["required"], "evidence_paragraphs"]))
+        issue["properties"]["evidence"]["const"] = "Source paragraphs"
+        issue["properties"]["evidence_paragraphs"]["minItems"] = 1
+        if paragraph_count is not None:
+            issue["properties"]["evidence_paragraphs"]["items"]["enum"] = list(range(1, paragraph_count + 1))
+        schema["properties"]["optional_suggestions"]["maxItems"] = 0
+    return make_schema_marker("autonomous_review", schema=schema)
+
+
 def _inline_paragraph_references(evidence, chapter_number):
     # Local reviewers vary the spelling of navigation labels. Interpret only
     # explicit labels; the referenced source is attached by validate_review.
@@ -74,7 +97,7 @@ def _inline_paragraph_references(evidence, chapter_number):
         r"\[Chapter\s+(?P<chapter>\d+),\s*paragraph\s+(?P<chapter_para>\d+)\]"
         r"|(?:\(|\[)\s*(?:P|Para\.?|Paragraph)\s+(?P<wrapped>\d+)\s*(?:\)|\])"
         r"|(?:\(|\[)P\s*(?P<short>\d+)(?:\)|\])"
-        r"|\bParagraph\s+(?P<label>\d+)\s*:", re.IGNORECASE)
+        r"|\b(?:Paragraph|Para\.?)\s+(?P<label>\d+)\b", re.IGNORECASE)
     references = []
     for match in pattern.finditer(evidence):
         if match.group("chapter") and int(match.group("chapter")) != chapter_number:
@@ -97,7 +120,7 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
     def validate_evidence(issue):
-        if not issue.evidence_paragraphs:
+        if not issue.evidence_paragraphs and not _grounded_evidence(issue.evidence, source.get(issue.chapter_number, "")):
             # Some local models serialize explicit source labels inside evidence
             # instead of its dedicated array. Treat those as references, never
             # as fuzzy quotations; the source text is still attached below.
@@ -177,7 +200,7 @@ def _context(run, chapter, ledger) -> dict:
         nearby.append(outline[-1])
     # Preserve all literal current prose. Only supporting history is compacted.
     return {
-        "author_brief": run.project.story_brief,
+        "author_brief": run_book_brief(run),
         "premise": run.project.premise,
         "story_bible": run.story_bible,
         "chapter_number": chapter.chapter_number,
@@ -225,28 +248,37 @@ def _adjudication_messages(scope, context, review, controls):
         "otherwise quote exact source words. Return valid JSON only, matching this contract: "
         + json.dumps(EditorialReview.model_json_schema())
     )
-    if scope == "adjacent_chapters":
+    if scope == "source_accuracy":
+        instruction += "\n" + source_review_instruction()
+    elif scope == "adjacent_chapters":
         instruction += (
             " Only compare factual continuity, character identity, and causes across these complete chapters. "
             "Only continuity, character, and causality issues are allowed. Set prose_clean and ending_complete to true; "
             "separate audits cover those checks. optional_suggestions must be empty. Explain both incompatible claims and their chapters."
         )
     elif scope == "whole_book" or context.get("is_final_chapter"):
-        instruction += (
-            " This is the end of the book: require the author's central resolution, cost, and promised aftermath on page. "
-            "If they are already depicted, do not demand a longer or differently worded depiction. Beginning a new life does not "
-            "require completing a lifetime project. Judge current prose, not a stale outline or QA diagnosis."
-        )
+        if uses_book_contract(context.get("author_brief")):
+            instruction += " This is the end of the book. Verify the promised ending_target and complete coverage in the requested book form; there is no next chapter."
+        else:
+            instruction += (
+                " This is the end of the book: require the author's central resolution, cost, and promised aftermath on page. "
+                "If they are already depicted, do not demand a longer or differently worded depiction. Beginning a new life does not "
+                "require completing a lifetime project. Judge current prose, not a stale outline or QA diagnosis."
+            )
     else:
         instruction += (
             " Judge this chapter's assigned scene turn. A non-final setup may end on discovery, decision, or threat; "
             "do not require events assigned to future chapters."
         )
+    if uses_book_contract(context.get("author_brief")):
+        instruction += "\nThe following book-form contract governs interpretation of the checks and closure requirements:\n" + contract_text(context["author_brief"])
     messages = [{"role": "system", "content": instruction}, {"role": "user", "content": json.dumps(
         {"scope": scope, **source, "proposed_review_to_verify": allegations}, ensure_ascii=False)}]
     if controls:
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
+    messages.insert(-1, _coverage_marker(review.reviewed_chapters, scope,
+        paragraph_count=len(_paragraphs(context["actual_prose"])) if scope == "source_accuracy" else None))
     return messages
 
 
@@ -260,7 +292,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     if provider == "ollama" or adjudicator_provider == "ollama":
         from ..settings import get_settings
         config = getattr(client, "settings", None) or get_settings()
-    if scope == "adjacent_chapters" and provider == "ollama":
+    if scope in {"adjacent_chapters", "source_accuracy"} and provider == "ollama":
         if getattr(config, "ollama_continuity_think", None) is not None:
             controls["think"] = config.ollama_continuity_think
         if getattr(config, "ollama_continuity_temperature", None) is not None:
@@ -270,7 +302,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    fingerprint = _hash({"contract": 14, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 17, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
@@ -343,11 +375,20 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         review_context["actual_prose"] = _numbered_prose(context["actual_prose"], context["chapter_number"])
     if "final_chapter_actual_prose" in context:
         review_context["final_chapter_actual_prose"] = _numbered_prose(context["final_chapter_actual_prose"], max(chapter.chapter_number for chapter in chapters))
+    if uses_book_contract(context.get("author_brief")):
+        if scope == "adjacent_chapters":
+            instruction += "\nThe following book-form contract governs interpretation of the checks and closure requirements:\n" + contract_text(context["author_brief"])
+        else:
+            instruction = review_instruction(context["author_brief"], scope, context.get("is_final_chapter")) + "\n" + json.dumps(EditorialReview.model_json_schema())
+    if scope == "source_accuracy":
+        instruction = source_review_instruction() + "\n" + json.dumps(EditorialReview.model_json_schema())
     messages = [{"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps({"scope": scope, **review_context}, ensure_ascii=False)}]
     if controls:
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
+    messages.insert(-1, _coverage_marker([chapter.chapter_number for chapter in chapters], scope,
+        paragraph_count=len(_paragraphs(chapters[0].content or "")) if scope == "source_accuracy" else None))
     _check_context(messages, client, provider)
     run.current_step = "autonomous_review"
     run.current_chapter = chapters[0].chapter_number if len(chapters) == 1 else None
@@ -360,6 +401,9 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             if scope == "adjacent_chapters" and (not review.prose_clean or not review.ending_complete or
                 any(issue.category not in {"continuity", "character", "causality"} for issue in review.issues)):
                 raise ValueError("Chapter-pair audits compare factual continuity, character identity, and causes only. Prose and ending checks belong to the separate chapter and whole-book audits.")
+            if scope == "source_accuracy" and (not all((review.plot_coherent, review.prose_clean, review.ending_complete))
+                or any(issue.category != "factual" for issue in review.issues) or review.optional_suggestions):
+                raise ValueError("Source audits judge factual support only; keep other checks true and report only factual issues without optional suggestions.")
             if review._rejected_optional_suggestions:
                 _record(session, run, "autonomous_advisory_rejected", {
                     "message": "Discarded unsupported optional advice; required editorial checks remain validated.",
@@ -383,7 +427,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     affected = {issue.chapter_number for issue in review.issues}
     prior_repairs = [item for item in _events(run, "autonomous_repair_started")
                      if item.get("chapter_number") in affected]
-    if review.issues and scope in {"chapter", "final_chapter", "whole_book", "adjacent_chapters"} and len(prior_repairs) >= 2:
+    if review.issues and scope in {"chapter", "final_chapter", "whole_book", "adjacent_chapters", "source_accuracy"} and len(prior_repairs) >= 2:
         # A separate decision pass checks a repeatedly revised chapter against
         # the actual contract, rather than endlessly following new preferences.
         proposed = review.model_dump()
@@ -607,6 +651,9 @@ def ensure_chapter(session, run, chapter, ledger, settings, client) -> None:
     while True:
         review = _review(session, run, [chapter], _context(run, chapter, ledger), client, "chapter")
         issues = [*review.issues, *_length_issues(run, chapter)]
+        source_review = _source_review(session, run, chapter, client)
+        if source_review:
+            issues.extend(source_review.issues)
         if review.passed and not issues:
             return
         _repair(session, run, chapter, ledger, issues, settings, client, "draft")
@@ -619,6 +666,18 @@ def draft_checkpoint(run, chapter):
                and event.payload.get("chapter_number") == chapter.chapter_number
                and (event.event_type == "autonomous_draft_checkpoint" or event.payload.get("phase") == "draft")
                for event in run.events)
+
+
+def _source_review(session, run, chapter, client):
+    brief = run_book_brief(run)
+    if brief.get("content_kind", "fiction") != "nonfiction":
+        return None
+    if not brief.get("source_material", "").strip():
+        raise AutonomousQualityError("Nonfiction source audit requires the saved source content.")
+    return _review(session, run, [chapter], {
+        "chapter_number": chapter.chapter_number, "actual_prose": chapter.content,
+        "source_material": brief["source_material"],
+    }, client, "source_accuracy")
 
 
 def _refresh_metadata(session, run, chapters, client):
@@ -641,7 +700,8 @@ def _refresh_metadata(session, run, chapters, client):
             provider, model = pipeline._resolve_stage_route(client, run, "chapter_summary")
             chapter.summary = pipeline._supervised_provider_chat(
                 session, run, client, provider, model,
-                pipeline.build_summary_messages(chapter, pipeline._outline_entry(run, chapter.chapter_number)),
+                pipeline.build_summary_messages(chapter, pipeline._outline_entry(run, chapter.chapter_number),
+                    project=run.project, story_bible=run.story_bible),
                 stage="chapter_summary", chapter_number=chapter.chapter_number,
                 metadata={"phase": "autonomous_reconciliation"},
             ).strip()
@@ -691,7 +751,7 @@ def _book_context(run, chapters, qa_report) -> dict:
                 row["ending_prose"] = prose[-320:]
         chapter_map.append(row)
     return {
-        "author_brief": run.project.story_brief,
+        "author_brief": run_book_brief(run),
         "ending_promise": (run.story_bible or {}).get("ending_promise", ""),
         "ending_debt_to_verify_against_actual_prose": compile_ending_debt_audit(run, chapters).payload,
         "chapter_map": chapter_map,
@@ -706,6 +766,7 @@ def _book_context(run, chapters, qa_report) -> dict:
 def _adjacent_context(run, chapters, ledger) -> dict:
     """Compare complete literal prose; a summary cannot substitute for an earlier fact."""
     return {
+        "author_brief": run_book_brief(run),
         "world_rules": (run.story_bible or {}).get("world_rules", []),
         "actual_chapters": [{"chapter_number": chapter.chapter_number,
                              "actual_prose": _numbered_prose(chapter.content or "", chapter.chapter_number)}
@@ -748,6 +809,9 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
                 review = _review(session, run, [chapter], _context(run, chapter, before[chapter.chapter_number]), client, "final_chapter")
                 issues.extend(review.issues)
                 issues.extend(_length_issues(run, chapter))
+                source_review = _source_review(session, run, chapter, client)
+                if source_review:
+                    issues.extend(source_review.issues)
             for left, right in zip(chapters, chapters[1:]):
                 pair = [left, right]
                 review = _review(session, run, pair, _adjacent_context(run, pair, before[left.chapter_number]), client, "adjacent_chapters")

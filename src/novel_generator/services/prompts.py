@@ -21,6 +21,7 @@ from ..schemas import (
     StructuredOutlineEntry,
 )
 from .genre_profiles import GenreProfile, genre_profile
+from .book_specs import book_form_prompt, uses_book_contract
 
 
 def _chapter_mode_options() -> str:
@@ -242,6 +243,7 @@ def outline_summary_from_entry(entry: StructuredOutlineEntry | dict[str, Any]) -
     return " ".join(part for part in parts if part and not part.endswith(":")).strip()
 
 
+@book_form_prompt
 def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dict[str, str]]:
     profile = _project_genre_profile(project)
     return [
@@ -328,6 +330,7 @@ def build_story_bible_messages(project: Project, run: GenerationRun) -> list[dic
     ]
 
 
+@book_form_prompt
 def build_outline_messages(project: Project, run: GenerationRun, story_bible: StoryBible | dict[str, Any]) -> list[dict[str, str]]:
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
     profile = _story_bible_genre_profile(bible)
@@ -423,6 +426,7 @@ def build_outline_messages(project: Project, run: GenerationRun, story_bible: St
     ]
 
 
+@book_form_prompt
 def build_outline_chunk_messages(
     project: Project,
     run: GenerationRun,
@@ -528,6 +532,7 @@ def rolling_context(chapters: list[ChapterDraft], window: int) -> str:
     )
 
 
+@book_form_prompt
 def build_chapter_plan_messages(
     project: Project,
     run: GenerationRun,
@@ -627,6 +632,7 @@ def build_chapter_plan_messages(
     ]
 
 
+@book_form_prompt
 def build_chapter_draft_messages(
     project: Project,
     run: GenerationRun,
@@ -711,6 +717,7 @@ def build_chapter_draft_messages(
     ]
 
 
+@book_form_prompt
 def build_chapter_critique_messages(
     project: Project,
     chapter: ChapterDraft,
@@ -813,6 +820,7 @@ def build_chapter_critique_messages(
     ]
 
 
+@book_form_prompt
 def build_chapter_revision_messages(
     project: Project,
     chapter: ChapterDraft,
@@ -884,6 +892,7 @@ def build_chapter_revision_messages(
     ]
 
 
+@book_form_prompt
 def build_chapter_expansion_messages(
     project: Project,
     run: GenerationRun,
@@ -940,7 +949,9 @@ def build_chapter_expansion_messages(
     ]
 
 
-def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutlineEntry | dict[str, Any]) -> list[dict[str, str]]:
+@book_form_prompt
+def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutlineEntry | dict[str, Any], project: Project | None = None,
+                           story_bible: StoryBible | dict[str, Any] | None = None) -> list[dict[str, str]]:
     entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
     return [
         {
@@ -959,6 +970,7 @@ def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutli
     ]
 
 
+@book_form_prompt
 def build_continuity_update_messages(
     project: Project,
     chapter: ChapterDraft,
@@ -1055,6 +1067,7 @@ def build_continuity_update_messages(
     ]
 
 
+@book_form_prompt
 def build_manuscript_qa_messages(
     project: Project,
     story_bible: StoryBible | dict[str, Any],
@@ -1137,6 +1150,7 @@ def build_manuscript_qa_messages(
     ]
 
 
+@book_form_prompt
 def build_developmental_rewrite_messages(
     project: Project,
     story_bible: StoryBible | dict[str, Any],
@@ -1247,6 +1261,7 @@ def _qa_editing_context(qa_report: ManuscriptQaReport) -> dict[str, Any]:
     return {key: payload.get(key) for key in keys if payload.get(key)}
 
 
+@book_form_prompt
 def build_chapter_edit_messages(
     project: Project,
     chapter: ChapterDraft,
@@ -1307,6 +1322,7 @@ def build_chapter_edit_messages(
     ]
 
 
+@book_form_prompt
 def build_developmental_revision_messages(
     project: Project,
     chapter: ChapterDraft,
@@ -1357,6 +1373,7 @@ def build_developmental_revision_messages(
     ]
 
 
+@book_form_prompt
 def build_publication_humanization_messages(
     project: Project,
     chapter: ChapterDraft,
@@ -1403,6 +1420,7 @@ def build_publication_humanization_messages(
     ]
 
 
+@book_form_prompt
 def build_publication_compression_messages(
     project: Project,
     chapter: ChapterDraft,
@@ -1538,7 +1556,7 @@ def _normalize_outline_payload(payload: Any) -> Any:
     return payload
 
 
-def parse_outline_chunk(text: str, start_chapter: int, end_chapter: int) -> list[dict[str, Any]]:
+def parse_outline_chunk(text: str, start_chapter: int, end_chapter: int, book_spec=None) -> list[dict[str, Any]]:
     payload = _normalize_outline_payload(extract_json_payload(text))
     try:
         outline = TypeAdapter(list[StructuredOutlineEntry]).validate_python(payload)
@@ -1554,6 +1572,8 @@ def parse_outline_chunk(text: str, start_chapter: int, end_chapter: int) -> list
             + f", but expected {start_chapter} through {end_chapter}."
         )
 
+    if uses_book_contract(book_spec):
+        return _book_outline_payload(outline, book_spec)
     if any(not item.chapter_mode.strip() for item in outline):
         raise ValueError("Outline chunk entries must include a chapter_mode for every chapter.")
 
@@ -1583,7 +1603,14 @@ def parse_outline_chunk(text: str, start_chapter: int, end_chapter: int) -> list
     return [item.model_dump() for item in outline]
 
 
-def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
+def _book_outline_payload(outline, spec):
+    # Mode is descriptive metadata for arbitrary forms, not a prescribed list
+    # of thriller scene types. Structural coverage/numbering remain mandatory.
+    default = {"nonfiction": "essay", "poetry": "poem", "drama": "dramatic_scene"}.get(spec.get("content_kind"), "narrative")
+    return [item.model_copy(update={"chapter_mode": item.chapter_mode or default}).model_dump() for item in outline]
+
+
+def parse_outline(text: str, requested_chapters: int, book_spec=None) -> list[dict[str, Any]]:
     payload = _normalize_outline_payload(extract_json_payload(text))
     try:
         outline = TypeAdapter(list[StructuredOutlineEntry]).validate_python(payload)
@@ -1599,6 +1626,9 @@ def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
     actual_numbers = [item.chapter_number for item in outline]
     if actual_numbers != expected_numbers:
         raise ValueError("Outline chapter numbers must run sequentially from 1 to the requested chapter count.")
+
+    if uses_book_contract(book_spec):
+        return _book_outline_payload(outline, book_spec)
 
     if any(not item.chapter_mode.strip() for item in outline):
         raise ValueError("Outline entries must include a chapter_mode for every chapter.")
@@ -1673,11 +1703,15 @@ def parse_outline(text: str, requested_chapters: int) -> list[dict[str, Any]]:
     return [item.model_dump() for item in outline]
 
 
-def parse_chapter_plan(text: str) -> ChapterPlan:
+def parse_chapter_plan(text: str, book_spec=None) -> ChapterPlan:
     payload = extract_json_payload(text)
     if isinstance(payload, dict) and "plan" in payload:
         payload = payload["plan"]
     plan = ChapterPlan.model_validate(payload)
+    if uses_book_contract(book_spec):
+        if not plan.scene_beats or not plan.ending_hook.strip():
+            raise ValueError("Book chapter plan requires concrete beats/sections and an assigned ending state.")
+        return plan
     required_story_turn_fields = [
         "irreversible_change",
         "protagonist_choice",
@@ -1732,7 +1766,7 @@ def parse_developmental_rewrite_plan(text: str) -> DevelopmentalRewritePlan:
 def sanitize_chapter_content(content: str) -> str:
     cleaned = content.strip()
     cleaned = re.sub(
-        r"^\s*chapter\s+\d+\s*[:\-\u2014]?\s*[^\n]*\n+",
+        r"^\s*(?:#{1,6}\s*)?chapter\s+\d+\s*[:\-\u2014]?\s*[^\n]*\n+",
         "",
         cleaned,
         flags=re.IGNORECASE,

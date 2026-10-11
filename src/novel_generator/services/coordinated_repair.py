@@ -50,6 +50,8 @@ def repair(text, plan, context, generate):
             "If several selected passages repeat the same dialogue, retain that dialogue in only one passage. "
             "Respect the assigned chapter ending; a non-final chapter need not resolve the whole book. "
             "Do not follow editorial suggestions that would contradict the author brief or assigned ending. "
+            "For factual issues, use the supplied source_material to correct unsupported claims and remove "
+            "invented mandatory fields or steps, preserving supported facts and labeled hypothetical examples. "
             "Preserve speaker identity, chronology, and voice. Return prose inside JSON strings, no commentary."
         )},
         {"role": "user", "content": json.dumps({"passages": passages, "diagnoses": diagnoses,

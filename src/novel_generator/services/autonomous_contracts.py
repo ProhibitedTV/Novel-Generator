@@ -20,7 +20,7 @@ class EditorialIssue(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     chapter_number: int = Field(ge=1)
-    category: Literal["continuity", "causality", "character", "premature_payoff", "unresolved_payoff", "repetition", "prose", "length"]
+    category: Literal["continuity", "causality", "character", "factual", "premature_payoff", "unresolved_payoff", "repetition", "prose", "length"]
     problem: str = Field(min_length=1)
     evidence: str = Field(min_length=1, description="Use 'Source paragraphs' when evidence_paragraphs is provided. Otherwise give an exact short quotation from this chapter's actual prose, not its metadata.")
     evidence_paragraphs: list[int] = Field(default_factory=list, description="Numbered source paragraphs supporting this issue. Prefer these references to copying dialogue.")

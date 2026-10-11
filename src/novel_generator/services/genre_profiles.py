@@ -22,6 +22,17 @@ class GenreProfile:
 
 
 GENRE_PROFILES: dict[str, GenreProfile] = {
+    "custom": GenreProfile(
+        id="custom", label="Custom / blended genre",
+        description="Any genre or topic, defined by the author brief and reader promise.",
+        story_bible_focus=["Derive the genre and form contract from the author brief; do not assume thriller stakes or technical conflict."],
+        outline_focus=["Organize the requested book form to deliver the reader promise and complete its required coverage."],
+        drafting_focus=["Honor the requested audience, voice, form, and concrete chapter purpose."],
+        continuity_focus=["Track shared facts, reader progress, and promises appropriate to this book form."],
+        lint_focus=["Check actual defects against the author contract, without inventing genre obligations."],
+        qa_focus=["Judge complete delivery of the author's genre, form, and ending requirements."],
+        genre_contract=["Deliver the author brief and reader promise in the requested book form."],
+    ),
     "sci_fi_thriller": GenreProfile(
         id="sci_fi_thriller",
         label="Sci-Fi Thriller",
@@ -308,7 +319,7 @@ GENRE_PROFILES: dict[str, GenreProfile] = {
 
 def genre_profile(profile_name: str | None) -> GenreProfile:
     key = (profile_name or DEFAULT_GENRE_PROFILE).strip() or DEFAULT_GENRE_PROFILE
-    return GENRE_PROFILES.get(key, GENRE_PROFILES[DEFAULT_GENRE_PROFILE])
+    return GENRE_PROFILES.get(key, GENRE_PROFILES["custom"])
 
 
 def genre_profile_options() -> list[dict[str, str]]:

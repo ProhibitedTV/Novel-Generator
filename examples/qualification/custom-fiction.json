@@ -1,0 +1,23 @@
+{
+  "title": "The Apricot Boundary",
+  "premise": "In a quiet frontier village, aging orchard keeper Ada and carpenter Ben discover their shared fence was drawn incorrectly decades ago. Neither wants a feud. They test two repairs, laugh at the impractical one, and choose a shared gate that preserves Ada's apricot tree and Ben's access. Complete this small comic story in two chapters with a visible settled aftermath.",
+  "desired_word_count": 1400,
+  "requested_chapters": 2,
+  "min_words_per_chapter": 500,
+  "max_words_per_chapter": 900,
+  "story_brief": {
+    "genre_profile": "custom",
+    "genre_description": "Gentle literary western with dry comedy",
+    "genre_requirements": ["Small practical stakes and warm character humor", "A fair resolution without a villain", "No compulsory technical crisis or public uprising"],
+    "book_type": "short novella",
+    "content_kind": "fiction",
+    "structure": "continuous",
+    "audience": "Adult readers of quiet comic fiction",
+    "reader_promise": "Two stubborn neighbors learn to solve a small problem together.",
+    "protagonist": "Ada, an aging orchard keeper",
+    "supporting_cast": ["Ben, a carpenter and Ada's neighbor"],
+    "ending_target": "Ada and Ben build a shared gate, preserve the apricot tree and Ben's access, and share fruit beside the finished gate. Show the settled practical result.",
+    "must_include": ["The old fence drawing", "Two alternative practical repairs", "The finished shared gate"],
+    "avoid": ["Violence", "Secret conspiracy", "Magic", "A sequel cliffhanger replacing the ending"]
+  }
+}

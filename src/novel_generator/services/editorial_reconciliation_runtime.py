@@ -115,7 +115,7 @@ def reconcile_developmental_continuity(
                     client,
                     provider_name,
                     model_name,
-                    pipeline.build_summary_messages(chapter, outline_entry),
+                    pipeline.build_summary_messages(chapter, outline_entry, project=run.project, story_bible=story_bible),
                     stage="chapter_summary",
                     chapter_number=chapter_number,
                     metadata={

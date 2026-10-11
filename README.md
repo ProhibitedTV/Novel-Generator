@@ -4,6 +4,8 @@
 
 Novel Generator is a self-hosted, local-first writing studio for generating, revising, auditing, and exporting full-length fiction with Ollama or an optional OpenAI-compatible local endpoint.
 
+Custom genre briefs and explicit book forms also support collections, source-aware nonfiction, poetry, and drama through the checkpointed pipeline. See [book forms and local qualification](docs/book-forms.md) for configuration and the limits of this support.
+
 The product is built around one practical goal: get to a complete book draft, then make the draft increasingly coherent, reviewable, editable, and polished without losing the run history or long-form state that produced it.
 
 ![Updated product preview](docs/screenshots/dashboard-preview.svg)

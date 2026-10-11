@@ -47,6 +47,7 @@ from .editorial import (
 )
 from .exports import export_run_artifacts
 from .genre_profiles import genre_profile
+from .book_specs import uses_book_contract, run_book_brief
 from .ollama import OllamaClient
 from .provider_errors import ProviderError, ProviderTransportError
 from .prompts import (
@@ -603,12 +604,15 @@ def _story_turn_warnings(critique: ChapterCritique) -> list[str]:
     return warnings
 
 
-def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLintResult) -> ChapterCritique:
-    style_warnings = _style_score_warnings(critique)
-    ending_warnings = _ending_score_warnings(critique)
-    technical_warnings = _technical_fatigue_warnings(critique)
-    side_character_warnings = _side_character_warnings(critique)
-    story_turn_warnings = _story_turn_warnings(critique)
+def _combine_chapter_feedback(critique: ChapterCritique, lint_result: ChapterLintResult, book_spec=None) -> ChapterCritique:
+    form_specific = uses_book_contract(book_spec)
+    # Preserve the actual scores; an inapplicable dialogue/agency score is not
+    # evidence that a handbook needs fictional dialogue or a protagonist.
+    style_warnings = [] if form_specific else _style_score_warnings(critique)
+    ending_warnings = [] if form_specific else _ending_score_warnings(critique)
+    technical_warnings = [] if form_specific else _technical_fatigue_warnings(critique)
+    side_character_warnings = [] if form_specific else _side_character_warnings(critique)
+    story_turn_warnings = [] if form_specific else _story_turn_warnings(critique)
     blocking_issues = _dedupe([*critique.blocking_issues, *lint_result.blocking_issues])
     soft_warnings = _dedupe(
         [
@@ -699,6 +703,8 @@ def _strict_quality_warnings(critique: ChapterCritique) -> tuple[list[str], list
 
 
 def _apply_quality_profile_to_critique(run: GenerationRun, critique: ChapterCritique) -> ChapterCritique:
+    if uses_book_contract(run_book_brief(run)):
+        return critique
     profile = str(getattr(run, "quality_profile", "balanced") or "balanced").strip().lower()
     if profile == "draft":
         if critique.blocking_issues or critique.repair_scope == "full_chapter":
@@ -759,6 +765,16 @@ def _chapter_prior_context(run: GenerationRun, chapter_number: int) -> list:
 def _fallback_story_bible(project: Any, run: GenerationRun) -> StoryBible:
     brief = project.story_brief or {}
     profile = genre_profile(brief.get("genre_profile"))
+    if uses_book_contract(brief):
+        return StoryBible(
+            genre_profile=profile.id, book_spec=dict(brief), logline=project.premise,
+            theme=brief.get("reader_promise") or project.premise,
+            act_plan=["Establish the promised subject and form.", "Develop the assigned coverage without repetition.",
+                      "Complete the author's ending target and reader promise."],
+            world_rules=brief.get("world_rules", []),
+            genre_contract=[*profile.genre_contract, *brief.get("genre_requirements", [])],
+            ending_promise=brief.get("ending_target") or brief.get("reader_promise") or project.premise,
+        )
     protagonist = str(brief.get("protagonist") or "The protagonist").strip()
     antagonist = str(brief.get("antagonist") or "the central opposition").strip()
     supporting_cast = [
@@ -909,6 +925,18 @@ def _fallback_outline_entries(
     end_chapter: int,
     total_chapters: int,
 ) -> list[dict[str, Any]]:
+    brief = project.story_brief or {}
+    if uses_book_contract(brief):
+        topics = brief.get("must_include") or [project.premise]
+        return [StructuredOutlineEntry(
+            chapter_number=number, act="Book", title=f"Part {number}",
+            objective=str(topics[min(len(topics) - 1, (number - 1) * len(topics) // total_chapters)]),
+            conflict_turn="Develop this part's specific purpose without repeating earlier coverage.",
+            character_turn="Advance the reader's understanding or this piece's own narrative.",
+            reveal="Deliver a concrete new contribution to the reader promise.",
+            ending_state=story_bible.ending_promise if number == total_chapters else "Complete this part's assigned purpose.",
+            chapter_mode={"nonfiction": "instruction", "poetry": "poem", "drama": "dramatic_scene"}.get(brief.get("content_kind"), "independent_story"),
+        ).model_dump() for number in range(start_chapter, end_chapter + 1)]
     protagonist = story_bible.cast[0].name if story_bible.cast else "The protagonist"
     support = story_bible.cast[1].name if len(story_bible.cast) > 1 else "a trusted ally"
     canon_name = story_bible.canon_registry[0].name if story_bible.canon_registry else "the central pressure"
@@ -1161,7 +1189,7 @@ def _validated_outline_or_fallback(
     outline: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        return parse_outline(_outline_payload(outline), run.requested_chapters)
+        return parse_outline(_outline_payload(outline), run.requested_chapters, book_spec=story_bible.book_spec)
     except Exception as exc:
         try:
             repaired = _repair_outline_for_full_book_validation(
@@ -1170,7 +1198,7 @@ def _validated_outline_or_fallback(
                 outline,
                 run.requested_chapters,
             )
-            parsed = parse_outline(_outline_payload(repaired), run.requested_chapters)
+            parsed = parse_outline(_outline_payload(repaired), run.requested_chapters, book_spec=story_bible.book_spec)
             record_event(
                 session,
                 run,
@@ -1190,7 +1218,7 @@ def _validated_outline_or_fallback(
                     run.requested_chapters,
                     rebalance_modes=True,
                 )
-                parsed = parse_outline(_outline_payload(repaired), run.requested_chapters)
+                parsed = parse_outline(_outline_payload(repaired), run.requested_chapters, book_spec=story_bible.book_spec)
                 record_event(
                     session,
                     run,
@@ -1227,6 +1255,7 @@ def _validated_outline_or_fallback(
                 )
             ),
             run.requested_chapters,
+            book_spec=story_bible.book_spec,
         )
 
 
@@ -1270,7 +1299,9 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
     story_bible = story_bible.model_copy(
         update={
             "genre_profile": selected_profile.id,
-            "genre_contract": story_bible.genre_contract or list(selected_profile.genre_contract),
+            "book_spec": dict(project.story_brief or {}),
+            "genre_contract": _dedupe([*(story_bible.genre_contract or selected_profile.genre_contract),
+                                       *(project.story_brief or {}).get("genre_requirements", [])]),
         }
     )
     approved_canon = _project_approved_canon(project)
@@ -1328,7 +1359,7 @@ def _generate_outline_chunks(
                     end_chapter=end,
                     prior_outline=prior,
                 ),
-                lambda raw, start=start_chapter, end=end_chapter: parse_outline_chunk(raw, start, end),
+                lambda raw, start=start_chapter, end=end_chapter: parse_outline_chunk(raw, start, end, book_spec=story_bible.book_spec),
                 f"structured outline chapters {start_chapter}-{end_chapter}",
                 "outline_chunk",
                 None,
@@ -1397,7 +1428,7 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
                 lambda: build_outline_messages(project, run, story_bible),
                 # Validate the chapter records first, then use the same whole-book repair
                 # path as chunked outlines. A pacing label must not discard the model's plot.
-                lambda raw: parse_outline_chunk(raw, 1, run.requested_chapters),
+                lambda raw: parse_outline_chunk(raw, 1, run.requested_chapters, book_spec=story_bible.book_spec),
                 "structured outline",
                 "outline",
             )
@@ -1615,7 +1646,7 @@ def _draft_chapter(
                     ledger,
                     run.summary_context or "",
                 ),
-                parse_chapter_plan,
+                lambda raw: parse_chapter_plan(raw, book_spec=story_bible.book_spec),
                 f"chapter {chapter.chapter_number} plan",
                 "chapter_plan",
                 chapter.chapter_number,
@@ -1750,7 +1781,7 @@ def _draft_chapter(
                 )
             combined_critique = _apply_quality_profile_to_critique(
                 run,
-                _combine_chapter_feedback(critique, lint_result),
+                _combine_chapter_feedback(critique, lint_result, book_spec=story_bible.book_spec),
             )
             _persist_structured_qa(chapter, combined_critique)
             session.commit()
@@ -1859,7 +1890,7 @@ def _draft_chapter(
                 )
             combined_critique = _apply_quality_profile_to_critique(
                 run,
-                _combine_chapter_feedback(final_critique, final_lint),
+                _combine_chapter_feedback(final_critique, final_lint, book_spec=story_bible.book_spec),
             )
             _persist_structured_qa(chapter, combined_critique)
             session.commit()
@@ -1877,7 +1908,7 @@ def _draft_chapter(
                 client,
                 summary_provider_name,
                 summary_model_name,
-                build_summary_messages(chapter, outline_entry),
+                build_summary_messages(chapter, outline_entry, project=run.project, story_bible=story_bible),
                 stage="chapter_summary",
                 chapter_number=chapter.chapter_number,
                 metadata={"label": f"chapter {chapter.chapter_number} summary"},
@@ -1971,7 +2002,7 @@ def _run_manuscript_qa(
     client: ProviderManager | OllamaClient,
 ) -> tuple[ManuscriptQaReport, str]:
     story_bible = _story_bible_from_run(run)
-    lint_findings = lint_manuscript(chapters)
+    lint_findings = lint_manuscript(chapters, story_bible)
     deterministic_notes = manuscript_quality_notes(chapters, story_bible)
     provider_name, model_name = _resolve_stage_route(client, run, "manuscript_qa")
     run.current_step = "manuscript_qa"

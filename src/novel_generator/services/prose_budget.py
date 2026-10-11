@@ -46,7 +46,7 @@ def compress_prose(text: str, target: int, generate) -> str:
         else:
             messages = [
                 {"role": "system", "content": (
-                    "Compress this existing fiction passage. Return only its revised prose, with paragraph breaks. "
+                    "Compress this existing manuscript passage. Return only its revised text, preserving paragraph and line breaks. "
                     "Preserve its named people, evidence, actions, dialogue speakers, causal links, and consequences. "
                     "Remove redundant description and exposition. Do not invent events, summarize the rest of the "
                     "story, append an ending, or add a heading. Edit only the supplied passage. "
