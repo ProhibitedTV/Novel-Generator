@@ -356,6 +356,37 @@ def test_book_coverage_is_constrained_in_provider_schema_without_accepting_incom
     assert editor.validate_review(json.dumps(clean_review(numbers)), chapters).passed
 
 
+def test_pair_schema_matches_its_factual_scope_and_keeps_actual_conflicts_blocking():
+    from novel_generator.services.structured_schema_runtime import extract_schema_marker
+    _, schema, _ = extract_schema_marker([editor._coverage_marker([1, 2], "adjacent_chapters")])
+    assert schema["properties"]["prose_clean"]["const"] is True
+    assert schema["properties"]["ending_complete"]["const"] is True
+    assert schema["$defs"]["EditorialIssue"]["properties"]["category"]["enum"] == ["continuity", "character", "causality"]
+    assert schema["properties"]["optional_suggestions"]["maxItems"] == 0
+    data = clean_review([1, 2])
+    data["canon_consistent"] = False
+    data["issues"] = [issue(number=2)]
+    assert not editor.validate_review(json.dumps(data), [
+        SimpleNamespace(chapter_number=1, content=PROSE), SimpleNamespace(chapter_number=2, content=PROSE)]).passed
+
+
+@pytest.mark.parametrize('scope', ['chapter', 'final_chapter', 'adjacent_chapters', 'source_accuracy'])
+def test_numbered_audits_require_actual_references_instead_of_quoting_absent_rules(scope):
+    from novel_generator.services.structured_schema_runtime import extract_schema_marker
+    _, schema, _ = extract_schema_marker([editor._coverage_marker([1], scope, paragraph_count=2)])
+    required = schema['$defs']['EditorialIssue']
+    assert 'evidence_paragraphs' in required['required']
+    assert required['properties']['evidence']['const'] == 'Source paragraphs'
+    assert required['properties']['evidence_paragraphs']['minItems'] == 1
+    assert required['properties']['evidence_paragraphs']['items']['enum'] == [1, 2]
+    data = clean_review([1])
+    data['issues'] = [dict(issue(evidence='Source paragraphs'), evidence_paragraphs=[2],
+                         problem='The card description omits the privacy rule.')]
+    review = editor.validate_review(json.dumps(data), [SimpleNamespace(chapter_number=1,
+        content='Setup.\n\nThe Borrower Card stores contact details.')])
+    assert review.issues[0].evidence == 'The Borrower Card stores contact details.'
+
+
 @pytest.mark.parametrize("evidence", [
     "The channel collapsed. (Para 1) ... Not all of it. (Para 3)",
     "The channel collapsed. (Para. 1) ... Not all of it. [Paragraph 3]",

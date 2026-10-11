@@ -10,6 +10,7 @@ from docx.shared import Inches, Pt
 
 from ..models import Artifact, ChapterDraft, GenerationRun, Project
 from .prompts import sanitize_chapter_content
+from .docx_content import add_manuscript_content
 
 
 @dataclass(frozen=True)
@@ -339,7 +340,7 @@ def export_publication_artifact(
 
 
 def render_markdown(project: Project, chapters: list[ChapterDraft]) -> str:
-    lines = [f"# {project.title}", "", project.premise, ""]
+    lines = [f"# {project.title}", ""]
     for chapter in chapters:
         content = sanitize_chapter_content(chapter.content or "")
         lines.extend(
@@ -356,13 +357,10 @@ def render_markdown(project: Project, chapters: list[ChapterDraft]) -> str:
 def render_docx(project: Project, chapters: list[ChapterDraft], destination: Path) -> None:
     document = Document()
     document.add_heading(project.title, level=0)
-    document.add_paragraph(project.premise)
     for chapter in chapters:
         content = sanitize_chapter_content(chapter.content or "")
         document.add_heading(f"Chapter {chapter.chapter_number}: {chapter.title}", level=1)
-        for paragraph in content.split("\n\n"):
-            if paragraph.strip():
-                document.add_paragraph(paragraph.strip())
+        add_manuscript_content(document, content)
     document.save(destination)
 
 
@@ -384,7 +382,7 @@ def render_publication_markdown(
             [
                 f"## Chapter {chapter.chapter_number}: {chapter.title}",
                 "",
-                _clean_publication_text(chapter.content or ""),
+                sanitize_chapter_content(chapter.content or ""),
                 "",
             ]
         )
@@ -414,8 +412,7 @@ def render_publication_docx(
         heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
         heading.style = document.styles["Heading 1"]
         heading.add_run(f"Chapter {chapter.chapter_number}: {chapter.title}")
-        for paragraph in _publication_paragraphs(chapter.content or ""):
-            document.add_paragraph(paragraph)
+        add_manuscript_content(document, sanitize_chapter_content(chapter.content or ""))
     document.save(destination)
 
 
@@ -537,28 +534,3 @@ def _front_matter_markdown(
             ]
         )
     return lines
-
-
-def _publication_paragraphs(content: str) -> list[str]:
-    text = _clean_publication_text(content)
-    return [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text) if paragraph.strip()]
-
-
-def _clean_publication_text(content: str) -> str:
-    cleaned = sanitize_chapter_content(content)
-    lines: list[str] = []
-    for line in cleaned.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            continue
-        if re.match(r"^#{1,6}\s*chapter\s+\d+\b", stripped, flags=re.IGNORECASE):
-            continue
-        stripped = re.sub(r"^#{1,6}\s+", "", stripped)
-        if re.match(r"^chapter\s+\d+\b", stripped, flags=re.IGNORECASE) and len(stripped) <= 80:
-            continue
-        stripped = re.sub(r"^\s*[-*+]\s+", "", stripped)
-        stripped = re.sub(r"\*\*(.*?)\*\*", r"\1", stripped)
-        stripped = re.sub(r"__(.*?)__", r"\1", stripped)
-        stripped = stripped.replace("`", "")
-        lines.append(stripped)
-    return "\n".join(lines).strip()
