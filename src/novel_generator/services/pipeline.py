@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any, Callable
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..models import ChapterStatus, GenerationRun, RunStatus
@@ -276,23 +277,30 @@ def _generate_structured_output(
                     )},
                 ]
             if stage == "autonomous_review":
-                # Evidence validation cannot be repaired from the invalid JSON alone.
-                # Retain the actual prose and editorial contract on the retry.
+                # Repeating an invalid answer as an assistant turn anchors local
+                # reviewers to its flags and can promote optional advice into a
+                # defect merely to satisfy validation. Judge the complete source
+                # afresh; the invalid answer remains in the recorded attempt.
+                feedback = (json.dumps(exc.errors(include_input=False, include_url=False, include_context=False), default=str)
+                            if isinstance(exc, ValidationError) else str(exc))
+                feedback = feedback.split(" Unmatched quotation:", 1)[0]
                 repair_messages = [*build_messages(),
-                    {"role": "assistant", "content": raw_output},
                     {"role": "user", "content": (
-                        f"The review failed validation: {exc}. Re-evaluate against the actual prose above. "
+                        f"An earlier review failed validation: {feedback}. Independently re-evaluate the actual prose above. "
                         "Return the complete valid review with valid evidence_paragraphs when the source is numbered, "
-                        "or exact quotations for unnumbered excerpts. Do not drop a genuine "
-                        "problem merely to pass validation; correct its evidence and keep its repair instruction."
+                        "or exact quotations for unnumbered excerpts. Keep genuine evidenced defects blocking. "
+                        "Each false check requires a relevant required defect; optional advice never fails a check. "
+                        "If no required defect exists, return all checks true and issues empty. Do not invent or promote "
+                        "an aesthetic preference merely to preserve an earlier failed verdict. For a non-final chapter, "
+                        "ending_complete concerns its assigned stopping state, not the unwritten ending of the whole book."
                     )},
                 ]
                 if provider_name == "ollama":
                     from .provider_controls import extract_ollama_controls_marker, make_ollama_controls_marker
                     _, controls = extract_ollama_controls_marker(repair_messages)
                     if controls.get("think") is True:
-                        # The diagnosis is already present. Correct its JSON and
-                        # evidence without another potentially long reasoning pass.
+                        # Retain the complete source on a bounded validation
+                        # retry without another potentially long reasoning pass.
                         repair_messages.append(make_ollama_controls_marker(think=False))
             raw_output = _supervised_provider_chat(
                 session,
