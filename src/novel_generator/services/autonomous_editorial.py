@@ -67,6 +67,24 @@ def _numbered_prose(text, chapter_number):
                        for index, paragraph in enumerate(_paragraphs(text), 1))
 
 
+def _inline_paragraph_references(evidence, chapter_number):
+    # Local reviewers vary the spelling of navigation labels. Interpret only
+    # explicit labels; the referenced source is attached by validate_review.
+    pattern = re.compile(
+        r"\[Chapter\s+(?P<chapter>\d+),\s*paragraph\s+(?P<chapter_para>\d+)\]"
+        r"|(?:\(|\[)\s*(?:P|Para\.?|Paragraph)\s+(?P<wrapped>\d+)\s*(?:\)|\])"
+        r"|(?:\(|\[)P\s*(?P<short>\d+)(?:\)|\])"
+        r"|\bParagraph\s+(?P<label>\d+)\s*:", re.IGNORECASE)
+    references = []
+    for match in pattern.finditer(evidence):
+        if match.group("chapter") and int(match.group("chapter")) != chapter_number:
+            raise ValueError("Evidence paragraph label belongs to a different chapter.")
+        number = int(next(match.group(key) for key in ("chapter_para", "wrapped", "short", "label") if match.group(key)))
+        if number not in references:
+            references.append(number)
+    return references
+
+
 def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     payload = extract_json_payload(raw)
     # Validate all required checks and defects strictly. Optional advice must
@@ -83,11 +101,7 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
             # Some local models serialize explicit source labels inside evidence
             # instead of its dedicated array. Treat those as references, never
             # as fuzzy quotations; the source text is still attached below.
-            labels = re.findall(r"\bParagraph\s+(\d+)\s*:", issue.evidence, re.IGNORECASE)
-            labels += re.findall(r"\(P\s*(\d+)\)", issue.evidence, re.IGNORECASE)
-            labels += re.findall(r"\[P\s*(\d+)\]", issue.evidence, re.IGNORECASE)
-            if labels:
-                issue.evidence_paragraphs = sorted({int(label) for label in labels})
+            issue.evidence_paragraphs = _inline_paragraph_references(issue.evidence, issue.chapter_number)
         if issue.evidence_paragraphs:
             references = issue.evidence_paragraphs
             available = paragraphs.get(issue.chapter_number, [])
