@@ -195,3 +195,18 @@ def test_headroom_does_not_mutate_messages_when_already_within_budget() -> None:
     assert rewritten == messages
     assert telemetry["optional_context_blocks_removed"] == []
     assert telemetry["context_headroom_satisfied"] is True
+
+
+def test_thinking_review_retains_its_reasoning_allowance_without_changing_normal_reviews():
+    from novel_generator.services.provider_controls import make_ollama_controls_marker
+    captured = []
+    def supervised(session, run, client, provider_name, model_name, messages, *, stage, metadata=None, **kwargs):
+        captured.append(messages)
+        return 'ok'
+    wrapped = _wrap_supervised_provider_chat(supervised, reserve_tokens=8192)
+    client = SimpleNamespace(num_ctx=32768, num_predict=8192)
+    source = [{'role': 'user', 'content': 'Full source'}]
+    wrapped(None, None, client, 'ollama', 'editor', [make_ollama_controls_marker(think=True), *source], stage='autonomous_review')
+    wrapped(None, None, client, 'ollama', 'editor', source, stage='autonomous_review')
+    assert extract_output_budget_marker(captured[0])[1] == 8192
+    assert extract_output_budget_marker(captured[1])[1] == 6144

@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # Reserve bounded generation budgets for manuscript/JSON output. Reasoning
     # models can otherwise spend the entire allowance in message.thinking.
     ollama_think: bool | None = False
+    # Optional overrides for factual comparisons of complete chapter pairs.
+    # Keep slower reasoning separate from drafting and general JSON stages.
+    ollama_continuity_think: bool | None = None
+    ollama_continuity_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     provider_chat_timeout_seconds: float = Field(default=1800.0, ge=30.0, le=7200.0)
     provider_retry_backoff_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
     provider_recovery_attempts: int = Field(default=96, ge=0, le=1000)

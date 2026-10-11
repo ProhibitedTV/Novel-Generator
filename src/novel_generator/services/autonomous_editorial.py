@@ -180,8 +180,11 @@ def _context(run, chapter, ledger) -> dict:
 
 def _check_context(messages: list[dict], client, provider_name: str) -> None:
     from .context_runtime import _configured_context_tokens
+    from .provider_controls import extract_ollama_controls_marker
     limit = _configured_context_tokens(client, provider_name)
-    if limit and math.ceil(sum(len(item["content"]) for item in messages) / 4) + 6144 > limit:
+    _, controls = extract_ollama_controls_marker(messages)
+    reserve = 8192 if controls.get("think") is True else 6144
+    if limit and math.ceil(sum(len(item["content"]) for item in messages) / 4) + reserve > limit:
         raise AutonomousQualityError("Automatic editorial context exceeds the configured model window. Increase context or reduce chapter size; no prose was silently truncated.")
 
 
@@ -190,7 +193,15 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
     adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
-    fingerprint = _hash({"contract": 11, "context": context, "provider": provider, "model": model, "scope": scope,
+    controls = {}
+    if scope == "adjacent_chapters" and provider == "ollama":
+        from ..settings import get_settings
+        config = getattr(client, "settings", None) or get_settings()
+        if getattr(config, "ollama_continuity_think", None) is not None:
+            controls["think"] = config.ollama_continuity_think
+        if getattr(config, "ollama_continuity_temperature", None) is not None:
+            controls["temperature"] = config.ollama_continuity_temperature
+    fingerprint = _hash({"contract": 12, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
@@ -241,13 +252,21 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         "Paragraph labels are navigation aids, not manuscript text. Do not invent or paraphrase quotations."
     )
     if scope == "adjacent_chapters":
-        instruction += (
-            "\nRead BOTH complete chapters in actual_chapters, in order. Check dates, elapsed time, "
-            "who knows what, evidence custody, locations, identities, and causes across the chapter boundary. "
-            "A contradiction can involve a fact anywhere in either chapter, not just their opening or ending. "
-            "Judge actual passages rather than trusting summaries. Report only defects in these chapters, "
-            "using the chapter's own paragraph numbers. A non-final pair may leave the book's crisis open; "
-            "if the pair contains the final chapter, the author ending promise must resolve there."
+        # Chapter and book reviews cover prose and closure. Give this audit one
+        # factual task instead of burying chronology among aesthetic decisions.
+        instruction = (
+            "You are a fiction continuity auditor. Compare factual assertions in TWO complete chapters, in story order. "
+            "Find incompatible claims about the SAME event, date, person, place, or physical object. Read the actual passages, not summaries. "
+            "Relative elapsed time is measured from its own scene: a later scene can correctly give a larger elapsed interval for the same past event. "
+            "A scene change or later reflection is not a chronology contradiction. Report definite conflicting facts or impossible causal transitions, "
+            "not optional clarifications, aesthetic preferences, or invented restrictions. Only continuity, character, or causality issues are allowed. "
+            "canon_consistent is false for conflicting facts; plot_coherent is false for impossible or contradictory causes. "
+            "Set prose_clean and ending_complete to true because separate audits cover them. optional_suggestions must be empty. "
+            "Provide exact evidence from the chapter you ask to repair, preferably its numbered evidence_paragraphs and evidence='Source paragraphs'. "
+            "Explicitly describe BOTH conflicting statements and their chapters in problem. Return valid JSON matching this contract: "
+            + json.dumps(EditorialReview.model_json_schema())
+            + " Perform one comparison pass. If no demonstrated contradiction remains, return the clean review immediately. "
+            "Do not revisit a settled calculation or invent another requirement."
         )
     review_context = dict(context)
     if "actual_prose" in context:
@@ -256,6 +275,9 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         review_context["final_chapter_actual_prose"] = _numbered_prose(context["final_chapter_actual_prose"], max(chapter.chapter_number for chapter in chapters))
     messages = [{"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps({"scope": scope, **review_context}, ensure_ascii=False)}]
+    if controls:
+        from .provider_controls import make_ollama_controls_marker
+        messages.insert(0, make_ollama_controls_marker(**controls))
     _check_context(messages, client, provider)
     run.current_step = "autonomous_review"
     run.current_chapter = chapters[0].chapter_number if len(chapters) == 1 else None
@@ -265,6 +287,9 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             review = validate_review(raw, chapters)
             if scope in {"chapter", "final_chapter"}:
                 validate_chapter_repair_scope(review)
+            if scope == "adjacent_chapters" and (not review.prose_clean or not review.ending_complete or
+                any(issue.category not in {"continuity", "character", "causality"} for issue in review.issues)):
+                raise ValueError("Chapter-pair audits compare factual continuity, character identity, and causes only. Prose and ending checks belong to the separate chapter and whole-book audits.")
             if review._rejected_optional_suggestions:
                 _record(session, run, "autonomous_advisory_rejected", {
                     "message": "Discarded unsupported optional advice; required editorial checks remain validated.",
@@ -322,6 +347,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         "message": f"Automatic {scope} review {'passed' if review.passed else 'requested repairs'}.",
         "scope": scope, "fingerprint": fingerprint, "review": review.model_dump(),
         "provider_name": provider, "model_name": model,
+        "controls": controls,
     })
     return review
 
@@ -618,15 +644,8 @@ def _book_context(run, chapters, qa_report) -> dict:
 
 def _adjacent_context(run, chapters, ledger) -> dict:
     """Compare complete literal prose; a summary cannot substitute for an earlier fact."""
-    numbers = {chapter.chapter_number for chapter in chapters}
     return {
-        "author_brief": run.project.story_brief,
-        "premise": run.project.premise,
-        "story_bible": run.story_bible,
-        "total_chapters": run.requested_chapters,
-        "is_final_chapter": chapters[-1].chapter_number == run.requested_chapters,
-        "assigned_chapter_turns": [item for item in (run.outline or []) if item["chapter_number"] in numbers],
-        "state_before_first_chapter": compile_memory_packet(ledger, max_chars=6000).payload,
+        "world_rules": (run.story_bible or {}).get("world_rules", []),
         "actual_chapters": [{"chapter_number": chapter.chapter_number,
                              "actual_prose": _numbered_prose(chapter.content or "", chapter.chapter_number)}
                             for chapter in chapters],

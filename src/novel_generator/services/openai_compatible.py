@@ -8,7 +8,7 @@ import time
 import httpx
 
 from ..schemas import ProviderCapabilities
-from .provider_controls import extract_output_budget_marker
+from .provider_controls import extract_output_budget_marker, extract_ollama_controls_marker
 from .provider_errors import ProviderError, ProviderTransportError
 from .structured_schema_runtime import extract_schema_marker
 
@@ -250,7 +250,8 @@ class OpenAICompatibleClient:
             raise OpenAICompatibleError(f"Model '{model_name}' is not available in the configured OpenAI-compatible provider.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        budget_clean_messages, output_budget = extract_output_budget_marker(messages)
+        controls_clean_messages, _ = extract_ollama_controls_marker(messages)
+        budget_clean_messages, output_budget = extract_output_budget_marker(controls_clean_messages)
         clean_messages, response_schema, schema_name = extract_schema_marker(budget_clean_messages)
         structured = response_schema is not None or _requests_json_only(clean_messages)
         bare_payload: dict[str, Any] = {

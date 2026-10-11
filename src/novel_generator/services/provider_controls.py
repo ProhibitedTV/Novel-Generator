@@ -1,10 +1,44 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 
 _OUTPUT_BUDGET_ROLE = "__novel_generator_output_budget__"
+_OLLAMA_CONTROLS_ROLE = "__novel_generator_ollama_controls__"
+
+
+def make_ollama_controls_marker(*, think: bool | None = None, temperature: float | None = None) -> dict[str, str]:
+    controls = {}
+    if think is not None:
+        controls["think"] = think
+    if temperature is not None:
+        controls["temperature"] = temperature
+    return {"role": _OLLAMA_CONTROLS_ROLE, "content": json.dumps(controls)}
+
+
+def extract_ollama_controls_marker(messages: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Strip private hints and apply valid controls to this request only."""
+    cleaned, controls = [], {}
+    for item in list(messages or []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("role") != _OLLAMA_CONTROLS_ROLE:
+            cleaned.append(dict(item))
+            continue
+        try:
+            payload = json.loads(str(item.get("content") or "{}"))
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if isinstance(payload.get("think"), bool):
+            controls["think"] = payload["think"]
+        temperature = payload.get("temperature")
+        if isinstance(temperature, (int, float)) and not isinstance(temperature, bool) and math.isfinite(temperature) and 0 <= temperature <= 2:
+            controls["temperature"] = temperature
+    return cleaned, controls
 
 
 def make_output_budget_marker(max_tokens: int) -> dict[str, str]:

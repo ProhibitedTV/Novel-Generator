@@ -7,7 +7,7 @@ import os
 from typing import Any, Callable
 
 from .context_runtime import _configured_context_tokens, _provider_client
-from .provider_controls import make_output_budget_marker
+from .provider_controls import make_output_budget_marker, extract_ollama_controls_marker
 
 
 _INSTALLED = False
@@ -197,6 +197,10 @@ def _wrap_supervised_provider_chat(
                 else base_reserve
             )
             messages = list(bound.arguments.get("messages") or [])
+            _, controls = extract_ollama_controls_marker(messages)
+            if stage == "autonomous_review" and controls.get("think") is True:
+                # Reasoning and final JSON share Ollama's response allowance.
+                requested_reserve = base_reserve
             context_tokens = _configured_context_tokens(client, provider_name)
 
             if headroom_enabled and context_tokens:

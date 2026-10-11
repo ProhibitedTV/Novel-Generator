@@ -237,6 +237,57 @@ def test_invalid_review_retry_retains_source_prose_and_editorial_contract(monkey
     assert "actual prose" in calls[1][-1]["content"]
 
 
+def test_review_validation_retry_finalizes_evidence_without_restarting_thinking(monkeypatch):
+    from novel_generator.services.provider_controls import make_ollama_controls_marker, extract_ollama_controls_marker
+    messages = [make_ollama_controls_marker(think=True, temperature=1.0),
+        {'role':'system','content':'Editorial contract'}, {'role':'user','content':PROSE}]
+    invalid = clean_review([1]); invalid['issues'] = [issue(evidence='Invented quotation')]
+    calls = []
+    def chat(*args, **kwargs):
+        calls.append(args[5])
+        return json.dumps(invalid if len(calls)==1 else clean_review([1]))
+    monkeypatch.setattr(pipeline, '_supervised_provider_chat', chat)
+    review = pipeline._generate_structured_output(None, None, object(), 'ollama', 'editor', lambda:messages,
+        lambda raw:editor.validate_review(raw, [SimpleNamespace(chapter_number=1, content=PROSE)]),
+        'editorial review', 'autonomous_review', 1)
+    assert review.passed
+    assert extract_ollama_controls_marker(calls[0])[1]['think'] is True
+    corrected, controls = extract_ollama_controls_marker(calls[1])
+    assert controls == {'think':False, 'temperature':1.0}
+    assert corrected[:2] == messages[1:]
+
+
+def test_continuity_controls_are_scoped_and_invalidate_cached_pair_audits(configured_environment, monkeypatch):
+    from novel_generator.services.provider_controls import extract_ollama_controls_marker
+    from novel_generator.schemas import ContinuityLedger
+    config = get_settings()
+    monkeypatch.setattr(config, 'ollama_continuity_think', True)
+    monkeypatch.setattr(config, 'ollama_continuity_temperature', 1.0)
+    captured = []
+    def generate(session, run, client, provider, model, build_messages, parser, label, stage, chapter_number=None):
+        clean, controls = extract_ollama_controls_marker(build_messages())
+        captured.append((clean, controls))
+        numbers = [ch.chapter_number for ch in run.chapters] if 'actual_chapters' in json.loads(clean[-1]['content']) else [1]
+        return parser(json.dumps(clean_review(numbers)))
+    monkeypatch.setattr(pipeline, '_generate_structured_output', generate)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        ledger = ContinuityLedger(current_patch_status='Opening', world_state='Opening')
+        context = editor._adjacent_context(run, run.chapters, ledger)
+        editor._review(session, run, run.chapters, context, object(), 'adjacent_chapters')
+        editor._review(session, run, run.chapters, context, object(), 'adjacent_chapters')
+        assert len(captured)==1
+        config.ollama_continuity_temperature=0.7
+        editor._review(session, run, run.chapters, context, object(), 'adjacent_chapters')
+        assert len(captured)==2 and captured[1][1]['temperature']==0.7
+        editor._review(session, run, [run.chapters[0]], editor._context(run, run.chapters[0], ledger), object(), 'chapter')
+        assert captured[0][1]=={'think':True, 'temperature':1.0}
+        assert captured[-1][1]=={}
+        assert 'Only continuity, character, or causality issues' in captured[0][0][0]['content']
+        assert all(ch.content in re.sub(r'^\[Chapter \d+, paragraph \d+\]\n', '', item['actual_prose'], flags=re.MULTILINE)
+            for ch,item in zip(run.chapters, context['actual_chapters']))
+
+
 def test_missing_boolean_checks_and_unevidenced_failures_are_not_passes():
     with pytest.raises(ValueError):
         EditorialReview.model_validate({"reviewed_chapters": [1], "issues": []})
