@@ -201,7 +201,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             controls["think"] = config.ollama_continuity_think
         if getattr(config, "ollama_continuity_temperature", None) is not None:
             controls["temperature"] = config.ollama_continuity_temperature
-    fingerprint = _hash({"contract": 12, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 13, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
@@ -310,21 +310,28 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         parse_review, "automatic editorial review", "autonomous_review",
         run.current_chapter,
     )
+    affected = {issue.chapter_number for issue in review.issues} if scope == "whole_book" else {run.current_chapter}
     prior_repairs = [item for item in _events(run, "autonomous_repair_started")
-                     if item.get("chapter_number") == run.current_chapter]
-    if review.issues and scope in {"chapter", "final_chapter"} and len(prior_repairs) >= 2:
+                     if item.get("chapter_number") in affected]
+    if review.issues and scope in {"chapter", "final_chapter", "whole_book"} and len(prior_repairs) >= 2:
         # A separate decision pass checks a repeatedly revised chapter against
         # the actual contract, rather than endlessly following new preferences.
         proposed = review.model_dump()
+        scope_instruction = (
+            "Do not treat legacy QA findings or ending-debt metadata as proof that a current defect remains. "
+            "Verify them against the actual final prose. When a promised action, cost, and aftermath are already depicted, "
+            "do not require a longer, more explicit, or differently worded depiction. Beginning a new life does not require "
+            "completing the character's lifetime project. Keep any actually absent central resolution or promised consequence. "
+        ) if scope == "whole_book" else "Do not require a setup chapter to resolve the book's central crisis. "
         adjudication = [
             {"role": "system", "content": instruction + (
                 "\nYou are adjudicating a proposed review after repeated revisions. Independently check "
-                "each proposed defect against the supplied actual prose and this chapter's assigned ending. "
+                "each proposed defect against the supplied actual prose and the assigned chapter or book ending. "
                 "Reject an allegation when the prose already provides its requested cause, action, or consequence. "
                 "Wanting the same cause stated more explicitly or in a different paragraph is a preference, "
                 "not a missing cause. A repeated topic is not a repeated event if the argument advances. "
                 "Reclassify aesthetic preferences as optional_suggestions rather than retaining them as defects. "
-                "Do not require a setup chapter to resolve the book's central crisis. Do not invent alternate "
+                + scope_instruction + "Do not invent alternate "
                 "defects to justify earlier failed flags. Retain genuine contradictions, actual duplicate "
                 "passages, unfulfilled assigned events, and broken prose. Re-evaluate ALL four booleans "
                 "against the source; return a complete evidence-grounded EditorialReview, not commentary."
@@ -340,6 +347,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         _record(session, run, "autonomous_review_adjudicated", {
             "message": "Rechecked proposed defects against revised prose and assigned chapter scope.",
             "chapter_number": run.current_chapter, "proposed_review": proposed,
+            "scope": scope, "reviewed_chapters": [chapter.chapter_number for chapter in chapters],
             "provider_name": adjudicator_provider, "model_name": adjudicator_model,
             "review": review.model_dump(), "fingerprint": fingerprint,
         })
@@ -364,6 +372,11 @@ def _length_issues(run, chapter) -> list[EditorialIssue]:
         evidence=(chapter.content or "")[:120],
         repair_instruction="Reach the required range through scene depth or compression, preserving chapter boundaries and avoiding padding.",
     )]
+
+
+def _target_band(run):
+    target = max(run.min_words_per_chapter, min(run.max_words_per_chapter, round(run.target_word_count / run.requested_chapters)))
+    return target, max(run.min_words_per_chapter, math.ceil(target * 0.95)), min(run.max_words_per_chapter, math.floor(target * 1.05))
 
 
 def _repair_priority(issue):
@@ -451,9 +464,7 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
     context = _context(run, chapter, ledger)
     length_instruction = ""
     if any(issue.category == "length" for issue in issues):
-        target = max(run.min_words_per_chapter, min(run.max_words_per_chapter, round(run.target_word_count / run.requested_chapters)))
-        minimum = max(run.min_words_per_chapter, math.ceil(target * 0.95))
-        maximum = min(run.max_words_per_chapter, math.floor(target * 1.05))
+        target, minimum, maximum = _target_band(run)
         count = len(before.split())
         context["chapter_word_range"] = [minimum, maximum]
         length_instruction = (
@@ -695,8 +706,13 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
             issues.extend(book_review.issues)
             total = sum(len((chapter.content or "").split()) for chapter in chapters)
             if not 0.9 * run.target_word_count <= total <= 1.1 * run.target_word_count:
-                target = max(run.min_words_per_chapter, min(run.max_words_per_chapter, round(run.target_word_count / len(chapters))))
-                for chapter in chapters:
+                target, minimum, maximum = _target_band(run)
+                overlong = total > run.target_word_count
+                candidates = [chapter for chapter in chapters if
+                    (len(chapter.content.split()) > maximum if overlong else len(chapter.content.split()) < minimum)]
+                if not candidates:
+                    raise AutonomousQualityError("The book word target cannot be reached within the configured chapter ranges.")
+                for chapter in candidates:
                     issues.append(EditorialIssue(chapter_number=chapter.chapter_number, category="length",
                         problem=f"Book is {total} words against target {run.target_word_count}.", evidence=chapter.content[:120],
                         repair_instruction=f"Aim for {target} words in this chapter so the whole book meets its target, without consuming later events or padding."))

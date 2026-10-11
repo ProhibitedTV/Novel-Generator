@@ -765,6 +765,58 @@ def test_repeated_reviews_are_adjudicated_without_automatic_acceptance(configure
         assert saved['proposed_review']['issues'] and not saved['review']['issues']
 
 
+@pytest.mark.parametrize('confirmed', [False, True])
+def test_repeated_whole_book_diagnoses_are_verified_and_genuine_failures_remain(configured_environment, monkeypatch, confirmed):
+    def review(context, numbers):
+        result = clean_review(numbers)
+        if 'proposed_review_to_verify' not in context or confirmed:
+            result['ending_complete'] = False
+            result['issues'] = [dict(issue(), category='unresolved_payoff')]
+        return result
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        for n in range(2):
+            editor._record(session, run, 'autonomous_repair_started', {'chapter_number':1,'phase':'final'})
+        result = editor._review(session, run, run.chapters,
+            editor._book_context(run, run.chapters, ManuscriptQaReport()), object(), 'whole_book')
+        assert result.passed is not confirmed
+        assert bool(result.issues) is confirmed
+        assert run.chapters[0].content == PROSE
+        assert calls.count(('autonomous_review', 1)) == 2
+        event = editor._events(run, 'autonomous_review_adjudicated')[-1]
+        assert event['scope']=='whole_book' and event['reviewed_chapters']==[1]
+
+
+@pytest.mark.parametrize('second_words', [10, 26])
+def test_book_length_repair_preserves_chapters_already_within_target_band(configured_environment, monkeypatch, second_words):
+    install_fake_provider(monkeypatch)
+    fake_chat = pipeline._supervised_provider_chat
+    revised = []
+    first_text = ' '.join(['First'] * 20)
+    second_target = ' '.join(['Second'] * 20)
+    def chat(session, run, client, provider, model, messages, *, stage, chapter_number=None, **kwargs):
+        if stage=='autonomous_revision':
+            revised.append(chapter_number)
+            # Rewriting a chapter already within its requested range would
+            # return unchanged text, reproducing the live no-change stop.
+            return first_text if chapter_number==1 else second_target
+        return fake_chat(session, run, client, provider, model, messages,
+            stage=stage, chapter_number=chapter_number, **kwargs)
+    monkeypatch.setattr(pipeline, '_supervised_provider_chat', chat)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        run.target_word_count=40;run.min_words_per_chapter=10;run.max_words_per_chapter=30
+        run.chapters[0].content=first_text
+        run.chapters[1].content=' '.join(['Second'] * second_words)
+        session.commit()
+        editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        assert revised==[2]
+        assert run.chapters[0].content==first_text
+        assert sum(len(ch.content.split()) for ch in run.chapters)==40
+        assert editor._events(run, 'autonomous_quality_passed')
+
+
 @pytest.mark.parametrize('phase', ['draft', 'final'])
 @pytest.mark.parametrize('kind,category', [('targeted', 'continuity'), ('prose', 'prose')])
 def test_exhausted_local_strategy_escalates_with_persisted_chapter_limit(configured_environment, monkeypatch, phase, kind, category):
