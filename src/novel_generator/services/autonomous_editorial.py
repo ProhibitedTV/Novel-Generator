@@ -68,6 +68,36 @@ def _numbered_prose(text, chapter_number):
                        for index, paragraph in enumerate(_paragraphs(text), 1))
 
 
+def _repeated_passages(text):
+    groups = {}
+    for index, paragraph in enumerate(_paragraphs(text), 1):
+        # Ignore headings and short repeated lines. Long exact copies are
+        # evidence to inspect, not an automatic defect: refrains and reference
+        # instructions may deliberately repeat in the requested book form.
+        normalized = re.sub(r'^#{1,6}\s+.*\n', '', paragraph).strip()
+        normalized = _text(normalized)
+        if len(normalized.split()) >= 30:
+            groups.setdefault(normalized, []).append(index)
+    return [{"source_paragraphs": numbers, "actual_excerpt": passage}
+            for passage, numbers in groups.items() if len(numbers) > 1]
+
+
+def _book_repeated_passages(chapters):
+    groups = {}
+    for chapter in chapters:
+        for index, paragraph in enumerate(_paragraphs(chapter.content or ""), 1):
+            normalized = _text(re.sub(r'^#{1,6}\s+.*\n', '', paragraph).strip())
+            if len(normalized.split()) >= 30:
+                groups.setdefault(normalized, []).append({"chapter_number": chapter.chapter_number, "paragraph": index})
+    # Supporting hints may be bounded; complete source chapters remain intact
+    # in their own audits. Prioritize the largest cross-chapter copies.
+    matches = [(passage, locations) for passage, locations in groups.items()
+               if len({place["chapter_number"] for place in locations}) > 1]
+    matches.sort(key=lambda row: len(row[0].split()) * (len(row[1]) - 1), reverse=True)
+    return [{"source_locations": locations, "actual_excerpt": passage[:500]}
+            for passage, locations in matches[:16]]
+
+
 def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
     from .structured_schema_runtime import make_schema_marker, response_schema_for_stage
     schema = response_schema_for_stage("autonomous_review")
@@ -220,6 +250,7 @@ def _context(run, chapter, ledger) -> dict:
         "previous_chapter_ending": (previous[-1].content or "")[-3000:] if previous else "",
         "following_chapter_opening": (following[0].content or "")[:3000] if following else "",
         "actual_prose": chapter.content or "",
+        "repeated_passages_to_verify": _repeated_passages(chapter.content or ""),
     }
 
 
@@ -310,7 +341,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    fingerprint = _hash({"contract": 19, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 20, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
@@ -781,6 +812,7 @@ def _book_context(run, chapters, qa_report) -> dict:
         "ending_promise": (run.story_bible or {}).get("ending_promise", ""),
         "ending_debt_to_verify_against_actual_prose": compile_ending_debt_audit(run, chapters).payload,
         "chapter_map": chapter_map,
+        "repeated_passages_to_verify": _book_repeated_passages(chapters),
         "final_chapter_actual_prose": chapters[-1].content,
         "legacy_qa_concerns_to_verify_against_evidence": {
             key: [str(item)[:350] for item in qa_report.model_dump().get(key, [])[:16]]
