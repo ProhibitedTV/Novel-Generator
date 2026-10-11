@@ -74,7 +74,7 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
         raise ValueError(f"Review must cover exactly chapters {expected}, without duplicates.")
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
-    for issue in review.issues:
+    for issue in [*review.issues, *review.optional_suggestions]:
         if not issue.evidence_paragraphs:
             # Some local models serialize explicit source labels inside evidence
             # instead of its dedicated array. Treat those as references, never
@@ -174,7 +174,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
     adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
-    fingerprint = _hash({"contract": 9, "context": context, "provider": provider, "model": model, "scope": scope,
+    fingerprint = _hash({"contract": 10, "context": context, "provider": provider, "model": model, "scope": scope,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
@@ -195,6 +195,12 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         "with consequences and aftermath in the final prose. Do not require every subplot to end happily. "
         "Report concrete defects that require correction, not optional aesthetic preferences or suggestions "
         "to add more sensory detail. A coherent passage need not match your personal style. "
+        "Put optional wording, imagery, pacing, or subtext preferences in optional_suggestions, never issues. "
+        "A passage you would phrase differently is not broken prose. prose_clean is true when the prose is "
+        "grammatical and readable without materially redundant passages, even if optional refinements remain. "
+        "Evaluate all four booleans using required defects only; optional_suggestions never fail a check. "
+        "Do not invent a physical restriction, required backstory, or author requirement to justify a preference. "
+        "A quotation proves that words appear in the manuscript; it does not by itself prove they are defective. "
         "A causality defect requires a missing or contradictory cause, not a wish for a slower or more dramatic delivery. "
         "An unresolved payoff requires a promised event or consequence that is actually absent, not a preference for a different concluding image. "
         "Each failed boolean must be supported by a relevant issue: a stylistic preference does not mean "
@@ -261,6 +267,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
                 "Reject an allegation when the prose already provides its requested cause, action, or consequence. "
                 "Wanting the same cause stated more explicitly or in a different paragraph is a preference, "
                 "not a missing cause. A repeated topic is not a repeated event if the argument advances. "
+                "Reclassify aesthetic preferences as optional_suggestions rather than retaining them as defects. "
                 "Do not require a setup chapter to resolve the book's central crisis. Do not invent alternate "
                 "defects to justify earlier failed flags. Retain genuine contradictions, actual duplicate "
                 "passages, unfulfilled assigned events, and broken prose. Re-evaluate ALL four booleans "

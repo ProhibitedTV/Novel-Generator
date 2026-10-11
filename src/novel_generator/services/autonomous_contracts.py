@@ -36,7 +36,8 @@ class EditorialReview(BaseModel):
     canon_consistent: StrictBool
     prose_clean: StrictBool
     ending_complete: StrictBool
-    issues: list[EditorialIssue]
+    issues: list[EditorialIssue] = Field(description="Concrete defects requiring correction: contradictions, missing required events, broken grammar, or actual redundant passages. Do not include optional stylistic preferences.")
+    optional_suggestions: list[EditorialIssue] = Field(default_factory=list, description="Evidence-grounded aesthetic preferences or optional refinements. These do not fail checks or require another repair.")
 
     @model_validator(mode="after")
     def require_actionable_failures(self):
