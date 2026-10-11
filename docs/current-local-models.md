@@ -1,6 +1,6 @@
 # Current local-model qualification
 
-On the audited RTX 3060 (12 GB VRAM) and 32 GB RAM workstation, the installed Ollama 0.40.2 runtime matches the [official current release](https://github.com/ollama/ollama/releases/tag/v0.40.2). Model tags still need separate checking: the July `gemma4:latest` manifest differed from the registry, while `qwen2.5:7b` matched its older model-family tag.
+On the audited RTX 3060 (12 GB VRAM) and 32 GB RAM workstation, the initial October 10 check matched Ollama 0.40.2 to the then-current release. A final October 11 check found [Ollama 0.40.3](https://github.com/ollama/ollama/releases/tag/v0.40.3), published during the audit. The official Windows installer passed its published SHA-256 check and publisher-signature validation. The installed runtime was updated while generation was idle, then verified from both Windows and Docker. All installed model archives and digests remained intact. Model tags still need separate checking: the July `gemma4:latest` manifest differed from the registry, while `qwen2.5:7b` matched its older model-family tag.
 
 The October 10, 2026 audit installed [Qwen 3.5 9B](https://ollama.com/library/qwen3.5:9b), [Gemma 4 12B](https://ollama.com/library/gemma4:12b), and refreshed `gemma4:latest`. It retained the previous Gemma tag as `gemma4:archive-20260708` for comparison. Explicit size tags help avoid accidentally choosing a larger variant when `latest` changes.
 
@@ -17,6 +17,10 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml exec -T -e OLLA
 ```
 
 Use a new output directory for each qualification. Check that `report.json` contains both `pipeline_complete: true` and `autonomous_checks_passed: true`, inspect the manuscript and final ending, and verify the exported Markdown and DOCX files. A miniature manuscript confirms the pipeline for that sample; a whole novel still needs its own final checks and exports. Use `--project-file` with a ProjectCreate JSON to test other premises, genres, and novel-length targets.
+
+The saved two-chapter qualification completed at 1,527 words against its 1,400-word target on October 11. Both report flags were true, the acceptance hash matched the final saved chapters, and the Markdown and DOCX exports contained all their prose. Qwen 3.5 9B generated the initial material; Gemma 4 12B performed independent review and automatic repairs. No human prose edits were used. Development included checkpoint resumes as repairs were introduced, so this establishes recovery, final acceptance, and export behavior for that sample, rather than a fresh unattended run or novel-scale completion. This manuscript test used Ollama 0.40.2 before the runtime update.
+
+After the update to 0.40.3, five live Gemma 4 12B verification controls passed: normal travel, an enacted aftermath, and ordinary theme-word reuse were accepted; a contradictory signing date and an actually missing resolution remained blocking. Qwen 3.5 9B also returned valid non-thinking output in an API health probe. The 24-chapter, 60,000-word continuation is a separate novel-scale run; the miniature test and controls do not certify its eventual completion or publication quality.
 
 Provider Settings are persisted in the database. Update the default model and the run's stage routes there as well as any environment defaults. Keep the Ollama URL at `http://host.docker.internal:11434` for Docker deployment. A model update alone does not erase previous repair history or restart a failed run.
 
