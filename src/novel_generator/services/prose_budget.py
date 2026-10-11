@@ -32,6 +32,12 @@ def compress_prose(text: str, target: int, generate) -> str:
     compressed = []
     for index, chunk in enumerate(chunks):
         size = len(chunk.split())
+        # Earlier passages can use more than their share. Keep the remaining
+        # narrative intact rather than requesting a one-word replacement for
+        # a scene; the chapter gate will schedule another compression round.
+        if remaining <= 0:
+            compressed.extend(chunks[index:])
+            break
         budget = max(1, round(remaining * size / source_remaining))
         ceiling = max(budget, math.ceil(budget * 1.1))
         minimum = max(1, math.ceil(budget * 0.9))
@@ -52,9 +58,13 @@ def compress_prose(text: str, target: int, generate) -> str:
                 }, ensure_ascii=False)},
             ]
             accepted = None
+            best = None
+            best_count = size
             for attempt in range(2):
                 candidate = generate(messages, index + 1, len(chunks), attempt + 1).strip()
                 count = len(candidate.split())
+                if 0 < count < best_count:
+                    best, best_count = candidate, count
                 # A shorter passage can leave words for later passages. Only the
                 # assembled chapter must satisfy the lower bound.
                 if 0 < count <= ceiling:
@@ -63,7 +73,13 @@ def compress_prose(text: str, target: int, generate) -> str:
                 messages = [*messages[:2], {"role": "assistant", "content": candidate},
                             {"role": "user", "content": f"That response contains {count} words. Rewrite the passage in {minimum}-{budget} words. Preserve the events; do not report a word count."}]
             if accepted is None:
-                raise ValueError(f"Compression passage {index + 1} returned {count} words against a {ceiling}-word maximum after two attempts.")
+                # Local models often make a useful reduction while missing an
+                # exact passage count. Preserve that progress without clipping
+                # sentences or treating it as manuscript acceptance.
+                if best is not None:
+                    accepted = best
+                else:
+                    raise ValueError(f"Compression passage {index + 1} made no reduction toward a {ceiling}-word maximum after two attempts.")
         compressed.append(accepted)
         remaining -= len(accepted.split())
         source_remaining -= size
