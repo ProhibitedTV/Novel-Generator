@@ -765,6 +765,69 @@ def test_repeated_reviews_are_adjudicated_without_automatic_acceptance(configure
         assert saved['proposed_review']['issues'] and not saved['review']['issues']
 
 
+def test_adjudication_receives_allegations_without_answer_flags_or_stale_diagnoses():
+    proposed = EditorialReview.model_validate({**clean_review([1]), 'ending_complete': False,
+        'issues': [dict(issue(), category='unresolved_payoff')],
+        'optional_suggestions': [dict(issue(), problem='Aesthetic preference')]})
+    context = {'author_brief': {'ending_target': 'Keep the ledger safe.'}, 'final_chapter_actual_prose': PROSE,
+        'chapter_map': [{'chapter_number': 1}], 'legacy_qa_concerns_to_verify_against_evidence': {'warnings': ['Stale']},
+        'ending_debt_to_verify_against_actual_prose': {'old': 'diagnosis'}}
+    messages = editor._adjudication_messages('whole_book', context, proposed, {})
+    payload = json.loads(messages[-1]['content'])
+    assert payload['final_chapter_actual_prose'] == PROSE
+    assert payload['author_brief'] == context['author_brief']
+    assert 'legacy_qa_concerns_to_verify_against_evidence' not in payload
+    assert 'ending_debt_to_verify_against_actual_prose' not in payload
+    assert isinstance(payload['proposed_review_to_verify'], list)
+    allegation = payload['proposed_review_to_verify'][0]
+    assert allegation['problem'] == proposed.issues[0].problem
+    assert 'repair_instruction' not in allegation
+    assert 'ending_complete' not in payload and 'optional_suggestions' not in payload
+
+
+def test_adjudication_controls_are_scoped_and_invalidate_cache(configured_environment, monkeypatch):
+    from novel_generator.services.provider_controls import extract_ollama_controls_marker
+    from novel_generator.schemas import ContinuityLedger
+    config = get_settings()
+    monkeypatch.setattr(config, 'ollama_adjudication_think', True)
+    monkeypatch.setattr(config, 'ollama_adjudication_temperature', 1.0)
+    captured = []
+    def generate(session, run, client, provider, model, build_messages, parser, label, stage, chapter_number=None):
+        messages, controls = extract_ollama_controls_marker(build_messages())
+        context = json.loads(messages[-1]['content']);captured.append(controls)
+        result = clean_review([1])
+        if 'proposed_review_to_verify' not in context:result['issues'] = [issue()]
+        return parser(json.dumps(result))
+    monkeypatch.setattr(pipeline, '_generate_structured_output', generate)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        for n in range(2):editor._record(session, run, 'autonomous_repair_started', {'chapter_number':1,'phase':'draft'})
+        context = editor._context(run, run.chapters[0], ContinuityLedger(current_patch_status='Opening', world_state='Opening'))
+        editor._review(session, run, run.chapters, context, object(), 'chapter')
+        editor._review(session, run, run.chapters, context, object(), 'chapter')
+        assert captured == [{}, {'think':True, 'temperature':1.0}]
+        config.ollama_adjudication_temperature=0.7
+        editor._review(session, run, run.chapters, context, object(), 'chapter')
+        assert captured[-2:] == [{}, {'think':True, 'temperature':0.7}]
+        assert run.chapters[0].content == PROSE
+
+
+def test_repeated_pair_diagnosis_is_independently_verified(configured_environment, monkeypatch):
+    from novel_generator.schemas import ContinuityLedger
+    def review(context, numbers):
+        result = clean_review(numbers)
+        if 'proposed_review_to_verify' not in context:result['issues'] = [issue(2)]
+        return result
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        for n in range(2):editor._record(session, run, 'autonomous_repair_started', {'chapter_number':2,'phase':'draft'})
+        result = editor._review(session, run, run.chapters,
+            editor._adjacent_context(run, run.chapters, ContinuityLedger(current_patch_status='Opening', world_state='Opening')), object(), 'adjacent_chapters')
+        assert result.passed
+        assert calls == [('autonomous_review', None), ('autonomous_review', None)]
+
+
 @pytest.mark.parametrize('confirmed', [False, True])
 def test_repeated_whole_book_diagnoses_are_verified_and_genuine_failures_remain(configured_environment, monkeypatch, confirmed):
     def review(context, numbers):
