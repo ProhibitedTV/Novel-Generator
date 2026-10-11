@@ -25,6 +25,7 @@ class EditorialIssue(BaseModel):
     evidence: str = Field(min_length=1, description="Use 'Source paragraphs' when evidence_paragraphs is provided. Otherwise give an exact short quotation from this chapter's actual prose, not its metadata.")
     evidence_paragraphs: list[int] = Field(default_factory=list, description="Numbered source paragraphs supporting this issue. Prefer these references to copying dialogue.")
     repair_instruction: str = Field(min_length=1)
+    repair_scope: Literal["passage", "chapter"] = Field(default="passage", description="Use chapter for missing sections, broken organization, or a missing major promised outcome that cannot be fixed within the cited passages. Use passage only for localized defects. Evidence anchors a diagnosis; it does not restrict a structural repair to that paragraph.")
 
 
 class EditorialReview(BaseModel):

@@ -19,6 +19,7 @@ def test_joint_edit_deletes_duplicate_and_preserves_intervening_prose():
     def generate(messages, *args):
         request = json.loads(messages[1]['content'])
         assert len(request['passages']) == 2
+        assert [p['source_paragraphs'] for p in request['passages']] == [[1], [3]]
         assert request['read_only_context']['actual_prose'] == text
         return json.dumps({'edits': [{'id': 1, 'text': 'Gate vibration broke the pump.'}, {'id': 2, 'text': ''}]})
     candidate = repair(text, plan, {'actual_prose': text}, generate)
@@ -70,6 +71,16 @@ def test_coordinated_selection_can_cover_ten_small_passages():
     issue = SimpleNamespace(category='repetition', evidence_paragraphs=list(range(1, 11)))
     assert repair_plan(text, [issue]) is None
     assert len(repair_plan(text, [issue], max_passages=16)) == 10
+
+
+def test_coordinated_nonfiction_edits_keep_the_source_contract_and_passage_identity():
+    text, plan = setup()
+    brief = {'content_kind': 'nonfiction', 'book_type': 'handbook', 'source_material': 'Original procedure.'}
+    def generate(messages, *args):
+        assert 'Write nonfiction, not a fictional protagonist' in messages[0]['content']
+        assert 'source_paragraphs maps each edit slot' in messages[0]['content']
+        return json.dumps({'edits': [{'id': 1, 'text': 'The gate broke the pump.'}, {'id': 2, 'text': ''}]})
+    assert 'Unchanged dialogue.' in repair(text, plan, {'author_brief': brief}, generate)
 
 
 def test_oversized_valid_edits_are_compressed_instead_of_regenerated():

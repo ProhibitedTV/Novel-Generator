@@ -32,7 +32,7 @@ def repair_span(text, issues):
 def repair_messages(text, span, issues, context=None):
     start, end = span
     maximum = max(30, 2 * len(text[start:end].split()))
-    return [
+    messages = [
         {"role": "system", "content": (
             "Edit only the supplied passage to fix the diagnosed defect. Return the corrected passage "
             "as prose only, with no heading, explanation, or surrounding scenes. Preserve its unique "
@@ -51,6 +51,11 @@ def repair_messages(text, span, issues, context=None):
             "read_only_context": context,
         }, ensure_ascii=False)},
     ]
+    from .book_specs import uses_book_contract, contract_text
+    brief = (context or {}).get("author_brief", {})
+    if uses_book_contract(brief):
+        messages[0]["content"] += "\n" + contract_text(brief)
+    return messages
 
 
 def repair_plan(text, issues, max_passages=8):
@@ -61,6 +66,8 @@ def repair_plan(text, issues, max_passages=8):
         [item.start() for item in separators] + [len(text)]) if text[start:end].strip()]
     groups = []
     for issue in issues:
+        if getattr(issue, "repair_scope", "passage") == "chapter":
+            return None
         # Eligibility depends on grounded, bounded source spans, not on which
         # editorial label the reviewer chooses for a localized defect.
         # Length changes still require chapter-wide expansion/compression.

@@ -387,6 +387,30 @@ def test_numbered_audits_require_actual_references_instead_of_quoting_absent_rul
     assert review.issues[0].evidence == 'The Borrower Card stores contact details.'
 
 
+@pytest.mark.parametrize('content_kind', ['fiction', 'nonfiction', 'poetry', 'drama'])
+def test_structural_repairs_rewrite_the_chapter_in_its_book_form(configured_environment, monkeypatch, content_kind):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.story_bible = {**run.story_bible, 'book_spec': {
+            'genre_profile': 'custom', 'book_type': 'requested form', 'content_kind': content_kind,
+            'source_material': 'Procedure: a card contains an ID and contact detail.'}}
+        session.commit()
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnosis = EditorialIssue.model_validate(dict(issue(), repair_scope='chapter'))
+        captured = []
+        def chat(*args, **kwargs):
+            captured.append((args[5], kwargs['metadata']['repair_mode']))
+            return REPAIRED
+        monkeypatch.setattr(pipeline, '_supervised_provider_chat', chat)
+        editor._repair(session, run, run.chapters[0], ledger, [diagnosis], get_settings(), object(), 'draft')
+        assert captured[0][1] == 'chapter'
+        assert 'content: ' + content_kind in captured[0][0][0]['content']
+        assert 'restore missing assigned sections' in captured[0][0][0]['content']
+        assert editor._events(run, 'autonomous_repair_started')[-1]['repair_kind'] == 'chapter'
+        assert run.chapters[0].content == REPAIRED
+
+
 @pytest.mark.parametrize("evidence", [
     "The channel collapsed. (Para 1) ... Not all of it. (Para 3)",
     "The channel collapsed. (Para. 1) ... Not all of it. [Paragraph 3]",

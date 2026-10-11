@@ -13,8 +13,11 @@ def repeated_phrases(text):
 
 
 def repair(text, plan, context, generate):
-    passages = [{"id": index, "source": text[slice(*span)]}
-                for index, (span, _) in enumerate(plan, 1)]
+    passages = []
+    for index, (span, _) in enumerate(plan, 1):
+        first = len([p for p in re.split(r"\n\s*\n", text[:span[0]]) if p.strip()]) + 1
+        count = len([p for p in re.split(r"\n\s*\n", text[slice(*span)]) if p.strip()])
+        passages.append({"id": index, "source_paragraphs": list(range(first, first + count)), "source": text[slice(*span)]})
     diagnoses = []
     for _, issues in plan:
         for issue in issues:
@@ -43,6 +46,9 @@ def repair(text, plan, context, generate):
             'Return JSON only: {"edits":[{"id":1,"text":"replacement prose"}]}. '
             "Return every supplied passage id exactly once. Edit all passages together to resolve ALL diagnoses. "
             "Passage ids are edit slots, NOT paragraph numbers mentioned in diagnoses. "
+            "source_paragraphs maps each edit slot to the original numbered source. Keep each replacement's own "
+            "subject, purpose, and supported unique information. Fix only diagnosed defects; do not replace an "
+            "example, scene, or stanza with a copy of a different passage. "
             "A repeated event must occur ONCE, at its appropriate chronological position; later passages may "
             "show consequences but must not replay the event. Do not insert the same repair in every passage. "
             "Use an empty text string to remove a wholly redundant passage; retain unique facts elsewhere. "
@@ -57,6 +63,10 @@ def repair(text, plan, context, generate):
         {"role": "user", "content": json.dumps({"passages": passages, "diagnoses": diagnoses,
             "maximum_total_replacement_words": maximum, "read_only_context": context}, ensure_ascii=False)},
     ]
+    from .book_specs import uses_book_contract, contract_text
+    brief = context.get("author_brief", {})
+    if uses_book_contract(brief):
+        messages[0]["content"] += "\n" + contract_text(brief)
     for attempt in range(3):
         oversized_edits = None
         raw = generate(messages, 1, len(plan))

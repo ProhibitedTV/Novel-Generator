@@ -73,6 +73,8 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
     schema = response_schema_for_stage("autonomous_review")
     schema["properties"]["reviewed_chapters"]["const"] = sorted(chapter_numbers)
     schema["$defs"]["EditorialIssue"]["properties"]["chapter_number"]["enum"] = sorted(chapter_numbers)
+    definition = schema["$defs"]["EditorialIssue"]
+    definition["required"] = list(dict.fromkeys([*definition["required"], "repair_scope"]))
     if scope in {"chapter", "final_chapter", "adjacent_chapters", "source_accuracy"}:
         # Complete prose in these scopes is always numbered. References also
         # anchor omission diagnoses, which cannot quote an absent sentence.
@@ -308,7 +310,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    fingerprint = _hash({"contract": 18, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 19, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
@@ -522,6 +524,12 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         repair_kind = "targeted"
     if coordinated:
         repair_kind = "coordinated"
+    if any(issue.repair_scope == "chapter" for issue in all_issues):
+        # An evidence paragraph can anchor an omitted section or climax without
+        # containing the material needed to restore it. Respect the editor's
+        # explicit structural scope instead of repeatedly patching that anchor.
+        issues, deferred, plan, coordinated = all_issues, [], None, False
+        repair_kind = "chapter"
     attempts = [attempt for attempt in all_attempts if _repair_kind(attempt) == repair_kind]
     limit = (settings.autonomous_targeted_repair_attempts if repair_kind in {"targeted", "coordinated"} else
              settings.autonomous_prose_repair_attempts if repair_kind == "prose" else
@@ -579,6 +587,18 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         {"role": "user", "content": json.dumps({"context": context,
                                                    "repairs": [issue.model_dump() for issue in issues]}, ensure_ascii=False)},
     ]
+    brief = run_book_brief(run)
+    if uses_book_contract(brief):
+        messages[0]["content"] = (
+            "You are a book writer and editor repairing the complete chapter in its requested form. "
+            "Return the entire revised chapter, without a duplicate chapter title, explanation, or synopsis. "
+            "Fix every supplied issue and restore missing assigned sections or outcomes. Preserve correct unique "
+            "information, supported facts, speaker attribution, and unaffected passages. Do not replace one "
+            "record example, scene, or stanza with a copy of another. Respect the chapter's assigned ending state; "
+            "do not consume future chapters' work. Complete the author promise in the final chapter.\n"
+            + contract_text(brief)
+        )
+        length_instruction = length_instruction.replace("deepen existing scenes", "add useful detail in the requested book form")
     messages[0]["content"] += length_instruction
     run.current_step = "autonomous_revision"
     run.current_chapter = chapter.chapter_number
