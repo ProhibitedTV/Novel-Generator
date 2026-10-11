@@ -68,13 +68,17 @@ def _numbered_prose(text, chapter_number):
 
 
 def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
-    review = EditorialReview.model_validate(extract_json_payload(raw))
+    payload = extract_json_payload(raw)
+    # Validate all required checks and defects strictly. Optional advice must
+    # not invalidate those checks merely because its quotation is unusable.
+    optional = payload.get("optional_suggestions", []) if isinstance(payload, dict) else []
+    review = EditorialReview.model_validate({**payload, "optional_suggestions": []} if isinstance(payload, dict) else payload)
     expected = sorted(chapter.chapter_number for chapter in chapters)
     if sorted(review.reviewed_chapters) != expected:
         raise ValueError(f"Review must cover exactly chapters {expected}, without duplicates.")
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
-    for issue in [*review.issues, *review.optional_suggestions]:
+    def validate_evidence(issue):
         if not issue.evidence_paragraphs:
             # Some local models serialize explicit source labels inside evidence
             # instead of its dedicated array. Treat those as references, never
@@ -90,9 +94,21 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
             if references != sorted(set(references)) or any(index < 1 or index > len(available) for index in references):
                 raise ValueError("Evidence paragraph references must be valid, unique, and in source order for the indicated chapter.")
             issue.evidence = " [...] ".join(available[index - 1] for index in references)
-            continue
+            return
         if issue.chapter_number not in source or not _grounded_evidence(issue.evidence, source[issue.chapter_number]):
             raise ValueError(f"Issue evidence must quote chapter {issue.chapter_number}'s actual prose, not its outline or summary. Unmatched quotation: {issue.evidence[:300]!r}")
+    for issue in review.issues:
+        validate_evidence(issue)
+    if not isinstance(optional, list):
+        review._rejected_optional_suggestions.append({"error": "Optional suggestions must be a list.", "suggestion": optional})
+        optional = []
+    for row in optional:
+        try:
+            suggestion = EditorialIssue.model_validate(row)
+            validate_evidence(suggestion)
+            review.optional_suggestions.append(suggestion)
+        except ValueError as exc:
+            review._rejected_optional_suggestions.append({"error": str(exc), "suggestion": row})
     return review
 
 
@@ -174,7 +190,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     pipeline._ensure_not_canceled(session, run)
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
     adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
-    fingerprint = _hash({"contract": 10, "context": context, "provider": provider, "model": model, "scope": scope,
+    fingerprint = _hash({"contract": 11, "context": context, "provider": provider, "model": model, "scope": scope,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
@@ -224,6 +240,15 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         "If a reference excerpt has no paragraph labels, use an exact short quotation instead. "
         "Paragraph labels are navigation aids, not manuscript text. Do not invent or paraphrase quotations."
     )
+    if scope == "adjacent_chapters":
+        instruction += (
+            "\nRead BOTH complete chapters in actual_chapters, in order. Check dates, elapsed time, "
+            "who knows what, evidence custody, locations, identities, and causes across the chapter boundary. "
+            "A contradiction can involve a fact anywhere in either chapter, not just their opening or ending. "
+            "Judge actual passages rather than trusting summaries. Report only defects in these chapters, "
+            "using the chapter's own paragraph numbers. A non-final pair may leave the book's crisis open; "
+            "if the pair contains the final chapter, the author ending promise must resolve there."
+        )
     review_context = dict(context)
     if "actual_prose" in context:
         review_context["actual_prose"] = _numbered_prose(context["actual_prose"], context["chapter_number"])
@@ -240,6 +265,12 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             review = validate_review(raw, chapters)
             if scope in {"chapter", "final_chapter"}:
                 validate_chapter_repair_scope(review)
+            if review._rejected_optional_suggestions:
+                _record(session, run, "autonomous_advisory_rejected", {
+                    "message": "Discarded unsupported optional advice; required editorial checks remain validated.",
+                    "scope": scope, "fingerprint": fingerprint,
+                    "rejected_suggestions": review._rejected_optional_suggestions,
+                })
             return review
         except ValueError as exc:
             _record(session, run, "autonomous_review_rejected", {
@@ -585,6 +616,23 @@ def _book_context(run, chapters, qa_report) -> dict:
     }
 
 
+def _adjacent_context(run, chapters, ledger) -> dict:
+    """Compare complete literal prose; a summary cannot substitute for an earlier fact."""
+    numbers = {chapter.chapter_number for chapter in chapters}
+    return {
+        "author_brief": run.project.story_brief,
+        "premise": run.project.premise,
+        "story_bible": run.story_bible,
+        "total_chapters": run.requested_chapters,
+        "is_final_chapter": chapters[-1].chapter_number == run.requested_chapters,
+        "assigned_chapter_turns": [item for item in (run.outline or []) if item["chapter_number"] in numbers],
+        "state_before_first_chapter": compile_memory_packet(ledger, max_chars=6000).payload,
+        "actual_chapters": [{"chapter_number": chapter.chapter_number,
+                             "actual_prose": _numbered_prose(chapter.content or "", chapter.chapter_number)}
+                            for chapter in chapters],
+    }
+
+
 def save_report(session, run, settings, status: str, **extra) -> None:
     directory = settings.artifacts_dir / run.id
     directory.mkdir(parents=True, exist_ok=True)
@@ -620,6 +668,10 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
                 review = _review(session, run, [chapter], _context(run, chapter, before[chapter.chapter_number]), client, "final_chapter")
                 issues.extend(review.issues)
                 issues.extend(_length_issues(run, chapter))
+            for left, right in zip(chapters, chapters[1:]):
+                pair = [left, right]
+                review = _review(session, run, pair, _adjacent_context(run, pair, before[left.chapter_number]), client, "adjacent_chapters")
+                issues.extend(review.issues)
             book_review = _review(session, run, chapters, _book_context(run, chapters, qa_report), client, "whole_book")
             issues.extend(book_review.issues)
             total = sum(len((chapter.content or "").split()) for chapter in chapters)
@@ -641,6 +693,7 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
                 return ManuscriptQaReport(
                     overall_verdict="Automatic editorial checks passed for the final manuscript.",
                     strengths=["Every final chapter passed an evidence-based editorial review.",
+                               "Every adjacent chapter pair passed a review of its complete actual prose.",
                                "Whole-book chronology, canon, prose, and ending checks passed.",
                                "Chapter lengths and total manuscript word count passed deterministic checks."],
                     publication_readiness_label="automated checks passed",

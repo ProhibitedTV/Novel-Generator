@@ -73,8 +73,12 @@ def install_fake_provider(monkeypatch, *, review_fn=None, revision=REPAIRED):
             for field in ("actual_prose", "final_chapter_actual_prose"):
                 if field in context:
                     context[field] = re.sub(r"^\[Chapter \d+, paragraph \d+\]\n", "", context[field], flags=re.MULTILINE)
-            numbers = ([context["chapter_number"]] if context["scope"] != "whole_book"
-                       else [item["chapter_number"] for item in context["chapter_map"]])
+            if context["scope"] == "adjacent_chapters":
+                numbers = [item["chapter_number"] for item in context["actual_chapters"]]
+            elif context["scope"] == "whole_book":
+                numbers = [item["chapter_number"] for item in context["chapter_map"]]
+            else:
+                numbers = [context["chapter_number"]]
             output = review_fn(context, numbers) if review_fn else clean_review(numbers)
         return parser(json.dumps(output))
 
@@ -111,11 +115,32 @@ def test_advisory_preferences_cannot_excuse_failed_required_checks():
         EditorialReview.model_validate(review)
 
 
-def test_advisory_preferences_still_require_actual_source_evidence():
+@pytest.mark.parametrize('optional', [[dict(issue(), evidence='Invented quotation')], [{'not': 'a valid suggestion'}], None, 'not a list'])
+def test_unsupported_advice_is_discarded_without_invalidating_required_checks(optional):
     review = clean_review([1])
-    review['optional_suggestions'] = [dict(issue(), evidence='Invented quotation')]
-    with pytest.raises(ValueError, match='actual prose'):
+    review['optional_suggestions'] = optional
+    parsed = editor.validate_review(json.dumps(review), [SimpleNamespace(chapter_number=1, content=PROSE)])
+    assert parsed.passed and not parsed.optional_suggestions
+    assert len(parsed._rejected_optional_suggestions) == 1
+    # Optional advice can never supply a missing required check's defect.
+    review['ending_complete'] = False
+    with pytest.raises(ValueError, match='failed check needs an evidenced issue'):
         editor.validate_review(json.dumps(review), [SimpleNamespace(chapter_number=1, content=PROSE)])
+
+
+def test_unsupported_advice_is_logged_without_blocking_manuscript_acceptance(configured_environment, monkeypatch):
+    def review(context, numbers):
+        output = clean_review(numbers)
+        output['optional_suggestions'] = [dict(issue(evidence='Invented quotation'), category='prose')]
+        return output
+    install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        assert not editor._events(run, 'autonomous_repair_started')
+        assert editor._events(run, 'autonomous_advisory_rejected')
+        assert not editor._events(run, 'autonomous_review_rejected')
+        assert editor._events(run, 'autonomous_quality_passed')
 
 
 def test_final_gate_accepts_advisory_preferences_without_rewriting(configured_environment, monkeypatch):
@@ -155,6 +180,41 @@ def test_required_defect_is_repaired_while_preferences_remain_advisory(configure
         assert run.chapters[0].content == REPAIRED
         assert len(editor._events(run, 'autonomous_repair_started')) == 1
         assert editor._events(run, 'autonomous_review_completed')[-1]['review']['optional_suggestions']
+
+
+def test_full_adjacent_review_repairs_a_fact_outside_boundary_excerpts(configured_environment, monkeypatch):
+    contradiction = 'Mara signed the same survey months ago.'
+    audited = []
+    def review(context, numbers):
+        output = clean_review(numbers)
+        if context['scope'] == 'adjacent_chapters':
+            first, second = context['actual_chapters']
+            assert 'Mara signed the survey two days ago.' in first['actual_prose']
+            assert first['actual_prose'].endswith('Mara reached the dock.')
+            audited.append(second['actual_prose'])
+            if contradiction in second['actual_prose']:
+                output['canon_consistent'] = False
+                output['issues'] = [dict(issue(number=2, evidence=contradiction),
+                    problem='The same survey is signed at contradictory times.', repair_instruction='Align the signature date with Chapter 1.')]
+        return output
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        first, second = run.chapters
+        first.content = 'Mara signed the survey two days ago.\n\n' + 'Ordinary action. ' * 1500 + '\n\nMara reached the dock.'
+        second.content = contradiction + '\n\nIvo waited at the ferry.'
+        run.min_words_per_chapter = 8
+        run.max_words_per_chapter = 4000
+        run.target_word_count = sum(len(ch.content.split()) for ch in run.chapters)
+        session.commit()
+        editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        assert len(first.content) > 3000
+        assert contradiction not in second.content
+        assert len(audited) == 2
+        assert calls.count(('autonomous_revision', 2)) == 1
+        reviews = editor._events(run, 'autonomous_review_completed')
+        assert any(item['scope'] == 'adjacent_chapters' and item['review']['issues'] for item in reviews)
+        assert editor._events(run, 'autonomous_quality_passed')
 
 
 def test_invalid_review_retry_retains_source_prose_and_editorial_contract(monkeypatch):
