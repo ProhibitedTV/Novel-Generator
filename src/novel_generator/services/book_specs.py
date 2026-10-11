@@ -44,6 +44,7 @@ def contract_text(brief):
             "Write nonfiction, not a fictional protagonist's adventure. Organize an argument, explanation, or practical learning sequence.",
             "Use only the supplied source_material for factual assertions. Never fabricate research, quotations, statistics, references, credentials, or historical events.",
             "Identify sources in the prose when making specific factual claims. Separate sourced facts from clearly labeled hypothetical examples and deductions.",
+            "Hypothetical examples are separate scenarios unless explicitly linked into one case. A reused illustrative item ID does not establish one simultaneous event; a checkout can legitimately change an available item to on loan.",
             "Do not present unsupported claims as fact. Completion requires the promised coverage and a usable conclusion, not a climax or antagonist's defeat.",
         ]
     elif kind == "poetry":

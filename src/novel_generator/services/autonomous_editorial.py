@@ -88,7 +88,7 @@ def _inline_paragraph_references(evidence, chapter_number):
         r"\[Chapter\s+(?P<chapter>\d+),\s*paragraph\s+(?P<chapter_para>\d+)\]"
         r"|(?:\(|\[)\s*(?:P|Para\.?|Paragraph)\s+(?P<wrapped>\d+)\s*(?:\)|\])"
         r"|(?:\(|\[)P\s*(?P<short>\d+)(?:\)|\])"
-        r"|\bParagraph\s+(?P<label>\d+)\s*:", re.IGNORECASE)
+        r"|\b(?:Paragraph|Para\.?)\s+(?P<label>\d+)\b", re.IGNORECASE)
     references = []
     for match in pattern.finditer(evidence):
         if match.group("chapter") and int(match.group("chapter")) != chapter_number:
@@ -111,7 +111,7 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
     def validate_evidence(issue):
-        if not issue.evidence_paragraphs:
+        if not issue.evidence_paragraphs and not _grounded_evidence(issue.evidence, source.get(issue.chapter_number, "")):
             # Some local models serialize explicit source labels inside evidence
             # instead of its dedicated array. Treat those as references, never
             # as fuzzy quotations; the source text is still attached below.

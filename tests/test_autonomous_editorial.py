@@ -361,6 +361,7 @@ def test_book_coverage_is_constrained_in_provider_schema_without_accepting_incom
     "The channel collapsed. (Para. 1) ... Not all of it. [Paragraph 3]",
     "[Chapter 10, paragraph 1] ... [Chapter 10, paragraph 3]",
     "Paragraph 1: First statement ... Paragraph 3: Second statement",
+    "Paragraph 1 and Paragraph 3",
     "(P1) ... [P3]",
 ])
 def test_local_model_inline_source_labels_attach_exact_paragraphs(evidence):
@@ -378,6 +379,15 @@ def test_inline_source_labels_cannot_invent_or_reorder_source(evidence):
     data["issues"] = [issue(number=10, evidence=evidence)]
     with pytest.raises(ValueError, match="paragraph"):
         editor.validate_review(json.dumps(data), [SimpleNamespace(chapter_number=10, content="One.\n\nTwo.\n\nThree.")])
+
+
+def test_actual_prose_mentions_of_paragraph_numbers_are_not_navigation_labels():
+    prose = "The instruction says to read Paragraph 40 before filing."
+    data = clean_review([1])
+    data["issues"] = [issue(evidence=prose)]
+    review = editor.validate_review(json.dumps(data), [SimpleNamespace(chapter_number=1, content=prose)])
+    assert review.issues[0].evidence == prose
+    assert review.issues[0].evidence_paragraphs == []
 
 
 @pytest.mark.parametrize("references", [[0], [4], [2, 1], [1, 1]])
