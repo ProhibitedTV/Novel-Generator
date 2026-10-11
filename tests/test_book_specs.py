@@ -71,6 +71,17 @@ def test_nonfiction_requires_supplied_content_and_retains_sources_through_drafti
     assert "what this chapter actually contains" in summary[0]["content"]
 
 
+def test_summary_uses_saved_book_sources_after_project_brief_changes():
+    p = project(dict(content_kind="nonfiction", book_type="handbook", source_material="Original source: the gauge holds 10 mL."))
+    snapshot = dict(book_spec=dict(p.story_brief))
+    p.story_brief = StoryBrief(genre_profile="mystery").model_dump()
+    chapter = SimpleNamespace(chapter_number=1, title="Measuring", content="The gauge holds 10 mL.", summary=None)
+    messages = build_summary_messages(chapter, {}, project=p, story_bible=snapshot)
+    assert "Never fabricate research" in messages[0]["content"]
+    context = json.loads(messages[1]["content"])
+    assert context["project"]["story_brief"]["source_material"] == "Original source: the gauge holds 10 mL."
+
+
 def test_nonfiction_lint_keeps_unfinished_output_blocking_without_demanding_character_choices():
     bible = {"book_spec": {"content_kind": "nonfiction"}}
     chapter = SimpleNamespace(chapter_number=1, content="The next chapter explains the measuring scale.")

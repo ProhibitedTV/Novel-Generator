@@ -700,7 +700,8 @@ def _refresh_metadata(session, run, chapters, client):
             provider, model = pipeline._resolve_stage_route(client, run, "chapter_summary")
             chapter.summary = pipeline._supervised_provider_chat(
                 session, run, client, provider, model,
-                pipeline.build_summary_messages(chapter, pipeline._outline_entry(run, chapter.chapter_number), project=run.project),
+                pipeline.build_summary_messages(chapter, pipeline._outline_entry(run, chapter.chapter_number),
+                    project=run.project, story_bible=run.story_bible),
                 stage="chapter_summary", chapter_number=chapter.chapter_number,
                 metadata={"phase": "autonomous_reconciliation"},
             ).strip()

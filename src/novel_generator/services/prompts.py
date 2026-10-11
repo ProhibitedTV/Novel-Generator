@@ -950,7 +950,8 @@ def build_chapter_expansion_messages(
 
 
 @book_form_prompt
-def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutlineEntry | dict[str, Any], project: Project | None = None) -> list[dict[str, str]]:
+def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutlineEntry | dict[str, Any], project: Project | None = None,
+                           story_bible: StoryBible | dict[str, Any] | None = None) -> list[dict[str, str]]:
     entry = outline_entry if isinstance(outline_entry, dict) else outline_entry.model_dump()
     return [
         {

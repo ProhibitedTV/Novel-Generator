@@ -1908,7 +1908,7 @@ def _draft_chapter(
                 client,
                 summary_provider_name,
                 summary_model_name,
-                build_summary_messages(chapter, outline_entry, project=run.project),
+                build_summary_messages(chapter, outline_entry, project=run.project, story_bible=story_bible),
                 stage="chapter_summary",
                 chapter_number=chapter.chapter_number,
                 metadata={"label": f"chapter {chapter.chapter_number} summary"},
