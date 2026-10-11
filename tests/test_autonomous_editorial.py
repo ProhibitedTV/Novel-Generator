@@ -210,7 +210,7 @@ def test_full_adjacent_review_repairs_a_fact_outside_boundary_excerpts(configure
         editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
         assert len(first.content) > 3000
         assert contradiction not in second.content
-        assert len(audited) == 2
+        assert len(audited) == 3  # Initial allegation, verification, repaired pair.
         assert calls.count(('autonomous_revision', 2)) == 1
         reviews = editor._events(run, 'autonomous_review_completed')
         assert any(item['scope'] == 'adjacent_chapters' and item['review']['issues'] for item in reviews)
@@ -304,6 +304,7 @@ def test_continuity_controls_are_scoped_and_invalidate_cached_pair_audits(config
         run = make_run(session, chapters=2)
         ledger = ContinuityLedger(current_patch_status='Opening', world_state='Opening')
         context = editor._adjacent_context(run, run.chapters, ledger)
+        assert context['premise'] == run.project.premise
         editor._review(session, run, run.chapters, context, object(), 'adjacent_chapters')
         editor._review(session, run, run.chapters, context, object(), 'adjacent_chapters')
         assert len(captured)==1
@@ -789,6 +790,7 @@ def test_whole_book_context_does_not_duplicate_final_prose(configured_environmen
     with get_session_factory()() as session:
         run = make_run(session)
         context = editor._book_context(run, run.chapters, ManuscriptQaReport())
+        assert context['premise'] == run.project.premise
         assert json.dumps(context).count(PROSE) == 1
         assert context["chapter_map"][0]["actual_prose_supplied_in_final_chapter_field"]
 
@@ -987,6 +989,28 @@ def test_repeated_pair_diagnosis_is_independently_verified(configured_environmen
         result = editor._review(session, run, run.chapters,
             editor._adjacent_context(run, run.chapters, ContinuityLedger(current_patch_status='Opening', world_state='Opening')), object(), 'adjacent_chapters')
         assert result.passed
+        assert calls == [('autonomous_review', None), ('autonomous_review', None)]
+
+
+@pytest.mark.parametrize('confirmed', [False, True])
+def test_first_pair_allegation_is_verified_before_any_prose_change(configured_environment, monkeypatch, confirmed):
+    from novel_generator.schemas import ContinuityLedger
+    def review(context, numbers):
+        result = clean_review(numbers)
+        if 'proposed_review_to_verify' not in context or confirmed:
+            result['canon_consistent'] = False
+            result['issues'] = [issue(2)]
+        return result
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        context = editor._adjacent_context(run, run.chapters, ContinuityLedger(current_patch_status='Opening', world_state='Opening'))
+        result = editor._review(session, run, run.chapters, context, object(), 'adjacent_chapters')
+        assert result.passed is not confirmed
+        assert bool(result.issues) is confirmed
+        assert all(ch.content == PROSE for ch in run.chapters)
+        assert not editor._events(run, 'autonomous_repair_started')
+        assert len(editor._events(run, 'autonomous_review_adjudicated')) == 1
         assert calls == [('autonomous_review', None), ('autonomous_review', None)]
 
 

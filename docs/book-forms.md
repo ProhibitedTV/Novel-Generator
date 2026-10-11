@@ -20,6 +20,8 @@ Automatic passage edits, coordinated edits, and full chapter rewrites all use th
 
 Reviews receive computed matches for long copied paragraphs within a chapter and between distant chapters, with their original source locations. These are evidence to evaluate, not automatic failures: a refrain or intentionally repeated reference instruction can be valid. Accidental duplicated definitions, explanations, scenes, or examples still require correction.
 
+Continuity audits distinguish established facts from a character's speech, beliefs, guesses, lies, and later discoveries. Disagreement or a corrected belief does not automatically contradict the book. Every proposed cross-chapter continuity defect receives a separate verification pass against the complete source before the first repair; confirmed incompatible facts remain blocking. This adds inference time in exchange for checking an allegation before it can change the manuscript.
+
 ## Nonfiction sources
 
 Paste source **content**, with source names or citations, into the source-material field. A URL alone is not retrieved and is rejected. Nonfiction requires this field before a project is saved. Prompts prohibit invented research, quotations, statistics, credentials, and historical claims, and distinguish hypothetical examples from sourced assertions. In autonomous mode, a separate focused source audit compares every complete chapter with the supplied material, before accepting a draft and again after final editing. Unsupported assertions and invented mandatory procedure steps require repair even if the broad editorial review passes. This is source-aware generation, not a research crawler or an independent fact-verification service.
