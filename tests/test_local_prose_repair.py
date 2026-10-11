@@ -87,6 +87,13 @@ def test_numbered_evidence_repairs_separate_paragraphs_without_omission_matching
     assert [text[slice(*span)] for span, _ in plan] == ["First speech.", "Second speech."]
 
 
+def test_a_structural_omission_cannot_be_confined_to_its_evidence_anchor():
+    diagnosis = issue('The desk uses three records.', 'factual')
+    diagnosis.evidence_paragraphs = [1]
+    diagnosis.repair_scope = 'chapter'
+    assert repair_plan('The desk uses three records.\n\nOnly one is described.', [diagnosis]) is None
+
+
 @pytest.mark.parametrize('category', ['causality', 'unresolved_payoff', 'premature_payoff', 'character', 'continuity'])
 def test_causal_edit_preserves_prior_repairs_and_receives_context(category):
     import json
