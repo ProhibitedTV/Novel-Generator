@@ -102,6 +102,61 @@ def test_review_requires_real_prose_evidence_and_exact_coverage():
         editor.validate_review(json.dumps(review), chapters)
 
 
+def test_advisory_preferences_cannot_excuse_failed_required_checks():
+    review = clean_review([1])
+    review['optional_suggestions'] = [dict(issue(), category='prose', problem='I prefer longer descriptions.')]
+    assert EditorialReview.model_validate(review).passed
+    review['ending_complete'] = False
+    with pytest.raises(ValueError, match='failed check needs an evidenced issue'):
+        EditorialReview.model_validate(review)
+
+
+def test_advisory_preferences_still_require_actual_source_evidence():
+    review = clean_review([1])
+    review['optional_suggestions'] = [dict(issue(), evidence='Invented quotation')]
+    with pytest.raises(ValueError, match='actual prose'):
+        editor.validate_review(json.dumps(review), [SimpleNamespace(chapter_number=1, content=PROSE)])
+
+
+def test_final_gate_accepts_advisory_preferences_without_rewriting(configured_environment, monkeypatch):
+    def review(context, numbers):
+        output = clean_review(numbers)
+        evidence = context.get('actual_prose') or context['final_chapter_actual_prose']
+        output['optional_suggestions'] = [dict(issue(evidence=evidence), category='prose',
+            problem='I prefer a longer description of the ferry.', repair_instruction='Consider adding more imagery.')]
+        return output
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        result = editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        assert result.publication_readiness_label == 'automated checks passed'
+        assert run.chapters[0].content == PROSE
+        assert not editor._events(run, 'autonomous_repair_started')
+        assert editor._events(run, 'autonomous_quality_passed')
+        assert all(item['review']['optional_suggestions'] for item in editor._events(run, 'autonomous_review_completed'))
+        assert ('autonomous_revision', 1) not in calls
+
+
+def test_required_defect_is_repaired_while_preferences_remain_advisory(configured_environment, monkeypatch):
+    def review(context, numbers):
+        output = clean_review(numbers)
+        prose = context['actual_prose']
+        output['optional_suggestions'] = [dict(issue(evidence=prose), category='prose',
+            problem='I prefer more imagery.', repair_instruction='Consider describing the ferry.')]
+        if 'kept' in prose:
+            output['issues'] = [issue(evidence=prose)]
+            output['canon_consistent'] = False
+        return output
+    install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
+        assert run.chapters[0].content == REPAIRED
+        assert len(editor._events(run, 'autonomous_repair_started')) == 1
+        assert editor._events(run, 'autonomous_review_completed')[-1]['review']['optional_suggestions']
+
+
 def test_invalid_review_retry_retains_source_prose_and_editorial_contract(monkeypatch):
     messages = [{"role": "system", "content": "Editorial contract"},
                 {"role": "user", "content": PROSE}]
