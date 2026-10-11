@@ -8,6 +8,8 @@ from novel_generator.services.exports import (
     export_publication_artifact,
     export_run_artifacts,
     publication_export_options,
+    render_markdown,
+    render_docx,
 )
 
 
@@ -23,6 +25,18 @@ def _front_matter(**overrides) -> PublicationFrontMatter:
     }
     values.update(overrides)
     return PublicationFrontMatter(**values)
+
+
+def test_manuscript_exports_do_not_print_the_planning_premise_or_ending_spoilers(tmp_path):
+    project = Project(title="The Gate", premise="Planning spoiler: Ben is the culprit.")
+    chapters = [ChapterDraft(chapter_number=1, title="Arrival", content="Ada waited by the gate.")]
+    markdown = render_markdown(project, chapters)
+    destination = tmp_path / "manuscript.docx"
+    render_docx(project, chapters, destination)
+    word_text = '\n'.join(p.text for p in Document(destination).paragraphs)
+    for text in (markdown, word_text):
+        assert project.premise not in text
+        assert "The Gate" in text and "Ada waited by the gate." in text
 
 
 def test_export_run_artifacts_writes_manuscript_and_qa_report_without_duplicate_headings(tmp_path) -> None:

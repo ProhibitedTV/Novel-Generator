@@ -12,6 +12,8 @@ These contracts apply to planning, outline recovery, chapter planning, drafting,
 
 Each generated bible saves the book specification. Later project edits do not silently change its stored form or source contract. New outline requests constrain the requested chapter range in their provider schema. Reviews constrain `reviewed_chapters` to their complete requested coverage and retain strict validation of actual manuscript evidence. Known defects remain blocking, including factual defects in nonfiction.
 
+Word exports preserve section headings, emphasis, ordered and bulleted lists, reference tables, code, quotations, and line breaks within poems and scripts. Publication Markdown preserves its original structure. Source links retain their destinations in Word text; remote assets are not fetched. These are editable book exports, not automatic qualification of every publisher's typography requirements.
+
 ## Nonfiction sources
 
 Paste source **content**, with source names or citations, into the source-material field. A URL alone is not retrieved and is rejected. Nonfiction requires this field before a project is saved. Prompts prohibit invented research, quotations, statistics, credentials, and historical claims, and distinguish hypothetical examples from sourced assertions. In autonomous mode, a separate focused source audit compares every complete chapter with the supplied material, before accepting a draft and again after final editing. Unsupported assertions and invented mandatory procedure steps require repair even if the broad editorial review passes. This is source-aware generation, not a research crawler or an independent fact-verification service.

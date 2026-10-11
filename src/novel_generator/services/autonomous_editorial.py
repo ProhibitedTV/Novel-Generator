@@ -73,19 +73,25 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
     schema = response_schema_for_stage("autonomous_review")
     schema["properties"]["reviewed_chapters"]["const"] = sorted(chapter_numbers)
     schema["$defs"]["EditorialIssue"]["properties"]["chapter_number"]["enum"] = sorted(chapter_numbers)
-    if scope == "source_accuracy":
-        for check in ("plot_coherent", "prose_clean", "ending_complete"):
-            schema["properties"][check]["const"] = True
+    if scope in {"chapter", "final_chapter", "adjacent_chapters", "source_accuracy"}:
+        # Complete prose in these scopes is always numbered. References also
+        # anchor omission diagnoses, which cannot quote an absent sentence.
         issue = schema["$defs"]["EditorialIssue"]
-        issue["properties"]["category"]["const"] = "factual"
-        # This audit always supplies numbered complete prose. Constrain the
-        # decoder to references so Markdown stripping, abbreviated quotations,
-        # and reordered excerpts cannot prevent a genuine factual repair.
         issue["required"] = list(dict.fromkeys([*issue["required"], "evidence_paragraphs"]))
         issue["properties"]["evidence"]["const"] = "Source paragraphs"
         issue["properties"]["evidence_paragraphs"]["minItems"] = 1
         if paragraph_count is not None:
             issue["properties"]["evidence_paragraphs"]["items"]["enum"] = list(range(1, paragraph_count + 1))
+    if scope == "adjacent_chapters":
+        for check in ("prose_clean", "ending_complete"):
+            schema["properties"][check]["const"] = True
+        schema["$defs"]["EditorialIssue"]["properties"]["category"]["enum"] = ["continuity", "character", "causality"]
+        schema["properties"]["optional_suggestions"]["maxItems"] = 0
+    if scope == "source_accuracy":
+        for check in ("plot_coherent", "prose_clean", "ending_complete"):
+            schema["properties"][check]["const"] = True
+        issue = schema["$defs"]["EditorialIssue"]
+        issue["properties"]["category"]["const"] = "factual"
         schema["properties"]["optional_suggestions"]["maxItems"] = 0
     return make_schema_marker("autonomous_review", schema=schema)
 
@@ -278,7 +284,7 @@ def _adjudication_messages(scope, context, review, controls):
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
     messages.insert(-1, _coverage_marker(review.reviewed_chapters, scope,
-        paragraph_count=len(_paragraphs(context["actual_prose"])) if scope == "source_accuracy" else None))
+        paragraph_count=len(_paragraphs(context["actual_prose"])) if "actual_prose" in context else None))
     return messages
 
 
@@ -302,7 +308,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    fingerprint = _hash({"contract": 17, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 18, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
@@ -357,7 +363,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         # Chapter and book reviews cover prose and closure. Give this audit one
         # factual task instead of burying chronology among aesthetic decisions.
         instruction = (
-            "You are a fiction continuity auditor. Compare factual assertions in TWO complete chapters, in story order. "
+            "You are a book continuity auditor. Compare factual assertions in TWO complete chapters, in book order. "
             "Find incompatible claims about the SAME event, date, person, place, or physical object. Read the actual passages, not summaries. "
             "Relative elapsed time is measured from its own scene: a later scene can correctly give a larger elapsed interval for the same past event. "
             "A scene change or later reflection is not a chronology contradiction. Report definite conflicting facts or impossible causal transitions, "
@@ -388,7 +394,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
     messages.insert(-1, _coverage_marker([chapter.chapter_number for chapter in chapters], scope,
-        paragraph_count=len(_paragraphs(chapters[0].content or "")) if scope == "source_accuracy" else None))
+        paragraph_count=len(_paragraphs(chapters[0].content or "")) if len(chapters) == 1 else None))
     _check_context(messages, client, provider)
     run.current_step = "autonomous_review"
     run.current_chapter = chapters[0].chapter_number if len(chapters) == 1 else None
