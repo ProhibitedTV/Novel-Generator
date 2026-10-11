@@ -33,6 +33,7 @@ def load_project_spec(path: Path, model: str) -> ProjectCreate:
 
 
 def verification_report(run, artifacts_dir: Path) -> dict:
+    brief = getattr(getattr(run, "project", None), "story_brief", None) or {}
     chapters = sorted(run.chapters, key=lambda chapter: chapter.chapter_number)
     expected = list(range(1, run.requested_chapters + 1))
     complete = (
@@ -50,6 +51,9 @@ def verification_report(run, artifacts_dir: Path) -> dict:
         "model": run.model_name,
         "status": run.status.value,
         "quality_profile": getattr(run, "quality_profile", "balanced"),
+        "book_form": {key: brief.get(key) for key in
+                      ("book_type", "content_kind", "structure", "genre_profile", "genre_description")},
+        "task_routing": getattr(run, "task_routing", None) or {},
         "autonomous_checks_passed": bool(complete and exported and any(
             event.event_type == "autonomous_quality_passed"
             and event.payload.get("manuscript_hash") == _hash([(chapter.chapter_number, chapter.content) for chapter in chapters])
@@ -155,7 +159,8 @@ def main() -> int:
         report = verification_report(run, settings.artifacts_dir)
         (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(json.dumps(report, indent=2), flush=True)
-        return 0 if report["pipeline_complete"] else 1
+        accepted = report["pipeline_complete"] and (args.profile != "autonomous" or report["autonomous_checks_passed"])
+        return 0 if accepted else 1
 
 
 if __name__ == "__main__":

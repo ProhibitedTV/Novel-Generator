@@ -27,7 +27,7 @@ def generate_outline(session, run, bible, client, provider, model):
         for saved in reversed(_events(run, "outline_batch_checkpoint")):
             if saved.get("fingerprint") == fingerprint:
                 # Checkpoints are validated again, never trusted as opaque JSON.
-                chunk = parse_outline_chunk(json.dumps({"chapters": saved["outline"]}), start, end)
+                chunk = parse_outline_chunk(json.dumps({"chapters": saved["outline"]}), start, end, book_spec=bible.book_spec)
                 outline.extend(chunk)
                 return
         split = any(saved.get("fingerprint") == fingerprint for saved in _events(run, "outline_batch_split"))
@@ -41,7 +41,7 @@ def generate_outline(session, run, bible, client, provider, model):
                     session, run, client, provider, model,
                     lambda: build_outline_chunk_messages(run.project, run, bible,
                         start_chapter=start, end_chapter=end, prior_outline=list(outline)),
-                    lambda raw: parse_outline_chunk(raw, start, end),
+                    lambda raw: parse_outline_chunk(raw, start, end, book_spec=bible.book_spec),
                     f"structured outline chapters {start}-{end}", "outline_chunk", None,
                 )
             except ValueError as exc:

@@ -99,7 +99,7 @@ def test_reconciliation_refreshes_only_revised_chapter_then_replays_ledger() -> 
         ),
         _outline_entry=lambda target_run, number: SimpleNamespace(chapter_mode="aftermath"),
         _resolve_stage_route=lambda client, target_run, stage: ("ollama", "model"),
-        build_summary_messages=lambda chapter, outline: [],
+        build_summary_messages=lambda chapter, outline, **kwargs: [],
         _supervised_provider_chat=lambda *args, **kwargs: (
             calls.__setitem__("summary", calls["summary"] + 1) or "refreshed summary 1"
         ),

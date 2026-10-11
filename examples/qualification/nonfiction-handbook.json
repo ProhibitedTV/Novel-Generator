@@ -1,0 +1,22 @@
+{
+  "title": "The Borrowing Desk Manual",
+  "premise": "A concise volunteer handbook describing the proposed paper borrowing-desk procedure in the supplied source. Explain setup and record fields in chapter one; loans, returns, exceptions, and reconciliation in chapter two. Use useful worked examples and finish with a complete shift checklist.",
+  "desired_word_count": 1200,
+  "requested_chapters": 2,
+  "min_words_per_chapter": 450,
+  "max_words_per_chapter": 750,
+  "story_brief": {
+    "genre_profile": "custom",
+    "genre_description": "Practical procedural nonfiction",
+    "genre_requirements": ["Every procedure agrees with the supplied Desk Procedure", "Examples are clearly labeled hypothetical", "No invented research or claims that a real organization uses this proposed system"],
+    "book_type": "volunteer handbook",
+    "content_kind": "nonfiction",
+    "structure": "instructional",
+    "audience": "New volunteers learning a small paper borrowing desk",
+    "reader_promise": "A volunteer can set up the records, process a loan and return, and reconcile the desk without guessing missing steps.",
+    "ending_target": "Finish with a complete shift checklist covering record review, overdue loans, unresolved exceptions, physical item count, and handover.",
+    "must_include": ["Item and borrower cards with the required fields", "A hypothetical loan and return example", "An unresolved missing-item exception", "End-of-shift reconciliation and handover"],
+    "avoid": ["A fictional adventure plot", "External statistics", "Legal advice", "Invented electronic features"],
+    "source_material": "Desk Procedure (original proposed workflow for this qualification example). This describes a designed procedure, not a claim about an existing organization. Each item has an item card with a unique item ID, item description, condition note, current location, and status: available, on loan, or exception. Each borrower has a borrower card with a unique borrower ID and their chosen contact detail. Never put a borrower's contact detail on a publicly visible item card. A borrower may have at most two simultaneous open loans. A loan record contains item ID, borrower ID, checkout date, due date, checkout condition, return date when applicable, return condition when applicable, and volunteer initials. At checkout, check that the item is available, physically present, and in the recorded condition. Check the borrower has fewer than two open loans. Agree a due date, create the loan record, mark the item on loan, and record its current location as with the borrower. At return, match the item ID to the open loan, inspect condition, write return date and condition, and initial the return. If condition is acceptable, mark the item available and record its shelf location. If condition differs, mark the item exception, describe the difference on an exception note, and put it in the designated exception area. A missing item remains an open loan or an exception until it is found; do not invent a return date or mark it available. An overdue loan is an open loan whose due date has passed; flag it for follow-up using the borrower card, without claiming the item is lost. At the end of each shift, review that each open loan corresponds to an on-loan item card, each returned item has its return record closed, and each available item is present at its recorded shelf location. Count physical available and exception items separately. List discrepancies and overdue loans, leave unresolved exception notes intact, and hand over the records and discrepancy list to the next volunteer. Dates and item IDs in examples must be explicitly hypothetical. No fixed loan duration, fine, ID-document requirement, opening schedule, or automatic notification is defined by this procedure."
+  }
+}

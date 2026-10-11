@@ -8,11 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .models import ChapterStatus, RunStatus
 from .services.genre_profiles import DEFAULT_GENRE_PROFILE, GENRE_PROFILES
+from .services.book_specs import BOOK_STRUCTURES, CONTENT_KINDS
 
 
 QUALITY_PROFILE_VALUES = {"draft", "balanced", "strict", "publication", "autonomous"}
 
 ALLOWED_CHAPTER_MODES = {
+    "essay", "instruction", "reference", "poem", "dramatic_scene", "independent_story",
     "investigation",
     "interpersonal_confrontation",
     "public_debate",
@@ -87,7 +89,7 @@ def _clean_list_map(value: Any) -> dict[str, list[str]]:
 def _validate_genre_profile(value: Any) -> str:
     key = str(value or DEFAULT_GENRE_PROFILE).strip() or DEFAULT_GENRE_PROFILE
     if key not in GENRE_PROFILES:
-        raise ValueError("Choose one of the supported genre profiles.")
+        raise ValueError("Choose a genre profile or custom to describe any other genre or blend.")
     return key
 
 
@@ -140,6 +142,13 @@ class CanonicalEntity(BaseModel):
 
 class StoryBrief(BaseModel):
     genre_profile: str = DEFAULT_GENRE_PROFILE
+    genre_description: str = ""
+    genre_requirements: list[str] = Field(default_factory=list)
+    book_type: str = "novel"
+    content_kind: str = "fiction"
+    structure: str = "continuous"
+    audience: str = ""
+    source_material: str = ""
     setting: str = ""
     tone: str = ""
     reader_promise: str = ""
@@ -161,6 +170,7 @@ class StoryBrief(BaseModel):
     approved_canon: list[CanonicalEntity] = Field(default_factory=list)
 
     @field_validator(
+        "genre_requirements",
         "supporting_cast",
         "world_rules",
         "must_include",
@@ -176,6 +186,7 @@ class StoryBrief(BaseModel):
         return _clean_list(value)
 
     @field_validator(
+        "genre_description", "audience", "source_material",
         "setting",
         "tone",
         "reader_promise",
@@ -198,6 +209,29 @@ class StoryBrief(BaseModel):
     @classmethod
     def validate_genre_profile(cls, value: Any) -> str:
         return _validate_genre_profile(value)
+
+    @field_validator("book_type", mode="before")
+    @classmethod
+    def validate_book_type(cls, value: Any) -> str:
+        return str(value or "novel").strip() or "novel"
+
+    @field_validator("content_kind", "structure", mode="before")
+    @classmethod
+    def validate_book_form(cls, value: Any, info) -> str:
+        default = "fiction" if info.field_name == "content_kind" else "continuous"
+        key = str(value or default).strip().lower() or default
+        allowed = CONTENT_KINDS if info.field_name == "content_kind" else BOOK_STRUCTURES
+        if key not in allowed:
+            raise ValueError(f"Choose {', '.join(sorted(allowed))} for {info.field_name}.")
+        return key
+
+    @model_validator(mode="after")
+    def require_nonfiction_sources(self):
+        if self.content_kind == "nonfiction" and not self.source_material.strip():
+            raise ValueError("Nonfiction requires source material with source names and factual content; the generator must not invent references.")
+        if self.content_kind == "nonfiction" and all(part.startswith(("https://", "http://")) for part in self.source_material.split()):
+            raise ValueError("Paste actual nonfiction source content; source URLs are not automatically retrieved.")
+        return self
 
 
 class ConcreteEndingHook(BaseModel):
@@ -242,6 +276,7 @@ class ProseStyleProfile(BaseModel):
 
 class StoryBible(BaseModel):
     genre_profile: str = DEFAULT_GENRE_PROFILE
+    book_spec: dict[str, Any] = Field(default_factory=dict)
     logline: str
     theme: str
     act_plan: list[str] = Field(default_factory=list)

@@ -233,6 +233,38 @@ def test_home_empty_state_with_unreachable_ollama(client, monkeypatch) -> None:
     assert "Open provider settings" in response.text
 
 
+def test_book_form_and_all_editor_routes_survive_create_and_edit(client, monkeypatch):
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model, ["test-model", "editor-model"]))
+    form = dict(title="A Field Handbook", premise="Explain a documented procedure.",
+                desired_word_count="1200", requested_chapters="2", min_words_per_chapter="400", max_words_per_chapter="800",
+                preferred_provider_name="ollama", preferred_model="test-model", story_genre_profile="custom",
+                story_genre_description="Practical reference", story_genre_requirements="No invented research\nClear examples",
+                story_book_type="field handbook", story_content_kind="nonfiction", story_structure="reference",
+                story_audience="First-time volunteers", story_source_material="Desk manual: label each record before filing it.")
+    for role in ("autonomous_review", "autonomous_revision", "developmental_rewrite"):
+        form[f"route_{role}_provider"] = "ollama"
+        form[f"route_{role}_model"] = "editor-model"
+    response = client.post("/projects/new", data=form, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    project_id = response.headers["location"].split("?")[0].rsplit("/", 1)[-1]
+    form["story_book_type"] = "volunteer manual"
+    response = client.post(f"/projects/{project_id}/edit", data=form, follow_redirects=False)
+    assert response.status_code == 303, response.text
+    with get_session_factory()() as session:
+        p = get_project(session, project_id)
+        assert p.story_brief["book_type"] == "volunteer manual"
+        assert p.story_brief["content_kind"] == "nonfiction"
+        assert p.story_brief["genre_requirements"] == ["No invented research", "Clear examples"]
+        assert p.story_brief["source_material"] == form["story_source_material"]
+        assert p.story_brief["audience"] == "First-time volunteers"
+        for role in ("autonomous_review", "autonomous_revision", "developmental_rewrite"):
+            assert p.task_routing[role] == {"provider_name": "ollama", "model_name": "editor-model"}
+    page = client.get(f"/projects/{project_id}")
+    assert page.status_code == 200
+    assert "volunteer manual" in page.text
+    assert "Practical reference" in page.text
+
+
 def test_home_empty_state_with_reachable_ollama_but_no_models(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model, []))
 

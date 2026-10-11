@@ -60,8 +60,8 @@ def schema_name_for_stage(stage: str) -> str:
     return (rendered or "structured_output")[:64]
 
 
-def make_schema_marker(stage: str) -> dict[str, str] | None:
-    schema = response_schema_for_stage(stage)
+def make_schema_marker(stage: str, *, schema: dict[str, Any] | None = None) -> dict[str, str] | None:
+    schema = schema if schema is not None else response_schema_for_stage(stage)
     if not schema:
         return None
     payload = {

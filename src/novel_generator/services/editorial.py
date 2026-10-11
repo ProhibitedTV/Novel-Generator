@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .book_specs import uses_book_contract
+
 from collections import Counter
 from dataclasses import dataclass, field
 import json
@@ -1746,6 +1748,17 @@ def lint_chapter(
     words = _normalized_words(content)
     result = ChapterLintResult()
 
+    bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
+    if uses_book_contract(bible.get("book_spec")):
+        # Legacy character-choice, civilian-fallout, and hook heuristics cannot
+        # prescribe arbitrary genres/forms. Model audits check coverage and source
+        # accuracy. Keep deterministic unfinished-output checks for every form.
+        if not content or re.search(r"\[(?:INSERT|TODO|PLACEHOLDER)\b", content, re.IGNORECASE):
+            result.blocking_issues.append(f"Chapter {chapter.chapter_number} contains empty or unfinished manuscript text.")
+            result.needs_repair = True
+            result.repair_scope = "targeted_scene_and_ending"
+        return result
+
     meta_language_hits = _meta_language_hits(content)
     if meta_language_hits:
         rendered_hits = ", ".join(f"'{hit}'" for hit in meta_language_hits[:5])
@@ -2118,10 +2131,15 @@ def lint_chapter(
     return result
 
 
-def lint_manuscript(chapters: list[ChapterDraft]) -> list[str]:
+def lint_manuscript(chapters: list[ChapterDraft], story_bible=None) -> list[str]:
     findings: list[str] = []
     if not chapters:
         return findings
+    bible = story_bible if isinstance(story_bible, dict) else (story_bible.model_dump() if story_bible else {})
+    spec = bible.get("book_spec") or {}
+    if uses_book_contract(spec):
+        return [f"Chapter {chapter.chapter_number} is missing a continuity summary."
+                for chapter in chapters if not (chapter.summary or "").strip()]
 
     heading_duplicates = [
         chapter.chapter_number
@@ -2209,6 +2227,11 @@ def manuscript_quality_notes(
         "continuity_bible_findings": [],
         "continuity_bible_table": [],
     }
+
+    if uses_book_contract((bible or {}).get("book_spec")):
+        # Narrative fatigue/agency scores cannot diagnose missing handbook
+        # coverage or intentional poetic repetition. Form-aware QA handles them.
+        return notes
 
     manuscript_text = "\n\n".join(chapter.content or "" for chapter in chapters).lower()
     chapter_fatigue_hits = {
