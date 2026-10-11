@@ -21,6 +21,16 @@ class AutonomousQualityError(RuntimeError):
     """The manuscript cannot be certified by the configured automatic editorial checks."""
 
 
+VIEWPOINT_RULES = (
+    "Distinguish established shared facts from attributed speech, beliefs, guesses, lies, and predictions. "
+    "A character can be mistaken, deceptive, or change their mind after a discovery; dialogue is not automatically "
+    "an objective statement of world canon. A later revelation can correct an earlier belief without contradicting "
+    "the book. Require incompatible facts established as true about the same event, not merely disagreement "
+    "between a character's claim and the narrator or another character. Explain the attribution and framing of both claims. "
+    "Preserve explicit author facts when assessing possible corrections."
+)
+
+
 def enabled(run: Any) -> bool:
     return getattr(run, "quality_profile", "") == "autonomous"
 
@@ -294,7 +304,7 @@ def _adjudication_messages(scope, context, review, controls):
             " Only compare factual continuity, character identity, and causes across these complete chapters. "
             "Only continuity, character, and causality issues are allowed. Set prose_clean and ending_complete to true; "
             "separate audits cover those checks. optional_suggestions must be empty. Explain both incompatible claims and their chapters."
-        )
+        ) + "\n" + VIEWPOINT_RULES
     elif scope == "whole_book" or context.get("is_final_chapter"):
         if uses_book_contract(context.get("author_brief")):
             instruction += " This is the end of the book. Verify the promised ending_target and complete coverage in the requested book form; there is no next chapter."
@@ -341,7 +351,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    fingerprint = _hash({"contract": 21, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 22, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):
@@ -408,7 +418,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             + json.dumps(EditorialReview.model_json_schema())
             + " Perform one comparison pass. If no demonstrated contradiction remains, return the clean review immediately. "
             "Do not revisit a settled calculation or invent another requirement."
-        )
+        ) + "\n" + VIEWPOINT_RULES
     review_context = dict(context)
     if "actual_prose" in context:
         review_context["actual_prose"] = _numbered_prose(context["actual_prose"], context["chapter_number"])
@@ -466,9 +476,12 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     affected = {issue.chapter_number for issue in review.issues}
     prior_repairs = [item for item in _events(run, "autonomous_repair_started")
                      if item.get("chapter_number") in affected]
-    if review.issues and scope in {"chapter", "final_chapter", "whole_book", "adjacent_chapters", "source_accuracy"} and len(prior_repairs) >= 2:
+    if (review.issues and scope in {"chapter", "final_chapter", "whole_book", "adjacent_chapters", "source_accuracy"}
+            and (scope == "adjacent_chapters" or len(prior_repairs) >= 2)):
         # A separate decision pass checks a repeatedly revised chapter against
         # the actual contract, rather than endlessly following new preferences.
+        # Pair allegations are always verified before the first mutation: a
+        # mistaken character belief must not rewrite established author canon.
         proposed = review.model_dump()
         adjudication = _adjudication_messages(scope, review_context, review, adjudication_controls)
         _check_context(adjudication, client, adjudicator_provider)
@@ -809,6 +822,7 @@ def _book_context(run, chapters, qa_report) -> dict:
         chapter_map.append(row)
     return {
         "author_brief": run_book_brief(run),
+        "premise": run.project.premise,
         "ending_promise": (run.story_bible or {}).get("ending_promise", ""),
         "ending_debt_to_verify_against_actual_prose": compile_ending_debt_audit(run, chapters).payload,
         "chapter_map": chapter_map,
@@ -825,6 +839,7 @@ def _adjacent_context(run, chapters, ledger) -> dict:
     """Compare complete literal prose; a summary cannot substitute for an earlier fact."""
     return {
         "author_brief": run_book_brief(run),
+        "premise": run.project.premise,
         "world_rules": (run.story_bible or {}).get("world_rules", []),
         "actual_chapters": [{"chapter_number": chapter.chapter_number,
                              "actual_prose": _numbered_prose(chapter.content or "", chapter.chapter_number)}
