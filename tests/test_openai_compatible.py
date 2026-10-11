@@ -11,6 +11,19 @@ from novel_generator.services.openai_compatible import (
 )
 
 
+def test_ollama_private_controls_are_not_sent_to_another_provider():
+    from novel_generator.services.provider_controls import make_ollama_controls_marker
+    seen = {}
+    def handler(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={'choices':[{'message':{'content':'ok'}}]})
+    client = OpenAICompatibleClient(base_url='http://compatible.test', timeout_seconds=1, max_retries=0,
+        client_factory=lambda:httpx.Client(transport=httpx.MockTransport(handler), base_url='http://compatible.test'))
+    source = [{'role':'user','content':'Full source'}]
+    assert client.chat('editor', [make_ollama_controls_marker(think=True, temperature=1.0), *source])=='ok'
+    assert seen['messages']==source and 'think' not in seen
+
+
 def test_parse_openai_chat_payload_reads_string_content() -> None:
     payload = {
         "choices": [

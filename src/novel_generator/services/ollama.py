@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from ..schemas import ProviderCapabilities
-from .provider_controls import extract_output_budget_marker
+from .provider_controls import extract_output_budget_marker, extract_ollama_controls_marker
 from .provider_errors import ProviderError, ProviderTransportError
 from .structured_schema_runtime import extract_schema_marker
 
@@ -220,7 +220,8 @@ class OllamaClient:
             raise OllamaError(f"Model '{model_name}' is not available in Ollama.")
 
     def chat(self, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
-        budget_clean_messages, output_budget = extract_output_budget_marker(messages)
+        controls_clean_messages, controls = extract_ollama_controls_marker(messages)
+        budget_clean_messages, output_budget = extract_output_budget_marker(controls_clean_messages)
         clean_messages, response_schema, _ = extract_schema_marker(budget_clean_messages)
         structured = response_schema is not None or _requests_json_only(clean_messages)
         payload: dict = {
@@ -228,7 +229,9 @@ class OllamaClient:
             "messages": clean_messages,
             "stream": stream,
         }
-        if self.think is not None:
+        if "think" in controls:
+            payload["think"] = controls["think"]
+        elif self.think is not None:
             payload["think"] = self.think
         options: dict[str, int | float] = {}
         if self.num_ctx:
@@ -246,6 +249,8 @@ class OllamaClient:
         elif structured:
             payload["format"] = "json"
             options["temperature"] = self.structured_temperature
+        if "temperature" in controls:
+            options["temperature"] = controls["temperature"]
         if options:
             payload["options"] = options
 
@@ -257,8 +262,41 @@ class OllamaClient:
                     response = client.post("/api/chat", json=payload)
                     response.raise_for_status()
                     raw = response.text
-                    output = parse_ollama_chat_payload(raw)
                     self.last_chat_metrics = extract_ollama_chat_metrics(raw)
+                    if structured and not stream:
+                        data = response.json()
+                        message = data.get("message") or {}
+                        if data.get("done_reason") == "length" and message.get("thinking") and not message.get("content"):
+                            initial_metrics = self.last_chat_metrics
+                            # The server completed inference successfully. It used the
+                            # allowance on reasoning, so request one bounded verdict
+                            # instead of classifying this as a transport outage.
+                            final_budget = min(effective_num_predict or 4096, 4096)
+                            notes = str(message["thinking"])
+                            note_limit = len(notes)
+                            if self.num_ctx:
+                                source_tokens = sum(len(item.get("content", "")) for item in clean_messages) // 4
+                                note_limit = max(0, (self.num_ctx - source_tokens - final_budget - 1024) * 4)
+                            if len(notes) > note_limit:
+                                half = note_limit // 2
+                                notes = notes[:half] + "\n[Provisional analysis excerpted for context headroom.]\n" + notes[-half:] if half else ""
+                            verdict = dict(payload)
+                            verdict["think"] = False
+                            verdict["options"] = {**options, "num_predict": final_budget}
+                            verdict["messages"] = [*clean_messages, {"role": "user", "content": json.dumps({
+                                "partial_analysis_for_verification": notes,
+                                "instruction": "The bounded analysis pass reached its token limit. Now produce the final JSON immediately. These notes are provisional analysis, not manuscript evidence. Verify each alleged defect against the original source above. Discard speculation and settled calculations. Cite only actual source prose, preferably its numbered evidence_paragraphs. Do not continue thinking or add commentary.",
+                            })}]
+                            response = client.post("/api/chat", json=verdict)
+                            response.raise_for_status()
+                            raw = response.text
+                            self.last_chat_metrics = {**extract_ollama_chat_metrics(raw),
+                                "reasoning_finalized": True,
+                                "reasoning_eval_count": initial_metrics.get("eval_count"),
+                                "reasoning_duration_ms": initial_metrics.get("total_duration_ms"),
+                                "reasoning_notes_excerpted": len(str(message["thinking"])) > note_limit,
+                            }
+                    output = parse_ollama_chat_payload(raw)
                     return output
             except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError, json.JSONDecodeError, OllamaError) as exc:
                 last_error = exc

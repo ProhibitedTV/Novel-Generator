@@ -286,6 +286,13 @@ def _generate_structured_output(
                         "problem merely to pass validation; correct its evidence and keep its repair instruction."
                     )},
                 ]
+                if provider_name == "ollama":
+                    from .provider_controls import extract_ollama_controls_marker, make_ollama_controls_marker
+                    _, controls = extract_ollama_controls_marker(repair_messages)
+                    if controls.get("think") is True:
+                        # The diagnosis is already present. Correct its JSON and
+                        # evidence without another potentially long reasoning pass.
+                        repair_messages.append(make_ollama_controls_marker(think=False))
             raw_output = _supervised_provider_chat(
                 session,
                 run,
