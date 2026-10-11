@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, model_validator
 
 
 class PassageEdit(BaseModel):
@@ -22,7 +22,7 @@ class EditorialIssue(BaseModel):
     chapter_number: int = Field(ge=1)
     category: Literal["continuity", "causality", "character", "premature_payoff", "unresolved_payoff", "repetition", "prose", "length"]
     problem: str = Field(min_length=1)
-    evidence: str = Field(min_length=1, description="Exact short quotation from this chapter's actual prose.")
+    evidence: str = Field(min_length=1, description="Use 'Source paragraphs' when evidence_paragraphs is provided. Otherwise give an exact short quotation from this chapter's actual prose, not its metadata.")
     evidence_paragraphs: list[int] = Field(default_factory=list, description="Numbered source paragraphs supporting this issue. Prefer these references to copying dialogue.")
     repair_instruction: str = Field(min_length=1)
 
@@ -38,6 +38,7 @@ class EditorialReview(BaseModel):
     ending_complete: StrictBool
     issues: list[EditorialIssue] = Field(description="Concrete defects requiring correction: contradictions, missing required events, broken grammar, or actual redundant passages. Do not include optional stylistic preferences.")
     optional_suggestions: list[EditorialIssue] = Field(default_factory=list, description="Evidence-grounded aesthetic preferences or optional refinements. These do not fail checks or require another repair.")
+    _rejected_optional_suggestions: list[dict] = PrivateAttr(default_factory=list)
 
     @model_validator(mode="after")
     def require_actionable_failures(self):
