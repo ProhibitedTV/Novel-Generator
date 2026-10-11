@@ -58,6 +58,33 @@ def test_usable_undershoot_is_preserved_for_the_manuscript_gate_to_repair():
     assert len(result.split()) == 100
 
 
+def test_usable_overshoot_is_preserved_and_debited_from_later_passages():
+    budgets = []
+    def generate(messages, passage, total, attempt):
+        budget = json.loads(messages[1]["content"])["maximum_words"]
+        budgets.append(budget)
+        # Reproduce a model that improves the passage but misses its ceiling
+        # on both attempts; the shorter first candidate must survive.
+        count = (180 if attempt == 1 else 190) if passage == 1 else budget
+        return " ".join(["revised"] * count)
+    text = "word " * 300 + "\n\n" + "word " * 300
+    result = compress_prose(text, 300, generate)
+    assert len(result.split()) == 300
+    assert budgets == [150, 150, 120]
+
+
+def test_exhausted_allocation_preserves_the_unedited_narrative_suffix():
+    suffix = "The evidence survives and the witness leaves."
+    text = "word " * 300 + "\n\n" + "word " * 300 + "\n\n" + suffix
+    calls = []
+    def generate(messages, passage, total, attempt):
+        calls.append(passage)
+        return " ".join(["shorter"] * 290)
+    result = compress_prose(text, 100, generate)
+    assert result.endswith("word " * 299 + "word\n\n" + suffix)
+    assert calls == [1, 1]
+
+
 def test_compression_rejects_empty_output_and_unbounded_passage_count():
     with pytest.raises(ValueError):
         compress_prose(" ".join(["source"] * 100), 50, lambda *args: "")
