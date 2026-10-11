@@ -341,7 +341,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    fingerprint = _hash({"contract": 20, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint = _hash({"contract": 21, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
     for saved in reversed(_events(run, "autonomous_review_completed")):

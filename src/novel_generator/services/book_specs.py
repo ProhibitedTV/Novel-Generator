@@ -91,7 +91,9 @@ def _context_value(value):
 def review_instruction(brief, scope, is_final):
     closure = ("This is the end of the book. Verify complete delivery of the author's ending_target and reader promise in the actual text."
                if scope == "whole_book" or is_final else
-               "Check only this chapter's assigned purpose and ending state. Do not demand work assigned to future chapters.")
+               "This is a NON-FINAL chapter. ending_complete judges only this chapter's assigned purpose and ending state. "
+               "It is true when that state is delivered, even while the book's overall ending_target remains unresolved. "
+               "A setup may end on discovery, a decision, or an unresolved threat. Do not demand work assigned to future chapters.")
     return (
         "You are an independent book editor. Evaluate every required check using evidenced defects only.\n"
         + contract_text(brief) + "\n" + closure
@@ -104,6 +106,8 @@ def review_instruction(brief, scope, is_final):
         "the supplied source paragraph matches are evidence to evaluate, not automatic failures. Preserve deliberate refrains or repetition explicitly required by the book form. "
         "Do not call changes between independent collection pieces contradictions unless their canon is explicitly shared. "
         "Optional imagery, rhythm, wording, or aesthetic preferences belong in optional_suggestions and never fail checks. "
+        "Each false boolean requires a relevant concrete defect in issues. If issues is empty, all four booleans must be true, "
+        "even when optional_suggestions remain. Do not invent a defect to justify a failed boolean. "
         "Each required issue needs a repair in its indicated chapter and exact evidence from that chapter. "
         "Use evidence_paragraphs in ascending order and evidence='Source paragraphs' for labeled text; otherwise quote exact source words. "
         "Paragraph labels are navigation, not prose. Return all four booleans, every reviewed chapter, and valid JSON only."

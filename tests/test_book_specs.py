@@ -10,7 +10,7 @@ from novel_generator.schemas import ChapterPlan, ChapterCritique, StoryBrief
 from novel_generator.services.editorial import ChapterLintResult
 from novel_generator.services import autonomous_editorial as editor, pipeline
 from novel_generator.services.autonomous_contracts import EditorialReview
-from novel_generator.services.book_specs import contract_text
+from novel_generator.services.book_specs import contract_text, review_instruction
 from novel_generator.services.editorial import lint_chapter
 from novel_generator.services.genre_profiles import genre_profile
 from novel_generator.services.prompts import build_chapter_draft_messages, build_story_bible_messages, build_summary_messages, build_outline_chunk_messages, parse_outline, parse_outline_chunk, parse_chapter_plan
@@ -97,6 +97,17 @@ def test_collection_adjudication_checks_its_own_closure_and_shared_canon():
     messages = editor._adjudication_messages("whole_book", {"author_brief": brief, "is_final_chapter": True}, review, {})
     assert "do not force unrelated pieces into one plot" in messages[0]["content"]
     assert "single conflict spanning every piece" in messages[0]["content"]
+
+
+def test_nonfinal_book_review_does_not_require_the_unwritten_book_ending():
+    brief = dict(genre_profile="custom", content_kind="fiction", ending_target="The neighbors finish a shared gate.")
+    setup = review_instruction(brief, "chapter", False)
+    finale = review_instruction(brief, "chapter", True)
+    assert "ending_complete judges only this chapter" in setup
+    assert "overall ending_target remains unresolved" in setup
+    assert "all four booleans must be true" in setup
+    assert "NON-FINAL" not in finale
+    assert "Verify complete delivery" in finale
 
 
 def test_factual_defects_remain_required_repairs_with_actual_manuscript_evidence():

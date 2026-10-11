@@ -235,6 +235,36 @@ def test_invalid_review_retry_retains_source_prose_and_editorial_contract(monkey
     assert review.passed
     assert calls[1][:2] == messages
     assert "actual prose" in calls[1][-1]["content"]
+    assert not any(message["role"] == "assistant" for message in calls[1])
+    assert "Invented quotation" not in json.dumps(calls[1])
+
+
+@pytest.mark.parametrize("genuine_defect", [False, True])
+def test_invalid_failed_verdict_is_rejudged_without_promoting_optional_advice(monkeypatch, genuine_defect):
+    source = "They promised to lock the ledger. It stayed on the quay."
+    messages = [{"role": "system", "content": "Judge whether the promised final action occurs."},
+                {"role": "user", "content": source}]
+    invalid = {**clean_review([1]), "ending_complete": False,
+        "optional_suggestions": [dict(issue(evidence=source), category="prose", problem="Prefer a drier tone.")]}
+    verdict = clean_review([1])
+    if genuine_defect:
+        verdict["ending_complete"] = False
+        verdict["issues"] = [dict(issue(evidence=source), category="unresolved_payoff",
+            problem="The promised locking never happens.", repair_instruction="Depict the ledger being locked away.")]
+    calls = []
+    def chat(*args, **kwargs):
+        calls.append(args[5])
+        return json.dumps(invalid if len(calls) == 1 else verdict)
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    review = pipeline._generate_structured_output(None, None, object(), "ollama", "test", lambda: messages,
+        lambda raw: editor.validate_review(raw, [SimpleNamespace(chapter_number=1, content=source)]),
+        "editorial review", "autonomous_review", 1)
+    assert len(calls) == 2
+    assert calls[1][:2] == messages
+    assert "Prefer a drier tone" not in json.dumps(calls[1])
+    assert "input_value" not in calls[1][-1]["content"]
+    assert review.passed is not genuine_defect
+    assert bool(review.issues) is genuine_defect
 
 
 def test_review_validation_retry_finalizes_evidence_without_restarting_thinking(monkeypatch):
