@@ -176,3 +176,43 @@ def test_inapplicable_scores_do_not_force_fictional_repairs_but_real_defects_rem
     critique.blocking_issues = ["The procedure gives an unsupported capacity."]
     feedback = pipeline._combine_chapter_feedback(critique, ChapterLintResult(), book_spec=spec)
     assert feedback.revision_required and feedback.blocking_issues == critique.blocking_issues
+
+
+def test_nonfiction_cannot_bypass_source_audit_even_when_general_review_passes(monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    p = project(dict(content_kind="nonfiction", source_material="Manual: the gauge holds 10 mL."))
+    target_run = SimpleNamespace(project=p, story_bible={"book_spec": p.story_brief}, quality_profile="autonomous")
+    chapter = SimpleNamespace(chapter_number=1, content="The gauge holds 20 mL.")
+    calls = []
+    def review(session, run, chapters, context, client, scope):
+        calls.append(scope)
+        issues = [] if scope == "chapter" or "10 mL" in chapter.content else [EditorialIssue(
+            chapter_number=1, category="factual", problem="The source says 10 mL.", evidence=chapter.content,
+            repair_instruction="Correct 20 mL to the source's 10 mL.")]
+        return EditorialReview(reviewed_chapters=[1], plot_coherent=True, canon_consistent=not issues,
+                               prose_clean=True, ending_complete=True, issues=issues)
+    monkeypatch.setattr(editor, "draft_checkpoint", lambda *args: True)
+    monkeypatch.setattr(editor, "_context", lambda *args: {})
+    monkeypatch.setattr(editor, "_review", review)
+    monkeypatch.setattr(editor, "_length_issues", lambda *args: [])
+    repairs = []
+    def repair(session, run, ch, ledger, issues, settings, client, phase):
+        repairs.extend(issues)
+        ch.content = "The gauge holds 10 mL."
+    monkeypatch.setattr(editor, "_repair", repair)
+    editor.ensure_chapter(None, target_run, chapter, None, None, None)
+    assert [issue.category for issue in repairs] == ["factual"]
+    assert calls == ["chapter", "source_accuracy", "chapter", "source_accuracy"]
+
+
+def test_source_audit_constraints_keep_other_checks_separate_and_require_full_coverage():
+    from novel_generator.services.structured_schema_runtime import extract_schema_marker
+    _, schema, _ = extract_schema_marker([editor._coverage_marker([2], "source_accuracy")])
+    assert schema["properties"]["reviewed_chapters"]["const"] == [2]
+    assert schema["properties"]["ending_complete"]["const"] is True
+    assert schema["$defs"]["EditorialIssue"]["properties"]["category"]["const"] == "factual"
+
+
+def test_assembly_strips_duplicate_markdown_chapter_heading_without_removing_section_headings():
+    from novel_generator.services.prompts import sanitize_chapter_content
+    assert sanitize_chapter_content("# Chapter 1: The Desk\n\n### Record fields\nExplain the fields.") == "### Record fields\nExplain the fields."

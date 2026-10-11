@@ -1765,7 +1765,7 @@ def parse_developmental_rewrite_plan(text: str) -> DevelopmentalRewritePlan:
 def sanitize_chapter_content(content: str) -> str:
     cleaned = content.strip()
     cleaned = re.sub(
-        r"^\s*chapter\s+\d+\s*[:\-\u2014]?\s*[^\n]*\n+",
+        r"^\s*(?:#{1,6}\s*)?chapter\s+\d+\s*[:\-\u2014]?\s*[^\n]*\n+",
         "",
         cleaned,
         flags=re.IGNORECASE,

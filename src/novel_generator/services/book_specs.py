@@ -106,6 +106,21 @@ def review_instruction(brief, scope, is_final):
     )
 
 
+def source_review_instruction():
+    return (
+        "You are a nonfiction source auditor. Compare the complete actual chapter with the supplied source_material, assertion by assertion. "
+        "Ignore plans, earlier QA, and aesthetic preferences. Find specific factual contradictions, unsupported purported facts, "
+        "fabricated research/quotes/statistics, or invented mandatory procedure steps or record fields. "
+        "An explanatory deduction that follows from the source is allowed; clearly labeled hypothetical examples are allowed. "
+        "Unlabeled example dates/counts must not read as real events or statistics. A new required supervisor, policy, fine, or field needs source support. "
+        "For each confirmed defect, cite exact manuscript evidence or its evidence_paragraphs, describe the relevant source support or its absence in problem, "
+        "and request a precise source-preserving correction in that chapter. Do not demand verbatim reproduction of the source or flag harmless paraphrases. "
+        "Only category='factual' issues are allowed. Judge only canon_consistent in this audit; set plot_coherent, prose_clean, and ending_complete to true. "
+        "Separate audits check those. optional_suggestions must be empty. If all assertions are supported or explicitly hypothetical, return a clean review. "
+        "Return every reviewed chapter and valid JSON only."
+    )
+
+
 _TASKS = {
     "story_bible": "Create the book's complete planning bible. Make its ending_promise reflect the author ending_target. Do not supply thriller defaults for other forms.",
     "outline": "Plan exactly requested_chapters in order, numbered from 1. Distribute the coverage and total word budget. Complete the book promise in the final chapter.",
