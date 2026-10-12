@@ -1010,6 +1010,13 @@ class RunCreate(BaseModel):
     task_routing: TaskRouting | None = None
     source_run_id: str | None = None
     resume_from_chapter: int | None = Field(default=None, ge=1)
+    rebuild_outline: bool = False
+
+    @model_validator(mode="after")
+    def validate_outline_rebuild(self):
+        if self.rebuild_outline and (not self.source_run_id or not self.resume_from_chapter):
+            raise ValueError("Rebuilding an outline requires a source run and resume chapter.")
+        return self
 
     @field_validator("quality_profile", mode="before")
     @classmethod

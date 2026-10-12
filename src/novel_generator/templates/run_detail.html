@@ -1550,6 +1550,7 @@
             {% endif %}
             {% if run.status in terminal_statuses %}
               <form method="post" action="/runs/{{ run.id }}/chapters/{{ chapter.chapter_number }}/regenerate" class="panel-actions">
+                <label><input type="checkbox" name="rebuild_outline" value="true"> Rebuild the outline from this chapter, preserving earlier completed chapters</label>
                 <button type="submit" class="secondary">Regenerate from this chapter</button>
               </form>
             {% endif %}
