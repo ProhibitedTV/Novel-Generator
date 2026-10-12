@@ -851,6 +851,7 @@ class TaskRouting(BaseModel):
     continuity_update: TaskRouteOverride | None = None
     manuscript_qa: TaskRouteOverride | None = None
     developmental_rewrite: TaskRouteOverride | None = None
+    cover_prompts: TaskRouteOverride | None = None
 
 
 class ProviderCapabilities(BaseModel):

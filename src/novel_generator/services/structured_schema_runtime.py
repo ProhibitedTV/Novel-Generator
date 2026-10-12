@@ -20,6 +20,7 @@ from ..schemas import (
 from .continuity_lifecycle import LIVE_SNAPSHOT_FIELDS
 from .autonomous_contracts import EditorialReview, CoordinatedEdits
 from .outline_contracts import OutlineSpineEntry, OutlineProgressionReview
+from .cover_contracts import CoverDesign
 
 
 _INSTALLED = False
@@ -29,6 +30,7 @@ _SCHEMA_NAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
 def _adapter_for_stage(stage: str) -> TypeAdapter[Any] | None:
     mapping: dict[str, Any] = {
+        "cover_prompts": CoverDesign,
         "autonomous_review": EditorialReview,
         "autonomous_revision": CoordinatedEdits,
         "story_bible": StoryBible,

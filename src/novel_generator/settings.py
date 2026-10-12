@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     chapter_summary_window: int = Field(default=4, ge=1, le=12)
     autonomous_chapter_repair_attempts: int = Field(default=12, ge=1, le=100)
     autonomous_outline_repair_attempts: int = Field(default=4, ge=1, le=24)
+    generate_cover_prompts: bool = False
     autonomous_prose_repair_attempts: int = Field(default=12, ge=1, le=100)
     autonomous_targeted_repair_attempts: int = Field(default=12, ge=1, le=100)
     autonomous_manuscript_repair_rounds: int = Field(default=24, ge=1, le=100)

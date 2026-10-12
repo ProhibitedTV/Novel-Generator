@@ -313,6 +313,10 @@ def _generate_structured_output(
                 if provider_name == "ollama":
                     from .provider_controls import make_ollama_controls_marker
                     repair_messages.append(make_ollama_controls_marker(think=False))
+            if stage == "cover_prompts":
+                repair_messages = [*build_messages(), {"role": "user", "content":
+                    f"Cover pack validation failed: {exc}. Return the complete valid JSON pack. "
+                    "Use exact quotes from the supplied source excerpts, valid motif references, and three distinct cover concepts."}]
             raw_output = _supervised_provider_chat(
                 session,
                 run,
@@ -2995,7 +2999,7 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
         )
         _export_completed_run(session, run, chapters, settings, qa_report,
                               checkpoint.get("rewrite_markdown"), checkpoint.get("revised_outline_markdown"),
-                              checkpoint.get("developmental_qa_markdown"))
+                              checkpoint.get("developmental_qa_markdown"), client=client)
         return
 
     story_bible = _story_bible_from_run(run) if run.story_bible else _generate_story_bible(session, run, settings, client)
@@ -3077,11 +3081,11 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
     )
     qa_report = autonomous_editorial.finish_manuscript(session, run, completed_chapters, settings, client, qa_report)
     _export_completed_run(session, run, completed_chapters, settings, qa_report,
-                          rewrite_markdown, revised_outline_markdown, developmental_qa_markdown)
+                          rewrite_markdown, revised_outline_markdown, developmental_qa_markdown, client=client)
 
 
 def _export_completed_run(session, run, completed_chapters, settings, qa_report,
-                          rewrite_markdown=None, revised_outline_markdown=None, developmental_qa_markdown=None):
+                          rewrite_markdown=None, revised_outline_markdown=None, developmental_qa_markdown=None, *, client=None):
     qa_markdown = render_qa_report_markdown(qa_report)
     for chapter in completed_chapters:
         chapter.status = ChapterStatus.COMPLETED
@@ -3104,6 +3108,11 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
     replace_artifacts(session, run, artifacts)
     if autonomous_editorial.enabled(run):
         autonomous_editorial.save_report(session, run, settings, "passed")
+    session.commit()
+    session.refresh(run, attribute_names=["artifacts"])
+    if client is not None:
+        from .cover_prompts import generate_optional_cover_prompts
+        generate_optional_cover_prompts(session, run, completed_chapters, settings, client)
     run.current_step = "completed"
     run.current_chapter = None
     run.status = RunStatus.COMPLETED
