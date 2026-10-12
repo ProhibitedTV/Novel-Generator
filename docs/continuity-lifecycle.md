@@ -13,6 +13,19 @@ Historical fields are cumulative. Once an event happened, it remains part of the
 
 These fields preserve provenance and let later QA or developmental passes reconstruct how the book reached its current state.
 
+New continuity generation returns only the current chapter's historical changes.
+The model supplies one concise `timeline_entry` and `timeline: []`; the application
+appends the entry to preserved history. Newly resolved threads, side-character
+decisions, and system transitions are merged with their stored predecessors.
+Legacy checkpoints containing complete timelines remain readable, and merging
+them cannot erase earlier historical entries. Live fields still require complete
+current snapshots, including explicit empty lists/maps when state is resolved.
+
+Continuity generation receives the actual chapter prose as its source of truth,
+alongside the summary and prior ledger. It does not need to regenerate the entire
+book's history in every response. This keeps late-chapter output from growing
+with the cumulative timeline.
+
 ## Live state
 
 Live fields describe what is still true *after the current chapter*. The continuity-update prompt asks the model to return the promises, threads, damage, fractures, and fallout that are still active. These fields therefore use post-chapter snapshot semantics rather than append-only merge semantics:
@@ -38,3 +51,10 @@ their fields. Explicit empty lists/maps still clear those fields. Provider JSON 
 six live-state fields, and new chapter and editorial checkpoints preserve omitted-field information
 with `exclude_unset=True` so a restart cannot turn missing information into a false resolution.
 Older checkpoints that already serialized defaults cannot recover the original missing-field distinction.
+
+Final reconciliation commits a refreshed summary and continuity update together
+after both validate. A failed update preserves the earlier complete checkpoint
+and the drafted chapter's completion status. The run still fails if required
+metadata cannot be validated; draft completion does not certify final book
+acceptance. The updated reconciliation contract invalidates older metadata
+caches so their summaries and state are rebuilt from current prose.

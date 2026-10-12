@@ -54,7 +54,7 @@ def test_stage_reserves_keep_full_budget_for_prose_and_right_size_structured_sta
     assert _stage_reserve_tokens("story_bible", 8192) == 4096
     assert _stage_reserve_tokens("chapter_plan", 8192) == 3072
     assert _stage_reserve_tokens("chapter_critique", 8192) == 3072
-    assert _stage_reserve_tokens("continuity_update", 8192) == 3072
+    assert _stage_reserve_tokens("continuity_update", 8192) == 6144
     assert _stage_reserve_tokens("chapter_summary", 8192) == 2048
     assert _stage_reserve_tokens("unknown_stage", 8192) == 4096
 

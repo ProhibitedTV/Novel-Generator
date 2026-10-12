@@ -259,11 +259,14 @@ def _generate_structured_output(
         chapter_number=chapter_number,
         metadata={"label": label, "phase": "initial"},
     )
-    correction_limit = 3 if stage in {"autonomous_review", "outline_progression_review"} else 1
+    correction_limit = 3 if stage in {"autonomous_review", "outline_progression_review", "continuity_update"} else 1
     for correction in range(correction_limit + 1):
         try:
             return parser(raw_output)
         except Exception as exc:
+            if stage == "continuity_update":
+                from .structured_recovery import record_rejected_continuity
+                record_rejected_continuity(session, run, client, raw_output, exc, chapter_number, correction)
             if correction == correction_limit:
                 raise
             repair_messages = build_json_repair_messages(raw_output, label, str(exc))
@@ -317,6 +320,14 @@ def _generate_structured_output(
                 repair_messages = [*build_messages(), {"role": "user", "content":
                     f"Cover pack validation failed: {exc}. Return the complete valid JSON pack. "
                     "Use exact quotes from the supplied source excerpts, valid motif references, and three distinct cover concepts."}]
+            if stage == "continuity_update":
+                feedback = (json.dumps(exc.errors(include_input=False, include_url=False, include_context=False), default=str)
+                            if isinstance(exc, ValidationError) else str(exc))
+                repair_messages = [*build_messages(), {"role": "user", "content":
+                    f"The previous continuity response failed validation: {feedback}. Regenerate a complete JSON object "
+                    "from the original actual prose and prior ledger above. Do not repair a partial array or copy an unfinished answer. "
+                    "Use concise current facts, explicit values for all live snapshot fields, timeline=[], and one new timeline_entry. "
+                    "Historical resolutions, decisions, and transitions are already stored; include only new changes from this chapter."}]
             raw_output = _supervised_provider_chat(
                 session,
                 run,
@@ -461,7 +472,7 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
     if collisions:
         raise RuntimeError("; ".join(collisions))
 
-    timeline = list(update.timeline or current_ledger.timeline)
+    timeline = _dedupe([*current_ledger.timeline, *update.timeline])
     if update.timeline_entry and update.timeline_entry not in timeline:
         timeline.append(update.timeline_entry)
 
@@ -3138,7 +3149,7 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
             return
         if run.current_chapter:
             chapter = next((item for item in run.chapters if item.chapter_number == run.current_chapter), None)
-            if chapter is not None:
+            if chapter is not None and not (run.current_step == "autonomous_reconciliation" and chapter.status == ChapterStatus.COMPLETED):
                 chapter.status = ChapterStatus.FAILED
                 chapter.error_message = str(exc)
         run.status = RunStatus.FAILED
@@ -3156,7 +3167,7 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
             return
         if run.current_chapter:
             chapter = next((item for item in run.chapters if item.chapter_number == run.current_chapter), None)
-            if chapter is not None:
+            if chapter is not None and not (run.current_step == "autonomous_reconciliation" and chapter.status == ChapterStatus.COMPLETED):
                 chapter.status = ChapterStatus.FAILED
                 chapter.error_message = str(exc)
         run.status = RunStatus.FAILED
