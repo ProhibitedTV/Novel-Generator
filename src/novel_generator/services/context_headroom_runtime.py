@@ -31,6 +31,7 @@ _LARGE_STRUCTURED_STAGES = frozenset(
         "publication_readiness",
         "developmental_rewrite",
         "autonomous_review",
+        "continuity_update",
     }
 )
 _MEDIUM_OUTPUT_STAGES = frozenset({"story_bible"})
@@ -38,7 +39,6 @@ _SMALL_STRUCTURED_STAGES = frozenset(
     {
         "chapter_plan",
         "chapter_critique",
-        "continuity_update",
     }
 )
 # Least essential derived/read-only blocks are removed first. Durable prompt inputs such as chapter

@@ -983,6 +983,8 @@ def build_continuity_update_messages(
     chapter: ChapterDraft,
     current_ledger: ContinuityLedger | dict[str, Any],
     story_bible: StoryBible | dict[str, Any],
+    *,
+    summary_override: str | None = None,
 ) -> list[dict[str, str]]:
     ledger = current_ledger if isinstance(current_ledger, dict) else current_ledger.model_dump()
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
@@ -996,7 +998,7 @@ def build_continuity_update_messages(
         {
             "role": "system",
             "content": (
-                "You maintain a continuity ledger for a novel. Return valid JSON only with the fully updated ledger after this chapter."
+                "You maintain continuity for a book. Return valid JSON only with a concise chapter update, not a rewritten copy of the historical ledger."
             ),
         },
         {
@@ -1006,7 +1008,8 @@ def build_continuity_update_messages(
                 f"Current ledger:\n{json.dumps(ledger, indent=2)}\n\n"
                 f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Relevant canon registry:\n{json.dumps(relevant_canon, indent=2)}\n\n"
-                f"Chapter summary:\n{chapter.summary or ''}\n\n"
+                f"Chapter summary:\n{(chapter.summary if summary_override is None else summary_override) or ''}\n\n"
+                f"Actual chapter prose (source of truth):\n{chapter.content or ''}\n\n"
                 "Return a JSON object with exactly these keys:\n"
                 "{\n"
                 '  "chapter_outcome": "string",\n'
@@ -1016,7 +1019,7 @@ def build_continuity_update_messages(
                 '  "open_threads": ["string"],\n'
                 '  "resolved_threads": ["string"],\n'
                 '  "timeline_entry": "string",\n'
-                '  "timeline": ["string"],\n'
+                '  "timeline": [],\n'
                 '  "new_entities_introduced": [\n'
                 "    {\n"
                 '      "name": "string",\n'
@@ -1057,7 +1060,11 @@ def build_continuity_update_messages(
                 "Rules:\n"
                 "- keep unresolved threads alive unless the chapter truly resolves them\n"
                 "- update character states only where the chapter created a real change\n"
-                "- append a concise timeline entry for this chapter\n"
+                "- timeline_entry describes this chapter only in one concise sentence; timeline must be [] because the application appends the entry to preserved history\n"
+                "- resolved_threads, side_character_decisions, ideology_shift_notes, entity_state_changes, and system_state_transitions contain only NEW resolutions or changes from this chapter; do not repeat or paraphrase historical entries\n"
+                "- open_threads, open_promises_by_name, memory_damage, trust_fractures, civilian_pressure_points, and emotional_open_loops are complete current live snapshots; explicit empty lists or objects retire resolved state\n"
+                "- derive changes from actual chapter prose; the summary and prior ledger are context, not permission to invent events\n"
+                "- keep descriptions concise; omit historical exposition and repeated moral commentary, while retaining every still-live fact\n"
                 "- only list intentionally new canonical entities in new_entities_introduced\n"
                 "- explicitly track which named entities changed state and which open promises are still live\n"
                 "- if a character's belief is contradicted, mark whether that contradiction is intentional in ideology_shift_notes\n"
@@ -1505,27 +1512,54 @@ def extract_json_payload(text: str) -> Any:
         cleaned = re.sub(r"\s*```$", "", cleaned)
         cleaned = cleaned.strip()
 
-    candidates = [cleaned]
-    for opening, closing in (("{", "}"), ("[", "]")):
-        start = cleaned.find(opening)
-        end = cleaned.rfind(closing)
-        if start != -1 and end != -1 and end > start:
-            candidates.append(cleaned[start : end + 1])
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
 
+    # Inspect top-level spans only. A truncated object must not turn into its
+    # first complete child array/dict (or a string containing a JSON example).
+    index = 0
     decoder = json.JSONDecoder()
-    for candidate in candidates:
+    while index < len(cleaned):
+        if cleaned[index] not in "[{":
+            index += 1
+            continue
+        start = index
+        stack = []
+        quoted = escaped = False
+        while index < len(cleaned):
+            char = cleaned[index]
+            if quoted:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    quoted = False
+            elif char == '"':
+                quoted = True
+            elif char in "[{":
+                stack.append(char)
+            elif char in "]}":
+                if not stack or (stack[-1], char) not in {("[", "]"), ("{", "}")}:
+                    raise ValueError("Structured model output contained an invalid top-level JSON container.")
+                stack.pop()
+                if not stack:
+                    break
+            index += 1
+        if stack:
+            raise ValueError("Structured model output contained an incomplete top-level JSON container.")
+        candidate = cleaned[start:index + 1]
         try:
-            return json.loads(candidate)
+            payload, _ = decoder.raw_decode(candidate)
+            return payload
         except json.JSONDecodeError:
-            pass
-        for index, char in enumerate(candidate):
-            if char not in "[{":
-                continue
-            try:
-                payload, _ = decoder.raw_decode(candidate[index:])
-                return payload
-            except json.JSONDecodeError:
-                continue
+            # Prose may contain balanced bracketed labels before its JSON.
+            # Never search inside the rejected span for a usable child value.
+            if start == 0:
+                raise ValueError("Structured model output contained invalid top-level JSON.")
+        index += 1
     raise ValueError("Structured model output was not valid JSON.")
 
 

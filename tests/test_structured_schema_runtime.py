@@ -28,6 +28,7 @@ def test_continuity_schema_requires_explicit_live_snapshots() -> None:
     schema = response_schema_for_stage("continuity_update")
     assert {"open_threads", "open_promises_by_name", "trust_fractures", "memory_damage",
             "civilian_pressure_points", "emotional_open_loops"} <= set(schema["required"])
+    assert schema["properties"]["timeline"]["const"] == []
 
 
 def test_coordinated_edit_schema_constrains_ollama_response_shape():

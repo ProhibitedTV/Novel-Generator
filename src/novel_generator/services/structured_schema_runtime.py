@@ -57,6 +57,7 @@ def response_schema_for_stage(stage: str) -> dict[str, Any] | None:
     if stage == "continuity_update":
         # Ask constrained decoders for an explicit live-state snapshot, including empty fields.
         schema["required"] = list(dict.fromkeys([*schema.get("required", []), *LIVE_SNAPSHOT_FIELDS]))
+        schema["properties"]["timeline"]["const"] = []
     return schema if isinstance(schema, dict) and schema else None
 
 

@@ -197,6 +197,25 @@ Schema shaping is installed before telemetry. Reconciliation follows lifecycle h
 
 ## Failure philosophy
 
+Structured JSON parsing inspects complete top-level containers. An unfinished
+object cannot be accepted as one of its complete nested arrays or dictionaries.
+Fenced JSON and ordinary prose wrappers around a complete payload remain
+supported. Invalid continuity responses are retained under the run's
+`structured-output-rejections` directory with validation diagnostics.
+
+Continuity updates receive up to 6,144 output tokens within the configured model
+limit and available context. They have three bounded validation retries that
+regenerate from the original actual prose and prior ledger. Retries do not
+continue a partial array or invent missing history. Persistent invalid output
+remains blocking; increasing a response allowance never grants book acceptance.
+
+The October 12 chapter-21 failure recorded two Qwen 3.5 9B responses ending at
+the former 3,072-token ceiling. The repaired source-grounded update completed
+with `done_reason: stop` after 1,804 tokens on the same model, preserved the
+historical timeline, and left all manuscript prose unchanged. This verifies the
+failed call's recovery, not final acceptance of the whole novel. Workstation
+evidence is retained under `artifacts/continuity-recovery-20261012/`.
+
 The reliability layers follow three principles:
 
 - **Do not silently accept incomplete output.** Explicit length stops are recovered or surfaced.

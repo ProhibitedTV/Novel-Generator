@@ -7,7 +7,7 @@ import math
 import re
 from typing import Any
 
-from ..models import Artifact
+from ..models import Artifact, ChapterStatus
 from ..repositories import record_event
 from .autonomous_contracts import EditorialIssue, EditorialReview
 from .context_memory import compile_memory_packet
@@ -761,21 +761,21 @@ def _refresh_metadata(session, run, chapters, client):
         run.current_chapter = chapter.chapter_number
         session.commit()
         ledger_before[chapter.chapter_number] = ledger
-        fingerprint = _hash({"prose": chapter.content, "prior_state": ledger.model_dump()})
+        fingerprint = _hash({"contract": 2, "prose": chapter.content, "prior_state": ledger.model_dump()})
         metadata_hash = _hash([chapter.summary, chapter.continuity_update])
         cached = any(item.get("fingerprint") == fingerprint and item.get("chapter_number") == chapter.chapter_number
                      and item.get("metadata_hash") == metadata_hash
                      for item in _events(run, "autonomous_metadata_refreshed"))
         if not cached or not chapter.summary or not chapter.continuity_update:
             provider, model = pipeline._resolve_stage_route(client, run, "chapter_summary")
-            chapter.summary = pipeline._supervised_provider_chat(
+            refreshed_summary = pipeline._supervised_provider_chat(
                 session, run, client, provider, model,
                 pipeline.build_summary_messages(chapter, pipeline._outline_entry(run, chapter.chapter_number),
                     project=run.project, story_bible=run.story_bible),
                 stage="chapter_summary", chapter_number=chapter.chapter_number,
                 metadata={"phase": "autonomous_reconciliation"},
             ).strip()
-            if not chapter.summary:
+            if not refreshed_summary:
                 raise AutonomousQualityError("Automatic reconciliation returned an empty summary.")
             provider, model = pipeline._resolve_stage_route(client, run, "continuity_update")
 
@@ -787,10 +787,16 @@ def _refresh_metadata(session, run, chapters, client):
 
             update = pipeline._generate_structured_output(
                 session, run, client, provider, model,
-                lambda: pipeline.build_continuity_update_messages(run.project, chapter, ledger, pipeline._story_bible_from_run(run)),
+                lambda: pipeline.build_continuity_update_messages(run.project, chapter, ledger, pipeline._story_bible_from_run(run),
+                    summary_override=refreshed_summary),
                 parse_snapshot, "automatic continuity reconciliation", "continuity_update", chapter.chapter_number,
             )
+            chapter.summary = refreshed_summary
             chapter.continuity_update = update.model_dump(exclude_unset=True)
+            # Draft completion is separate from the still-pending final quality
+            # checks. A failed metadata refresh must not discard that draft.
+            chapter.status = ChapterStatus.COMPLETED
+            chapter.error_message = None
             _record(session, run, "autonomous_metadata_refreshed", {
                 "message": f"Refreshed chapter {chapter.chapter_number} summary and continuity from current prose.",
                 "chapter_number": chapter.chapter_number, "fingerprint": fingerprint,
