@@ -236,6 +236,16 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
             run.pause_after_outline = False
             if payload.resume_from_chapter > requested_chapters:
                 raise ValueError("Resume chapter exceeds the new run's chapter count.")
+            if not payload.rebuild_outline and requested_chapters != source_run.requested_chapters:
+                raise ValueError("Changing a continuation's chapter count requires rebuilding its outline.")
+            if payload.rebuild_outline:
+                if not source_run.story_bible:
+                    raise ValueError("Rebuilding an outline requires a saved story bible.")
+                completed_prefix = {chapter.chapter_number for chapter in source_run.chapters
+                    if chapter.status == ChapterStatus.COMPLETED and chapter.content
+                    and chapter.summary and chapter.continuity_update}
+                if not set(range(1, payload.resume_from_chapter)) <= completed_prefix:
+                    raise ValueError("Every preserved chapter requires completed prose, a summary, and a continuity checkpoint.")
             run.outline = None if payload.rebuild_outline else deepcopy(source_run.outline)
             run.story_bible = deepcopy(source_run.story_bible)
             for source_chapter in source_run.chapters:

@@ -209,3 +209,15 @@ def test_reused_bad_outline_is_blocked_before_drafting(configured_environment, m
         run = make_run(session, chapters=2)
         with pytest.raises(AutonomousQualityError, match="Stored outline has confirmed progression defects"):
             pipeline.process_run(session, run, get_settings(), object())
+
+
+def test_invalid_continuations_are_rejected_before_queueing(configured_environment):
+    with get_session_factory()() as session:
+        source = make_run(session, chapters=4)
+        with pytest.raises(ValueError, match="Every preserved chapter"):
+            create_run(session, source.project, RunCreate(project_id=source.project_id,
+                source_run_id=source.id, resume_from_chapter=3, rebuild_outline=True))
+        session.rollback()
+        with pytest.raises(ValueError, match="chapter count requires rebuilding"):
+            create_run(session, source.project, RunCreate(project_id=source.project_id,
+                source_run_id=source.id, resume_from_chapter=2, requested_chapters=3))
