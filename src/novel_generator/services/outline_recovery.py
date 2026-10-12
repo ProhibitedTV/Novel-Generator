@@ -10,15 +10,16 @@ from .prompts import build_outline_chunk_messages, parse_outline_chunk
 AUTONOMOUS_OUTLINE_BATCH_SIZE = 4
 
 
-def generate_outline(session, run, bible, client, provider, model):
+def generate_outline(session, run, bible, client, provider, model, *, prefix=(), spine=None, repairs=None):
     from . import pipeline
 
-    outline = []
+    outline = list(prefix)
     identity = {
-        "contract": 1, "bible": bible.model_dump(), "brief": run.project.story_brief,
+        "contract": 2, "bible": bible.model_dump(), "brief": run.project.story_brief,
         "premise": run.project.premise, "chapters": run.requested_chapters,
         "target_words": run.target_word_count, "minimum": run.min_words_per_chapter,
         "maximum": run.max_words_per_chapter, "provider": provider, "model": model,
+        "spine": spine, "repairs": repairs,
     }
 
     def generate_range(start, end):
@@ -40,7 +41,8 @@ def generate_outline(session, run, bible, client, provider, model):
                 chunk = pipeline._generate_structured_output(
                     session, run, client, provider, model,
                     lambda: build_outline_chunk_messages(run.project, run, bible,
-                        start_chapter=start, end_chapter=end, prior_outline=list(outline)),
+                        start_chapter=start, end_chapter=end, prior_outline=list(outline),
+                        book_spine=spine, progression_repairs=repairs),
                     lambda raw: parse_outline_chunk(raw, start, end, book_spec=bible.book_spec),
                     f"structured outline chapters {start}-{end}", "outline_chunk", None,
                 )
@@ -68,6 +70,6 @@ def generate_outline(session, run, bible, client, provider, model):
         generate_range(start, midpoint)
         generate_range(midpoint + 1, end)
 
-    for start in range(1, run.requested_chapters + 1, AUTONOMOUS_OUTLINE_BATCH_SIZE):
+    for start in range(len(prefix) + 1, run.requested_chapters + 1, AUTONOMOUS_OUTLINE_BATCH_SIZE):
         generate_range(start, min(run.requested_chapters, start + AUTONOMOUS_OUTLINE_BATCH_SIZE - 1))
     return outline

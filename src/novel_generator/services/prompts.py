@@ -435,6 +435,8 @@ def build_outline_chunk_messages(
     start_chapter: int,
     end_chapter: int,
     prior_outline: list[dict[str, Any]],
+    book_spine: list[dict[str, Any]] | None = None,
+    progression_repairs: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     bible = story_bible if isinstance(story_bible, dict) else story_bible.model_dump()
     profile = _story_bible_genre_profile(bible)
@@ -465,6 +467,11 @@ def build_outline_chunk_messages(
                 f"Story bible:\n{json.dumps(bible, indent=2)}\n\n"
                 f"Selected genre profile:\n{_genre_profile_block(profile)}\n\n"
                 f"Prior outline chapters already accepted:\n{json.dumps(prior_outline[-12:], indent=2)}\n\n"
+                f"Complete book progression spine (follow these assigned outcomes):\n{json.dumps(book_spine, ensure_ascii=False)}\n"
+                f"Confirmed progression corrections:\n{json.dumps(progression_repairs, ensure_ascii=False)}\n"
+                f"The book ends at chapter {run.requested_chapters}, not at this request's chapter {end_chapter}. "
+                "This batch is part of the same book. Do not restart completed discoveries, irreversible sacrifices, "
+                "ratifications, or first events. Preserve the global spine and distinguish new consequences from repetitions.\n\n"
                 "Return a JSON object in this shape:\n"
                 "{\n"
                 '  "chapters": [\n'

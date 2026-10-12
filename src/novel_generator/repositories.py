@@ -234,9 +234,23 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
             if not source_run.outline:
                 raise ValueError("Source run does not have a reusable outline.")
             run.pause_after_outline = False
-            run.outline = deepcopy(source_run.outline)
+            if payload.resume_from_chapter > requested_chapters:
+                raise ValueError("Resume chapter exceeds the new run's chapter count.")
+            if not payload.rebuild_outline and requested_chapters != source_run.requested_chapters:
+                raise ValueError("Changing a continuation's chapter count requires rebuilding its outline.")
+            if payload.rebuild_outline:
+                if not source_run.story_bible:
+                    raise ValueError("Rebuilding an outline requires a saved story bible.")
+                completed_prefix = {chapter.chapter_number for chapter in source_run.chapters
+                    if chapter.status == ChapterStatus.COMPLETED and chapter.content
+                    and chapter.summary and chapter.continuity_update}
+                if not set(range(1, payload.resume_from_chapter)) <= completed_prefix:
+                    raise ValueError("Every preserved chapter requires completed prose, a summary, and a continuity checkpoint.")
+            run.outline = None if payload.rebuild_outline else deepcopy(source_run.outline)
             run.story_bible = deepcopy(source_run.story_bible)
             for source_chapter in source_run.chapters:
+                if source_chapter.chapter_number > requested_chapters:
+                    continue
                 cloned = ChapterDraft(
                     run=run,
                     chapter_number=source_chapter.chapter_number,
@@ -278,7 +292,14 @@ def create_run(session: Session, project: Project, payload: RunCreate) -> Genera
                     "genre_state": deepcopy(latest.get("genre_state", {})),
                 }
             session.flush()
+            if payload.rebuild_outline:
+                record_event(session, run, "outline_rebuild_requested", {
+                    "message": "Preserve completed prefix chapters and regenerate the remaining outline before drafting.",
+                    "source_run_id": source_run.id, "resume_from_chapter": payload.resume_from_chapter,
+                })
         else:
+            if payload.rebuild_outline:
+                raise ValueError("Rebuilding an outline requires a source run with chapter checkpoints (pipeline version 2 or later).")
             run.source_run_id = None
             run.resume_from_chapter = None
 

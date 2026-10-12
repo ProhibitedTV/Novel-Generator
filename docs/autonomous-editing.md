@@ -5,13 +5,34 @@ Choose **Autonomous** on the project run form (the UI default), or send
 that omit the profile retain balanced behavior. Autonomous runs disable outline
 approval and enable developmental rewriting automatically.
 
-The workflow generates a story bible and plans the outline in batches of at most
-four chapters. If a batch remains
+The workflow generates a story bible and, for books longer than four chapters,
+first saves a compact plan for the entire book. Detailed batches of at most four
+chapters follow this plan and the actual final chapter number, so a batch boundary
+does not become another book ending. If a batch remains
 invalid after its JSON repair, the planner divides it into smaller requests down
 to a single chapter. Every accepted batch is saved immediately. Resume reuses
 validated batches when the brief, canon, model, and preceding outline still match;
 it does not regenerate the entire plot after a later interruption. An invalid
 single chapter stops with its validation error, rather than substituting a plot.
+
+Before drafting, a separate local editorial route reviews the entire ordered
+outline, including reused plans. It checks for repeated irreversible decisions,
+first events, discoveries, and resolutions. An independent verification pass
+checks any allegations before requesting a replacement plan. Proposed agreements,
+ratification, and enactment can be separate advances; collections and handbooks
+can revisit structures without sharing fictional canon. Every replacement plan
+must pass the same review. Spine, batch, and review checkpoints include the author
+contract, source plan, and model controls in their cache identities.
+
+To repair a saved plot, use the run's regeneration form and select **Rebuild the
+outline from this chapter, preserving earlier completed chapters**. API callers
+can set `source_run_id`, `resume_from_chapter`, and `rebuild_outline: true` on
+`POST /api/runs`. This creates a new continuation with the same story bible,
+preserved completed predecessor chapters, and a newly planned suffix. Completed
+predecessors must have prose, summaries, and continuity checkpoints. Their outline
+records are locked even during pacing repairs. The original run and repair history
+remain available. A defect entirely within the preserved prefix requires an earlier
+restart boundary; it cannot be corrected by silently changing its plan.
 
 It then drafts each chapter
 and reviews its actual prose against the author brief, canon, prior story state,
@@ -60,13 +81,14 @@ different local model can review and revise the draft. Leave all stage providers
 on Ollama to keep manuscript processing local. Configure sufficient context for
 the full chapter plus canon and adjacent prose.
 
-Three environment settings bound the extra work:
+Environment settings bound the extra work:
 
 - `AUTONOMOUS_CHAPTER_REPAIR_ATTEMPTS=12`: repair attempts per chapter during drafting.
 - `AUTONOMOUS_PROSE_REPAIR_ATTEMPTS=12`: separate prose/repetition repair attempts per chapter in each draft/final phase.
 - `AUTONOMOUS_MANUSCRIPT_REPAIR_ROUNDS=24`: final repair sweeps and the maximum final repair attempts per chapter.
+- `AUTONOMOUS_OUTLINE_REPAIR_ATTEMPTS=4`: whole-book planning rounds, accepting values from 1 through 24.
 
-All accept values from 1 through 100. These are work budgets, not time limits;
+The chapter and manuscript limits accept values from 1 through 100. These are work budgets, not time limits;
 a run may take multiple days. Attempts are persisted before generation;
 restarting or resuming does not erase the used budget. A final-stage checkpoint
 resumes acceptance checks without repeating earlier drafting and editing. An unchanged or empty

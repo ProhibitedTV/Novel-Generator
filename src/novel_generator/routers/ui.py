@@ -3869,6 +3869,7 @@ def cancel_run_ui(run_id: str, db: Session = Depends(get_db)):
 def regenerate_chapter_ui(
     run_id: str,
     chapter_number: int,
+    rebuild_outline: bool = Form(False),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
@@ -3887,6 +3888,7 @@ def regenerate_chapter_ui(
     except (ProviderError, ProviderTransportError) as exc:
         return _redirect(f"/runs/{run_id}", message=str(exc), message_tone="error")
     payload = _same_settings_payload(run, source_run_id=run.id, resume_from_chapter=chapter_number)
+    payload.rebuild_outline = rebuild_outline
     try:
         new_run = create_run(db, run.project, payload)
     except ValueError as exc:

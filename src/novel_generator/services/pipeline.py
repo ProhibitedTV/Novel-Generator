@@ -259,7 +259,7 @@ def _generate_structured_output(
         chapter_number=chapter_number,
         metadata={"label": label, "phase": "initial"},
     )
-    correction_limit = 3 if stage == "autonomous_review" else 1
+    correction_limit = 3 if stage in {"autonomous_review", "outline_progression_review"} else 1
     for correction in range(correction_limit + 1):
         try:
             return parser(raw_output)
@@ -267,7 +267,7 @@ def _generate_structured_output(
             if correction == correction_limit:
                 raise
             repair_messages = build_json_repair_messages(raw_output, label, str(exc))
-            if stage in {"outline", "outline_chunk"}:
+            if stage in {"outline", "outline_chunk", "outline_spine"}:
                 repair_messages = [*build_messages(),
                     {"role": "assistant", "content": raw_output},
                     {"role": "user", "content": (
@@ -302,6 +302,17 @@ def _generate_structured_output(
                         # Retain the complete source on a bounded validation
                         # retry without another potentially long reasoning pass.
                         repair_messages.append(make_ollama_controls_marker(think=False))
+            if stage == "outline_progression_review":
+                feedback = (json.dumps(exc.errors(include_input=False, include_url=False, include_context=False), default=str)
+                            if isinstance(exc, ValidationError) else str(exc))
+                repair_messages = [*build_messages(), {"role": "user", "content":
+                    f"The earlier progression review was invalid: {feedback}. Rejudge the complete source outline. "
+                    "Return every reviewed chapter and valid source chapter_numbers for each genuine defect. "
+                    "If no required defect exists, progression_coherent is true and issues is empty. "
+                    "Do not invent a defect to preserve an earlier failed verdict."}]
+                if provider_name == "ollama":
+                    from .provider_controls import make_ollama_controls_marker
+                    repair_messages.append(make_ollama_controls_marker(think=False))
             raw_output = _supervised_provider_chat(
                 session,
                 run,
@@ -1001,6 +1012,7 @@ def _repair_outline_for_full_book_validation(
     requested_chapters: int,
     *,
     rebalance_modes: bool = False,
+    locked_chapters: int = 0,
 ) -> list[dict[str, Any]]:
     entries = [StructuredOutlineEntry.model_validate(item) for item in outline]
     if len(entries) != requested_chapters:
@@ -1014,13 +1026,18 @@ def _repair_outline_for_full_book_validation(
         item["chapter_number"]: item
         for item in _fallback_outline_entries(project, story_bible, 1, requested_chapters, requested_chapters)
     }
-    repaired = [entry.model_dump() for entry in entries]
+    repaired = [dict(outline[index]) if index < locked_chapters else entry.model_dump()
+                for index, entry in enumerate(entries)]
 
     if rebalance_modes:
         for item in repaired:
+            if item["chapter_number"] <= locked_chapters:
+                continue
             item["chapter_mode"] = _fallback_chapter_mode(item["chapter_number"])
 
     for item in repaired:
+        if item["chapter_number"] <= locked_chapters:
+            continue
         fallback = fallback_entries[item["chapter_number"]]
         _set_outline_breather_fields(item, fallback, story_bible)
 
@@ -1029,7 +1046,8 @@ def _repair_outline_for_full_book_validation(
         midpoint_start = max(2, (requested_chapters * 2 + 4) // 5)
         midpoint_end = max(midpoint_start, (requested_chapters * 7) // 10)
         midpoint_chapter = max(midpoint_start, min(midpoint_end, (midpoint_start + midpoint_end) // 2))
-        repaired[midpoint_chapter - 1]["outcome_type"] = "reversal"
+        if midpoint_chapter > locked_chapters:
+            repaired[midpoint_chapter - 1]["outcome_type"] = "reversal"
 
     minimum_setbacks = max(1, (requested_chapters * 3 + 9) // 10)
     candidate_numbers: list[int] = []
@@ -1042,6 +1060,8 @@ def _repair_outline_for_full_book_validation(
 
     seen_candidates: set[int] = set()
     for chapter_number in candidate_numbers:
+        if chapter_number <= locked_chapters:
+            continue
         if chapter_number in seen_candidates:
             continue
         seen_candidates.add(chapter_number)
@@ -1066,7 +1086,7 @@ def _repair_outline_for_full_book_validation(
             clean_win_streak += 1
         else:
             clean_win_streak = 0
-        if clean_win_streak > 2:
+        if clean_win_streak > 2 and item["chapter_number"] > locked_chapters:
             item["outcome_type"] = "setback"
             clean_win_streak = 0
 
@@ -1195,9 +1215,17 @@ def _validated_outline_or_fallback(
     run: GenerationRun,
     story_bible: StoryBible,
     outline: list[dict[str, Any]],
+    *,
+    locked_chapters: int = 0,
 ) -> list[dict[str, Any]]:
+    def validate(candidate):
+        parsed = parse_outline(_outline_payload(candidate), run.requested_chapters, book_spec=story_bible.book_spec)
+        # Older checkpoints may omit optional fields added by later schemas.
+        # Validate them normally, but keep their stored records byte-for-byte.
+        return [*outline[:locked_chapters], *parsed[locked_chapters:]]
+
     try:
-        return parse_outline(_outline_payload(outline), run.requested_chapters, book_spec=story_bible.book_spec)
+        return validate(outline)
     except Exception as exc:
         try:
             repaired = _repair_outline_for_full_book_validation(
@@ -1205,8 +1233,9 @@ def _validated_outline_or_fallback(
                 story_bible,
                 outline,
                 run.requested_chapters,
+                locked_chapters=locked_chapters,
             )
-            parsed = parse_outline(_outline_payload(repaired), run.requested_chapters, book_spec=story_bible.book_spec)
+            parsed = validate(repaired)
             record_event(
                 session,
                 run,
@@ -1225,8 +1254,9 @@ def _validated_outline_or_fallback(
                     outline,
                     run.requested_chapters,
                     rebalance_modes=True,
+                    locked_chapters=locked_chapters,
                 )
-                parsed = parse_outline(_outline_payload(repaired), run.requested_chapters, book_spec=story_bible.book_spec)
+                parsed = validate(repaired)
                 record_event(
                     session,
                     run,
@@ -1409,7 +1439,7 @@ def _generate_outline_chunks(
     return outline
 
 
-def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBible, client: ProviderManager | OllamaClient) -> None:
+def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBible, client: ProviderManager | OllamaClient, settings=None) -> None:
     project = run.project
     provider_name, model_name = _resolve_stage_route(client, run, "outline")
     run.current_step = "outline"
@@ -1422,8 +1452,11 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
     session.commit()
     try:
         if autonomous_editorial.enabled(run):
-            from .outline_recovery import generate_outline
-            outline = generate_outline(session, run, story_bible, client, provider_name, model_name)
+            from .outline_progression import plan_outline
+            if settings is None:
+                from ..settings import get_settings
+                settings = get_settings()
+            outline = plan_outline(session, run, story_bible, client, provider_name, model_name, settings)
         elif run.requested_chapters >= OUTLINE_CHUNK_THRESHOLD:
             outline = _generate_outline_chunks(session, run, story_bible, client, provider_name, model_name)
         else:
@@ -1440,7 +1473,7 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
                 "structured outline",
                 "outline",
             )
-        run.outline = _validated_outline_or_fallback(session, project, run, story_bible, outline)
+        run.outline = outline if autonomous_editorial.enabled(run) else _validated_outline_or_fallback(session, project, run, story_bible, outline)
     except Exception as exc:
         fallback = _fallback_outline_entries(project, story_bible, 1, run.requested_chapters, run.requested_chapters)
         if autonomous_editorial.enabled(run):
@@ -2968,11 +3001,17 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
     story_bible = _story_bible_from_run(run) if run.story_bible else _generate_story_bible(session, run, settings, client)
 
     if not run.outline:
-        _generate_outline(session, run, story_bible, client)
+        _generate_outline(session, run, story_bible, client, settings)
         if run.pause_after_outline:
             _pause_for_outline_review(session, run)
             return
     else:
+        if autonomous_editorial.enabled(run):
+            from .outline_progression import review_outline, locked_prefix
+            review = review_outline(session, run, run.outline, client, locked_prefix(session, run))
+            if not review.passed:
+                raise autonomous_editorial.AutonomousQualityError(
+                    "Stored outline has confirmed progression defects. Preserve the draft and continue with a rebuilt outline from the earliest affected chapter.")
         create_chapters_from_outline(session, run)
         session.commit()
 

@@ -19,6 +19,7 @@ from ..schemas import (
 )
 from .continuity_lifecycle import LIVE_SNAPSHOT_FIELDS
 from .autonomous_contracts import EditorialReview, CoordinatedEdits
+from .outline_contracts import OutlineSpineEntry, OutlineProgressionReview
 
 
 _INSTALLED = False
@@ -33,6 +34,8 @@ def _adapter_for_stage(stage: str) -> TypeAdapter[Any] | None:
         "story_bible": StoryBible,
         "outline": list[StructuredOutlineEntry],
         "outline_chunk": list[StructuredOutlineEntry],
+        "outline_spine": list[OutlineSpineEntry],
+        "outline_progression_review": OutlineProgressionReview,
         "chapter_plan": ChapterPlan,
         "chapter_critique": ChapterCritique,
         "continuity_update": ChapterContinuityUpdate,
