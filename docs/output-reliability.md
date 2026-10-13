@@ -226,15 +226,36 @@ Pair reviews receive the accepted chapter progression as a repair guide, not as
 evidence of completed events. A premature claim in an earlier chapter must not
 move a later assigned event or reorder the chapters. Unsupported requests to
 change chapter order are rejected before editing. Empty, unchanged, or cycling
-whole-chapter proposals receive up to three fresh source-based attempts within
-one repair attempt. Rejected proposals never change saved prose or grant
-acceptance; persistent inability to produce a correction remains blocking.
+whole-chapter proposals receive two fresh source-based attempts, followed by a
+different repair representation: explicit inclusive paragraph ranges and their
+replacement text. A structural diagnosis that survives an earlier chapter
+rewrite goes directly to this fallback, including after resume. This uses the
+existing persisted attempt budget without resetting or increasing it.
+
+The application validates every range against the original selected chapter,
+rejects overlapping ranges, and applies the entire edit set atomically. Empty
+replacement text can remove an erroneous scene; deleting the entire chapter or
+returning an unchanged chapter is rejected. Unselected prose retains its exact
+bytes. Up to three invalid range proposals can be regenerated from the same
+source, without replaying a failed assistant answer. Ollama range edits inherit
+the configured adjudication reasoning and temperature controls; an explicitly
+selected repair model remains selected. Book-form and source-material contracts
+remain in the repair context.
+
+Preserving correct past events does not require preserving a diagnosed
+contradiction or premature payoff. Every saved edit invalidates derived metadata
+and receives fresh chapter, neighboring-pair, length, and manuscript audits.
+Changing wording alone cannot grant acceptance. Persistent inability to produce
+a usable edit remains blocking and preserves the latest saved prose.
 
 Structured JSON parsing inspects complete top-level containers. An unfinished
 object cannot be accepted as one of its complete nested arrays or dictionaries.
 Fenced JSON and ordinary prose wrappers around a complete payload remain
 supported. Invalid continuity responses are retained under the run's
 `structured-output-rejections` directory with validation diagnostics.
+Structured editorial edit sets never receive prose continuation prompts after a
+token-limit stop. Their original-source validation retry handles incomplete JSON;
+appending a new story ending to an edit object cannot repair that object.
 
 Continuity updates receive up to 6,144 output tokens within the configured model
 limit and available context. They have three bounded validation retries that

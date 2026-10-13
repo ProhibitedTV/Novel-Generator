@@ -143,6 +143,20 @@ def test_non_prose_structured_stage_does_not_auto_continue() -> None:
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize('explicit_schema', [False, True])
+def test_structured_edit_set_never_receives_a_prose_continuation(explicit_schema):
+    from novel_generator.services.structured_schema_runtime import make_schema_marker
+    messages = ([make_schema_marker('autonomous_revision')] if explicit_schema else [])
+    messages.append({'role': 'system', 'content': 'Return valid JSON only.' if not explicit_schema else 'Return the edit set.'})
+    partial = '{"edits":[{"start_paragraph":1,'
+    supervised, calls = _supervised_fixture([(partial, 'length')])
+    wrapped = _wrap_supervised_provider_chat(supervised, max_continuations=2, context_chars=12000)
+    result = wrapped(object(), object(), SimpleNamespace(last_chat_metrics={}), 'ollama', 'model',
+                     messages, stage='autonomous_revision')
+    assert result == partial
+    assert len(calls) == 1
+
+
 def test_prose_still_truncated_after_budget_raises_instead_of_silently_accepting() -> None:
     supervised, calls = _supervised_fixture(
         [
