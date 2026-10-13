@@ -290,7 +290,9 @@ def _generate_structured_output(
                 repair_messages = [*build_messages(),
                     {"role": "user", "content": (
                         f"An earlier review failed validation: {feedback}. Independently re-evaluate the actual prose above. "
-                        "Return the complete valid review with valid evidence_paragraphs when the source is numbered, "
+                        "Return the complete valid review using the source citation format required by its scope: "
+                        "for chapter-pair reviews cite conflicting passages using source_references objects with separate chapter_number "
+                        "and paragraph_number, leaving evidence_paragraphs empty; for single-chapter reviews use valid evidence_paragraphs "
                         "or exact quotations for unnumbered excerpts. Keep genuine evidenced defects blocking. "
                         "Each false check requires a relevant required defect; optional advice never fails a check. "
                         "If no required defect exists, return all checks true and issues empty. Do not invent or promote "

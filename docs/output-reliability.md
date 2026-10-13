@@ -197,6 +197,39 @@ Schema shaping is installed before telemetry. Reconciliation follows lifecycle h
 
 ## Failure philosophy
 
+Chapter-pair audits use explicit `source_references` objects containing separate
+chapter and paragraph numbers. Each chapter's actual paragraph range constrains
+the reviewer and its independent verifier. The application validates every
+reference and attaches the exact source text; ambiguous flattened arrays and
+references outside the supplied prose cannot certify a review.
+
+Validated references are deduplicated and ordered by source location. Local edit
+anchors are derived only from the chapter selected for repair. Supporting
+passages from the other chapter remain read-only source context, including
+passages outside the normal neighboring excerpts. Existing saved reviews remain
+readable. Pair verdicts are rechecked under the new contract; unchanged
+single-chapter verdicts retain their checkpoints. Conflicts wholly within one
+supplied chapter remain actionable and receive independent verification.
+Automatic retries preserve this citation format and the complete source. A
+genuine contradiction still needs independent verification, an automatic prose
+repair, and a fresh audit of the resulting chapters.
+
+Repair diagnoses retain hashes of their reviewed source chapters. If an earlier
+edit changes that source during the same manuscript sweep, the later repair is
+deferred for a fresh audit without spending its repair budget. The outstanding
+issues still prevent acceptance; stale diagnoses cannot undo a newer correction.
+Whole-book review caches also bind to the complete manuscript's hash, including
+text outside their compacted excerpts. A middle-passage change cannot reuse the
+previous complete-book verdict.
+
+Pair reviews receive the accepted chapter progression as a repair guide, not as
+evidence of completed events. A premature claim in an earlier chapter must not
+move a later assigned event or reorder the chapters. Unsupported requests to
+change chapter order are rejected before editing. Empty, unchanged, or cycling
+whole-chapter proposals receive up to three fresh source-based attempts within
+one repair attempt. Rejected proposals never change saved prose or grant
+acceptance; persistent inability to produce a correction remains blocking.
+
 Structured JSON parsing inspects complete top-level containers. An unfinished
 object cannot be accepted as one of its complete nested arrays or dictionaries.
 Fenced JSON and ordinary prose wrappers around a complete payload remain
