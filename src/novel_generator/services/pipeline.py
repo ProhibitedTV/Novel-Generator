@@ -291,7 +291,7 @@ def _generate_structured_output(
                     {"role": "user", "content": (
                         f"An earlier review failed validation: {feedback}. Independently re-evaluate the actual prose above. "
                         "Return the complete valid review using the source citation format required by its scope: "
-                        "for chapter-pair reviews cite both chapters using source_references objects with separate chapter_number "
+                        "for chapter-pair reviews cite conflicting passages using source_references objects with separate chapter_number "
                         "and paragraph_number, leaving evidence_paragraphs empty; for single-chapter reviews use valid evidence_paragraphs "
                         "or exact quotations for unnumbered excerpts. Keep genuine evidenced defects blocking. "
                         "Each false check requires a relevant required defect; optional advice never fails a check. "

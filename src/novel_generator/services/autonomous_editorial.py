@@ -131,7 +131,7 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None, parag
         definition["properties"]["evidence_paragraphs"]["const"] = []
         references = definition["properties"]["source_references"]
         references.pop("const")
-        references["minItems"] = 2
+        references["minItems"] = 1
         # The decoder gets the actual paragraph range for EACH chapter. A flat
         # integer array cannot distinguish chapter 16 from paragraph 16.
         if paragraph_counts is not None:
@@ -156,10 +156,14 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None, parag
 
 PAIR_EVIDENCE_RULES = (
     "For every issue choose chapter_number as the ONE chapter to repair. Set evidence='Source paragraphs' and "
-    "evidence_paragraphs=[]. Cite BOTH conflicting claims using source_references objects, each with separate "
+    "evidence_paragraphs=[]. Cite the conflicting claims using source_references objects, each with separate "
     "chapter_number and paragraph_number taken from a [Chapter N, paragraph P] source label. "
     "Never flatten chapter and paragraph numbers into one list. Citation order does not choose repair order. "
+    "Conflicts can be between chapters or within one supplied chapter; do not invent a citation in the other chapter. "
     "References to the other chapter are supporting context; repair_instruction must change only the selected chapter. "
+    "Use assigned_chapter_progression only to choose a repair that preserves the intended event order, never as evidence "
+    "that a planned event actually happened. If an earlier chapter prematurely claims completion of an event assigned to "
+    "the later chapter, correct that earlier claim and preserve the later on-page action. Never reorder or renumber chapters. "
     "Explain both conflicting statements and their source chapters in problem."
 )
 
@@ -199,6 +203,7 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
     def validate_evidence(issue):
+        issue._reviewed_source_hashes = {chapter.chapter_number: _hash(chapter.content or "") for chapter in chapters}
         if issue.source_references:
             references = {(ref.chapter_number, ref.paragraph_number) for ref in issue.source_references}
             for number, index in references:
@@ -249,6 +254,11 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
 
 def validate_chapter_repair_scope(review):
     for issue in review.issues:
+        order_commands = re.finditer(r"\b(?:reorder|renumber|swap)\s+(?:(?:the|these|both|two|adjacent)\s+){0,2}chapters?\b",
+                                     issue.repair_instruction, re.IGNORECASE)
+        if any(not re.search(r"\b(?:not|never|without)\s*$", issue.repair_instruction[:command.start()], re.IGNORECASE)
+               for command in order_commands):
+            raise ValueError("A chapter repair cannot change chapter order. Choose a concrete correction within the selected chapter that preserves assigned_chapter_progression.")
         if re.search(r"\b(?:next|following) chapter (?:must|should|needs? to)\b", issue.repair_instruction, re.IGNORECASE):
             raise ValueError("Chapter review requested work in a future chapter. Judge this chapter against its assigned ending state; report only repairs to this chapter, not advice to the next chapter.")
 
@@ -402,11 +412,16 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
-    # Citation encoding changes do not invalidate existing source-grounded
-    # verdicts. Invalid responses were never cached as completed reviews.
-    fingerprint = _hash({"contract": 22, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    # Recheck pairs under the complete source-reference contract, including
+    # internal contradictions surfaced while comparing their event sequence.
+    fingerprint_inputs = {"contract": 23 if scope in {"adjacent_chapters", "whole_book"} else 22, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
-                         "adjudicator": [adjudicator_provider, adjudicator_model]})
+                         "adjudicator": [adjudicator_provider, adjudicator_model]}
+    if scope == "whole_book":
+        # Compacted excerpts can stay identical after a middle passage changes.
+        # Such a change must still invalidate the complete-book verdict.
+        fingerprint_inputs["manuscript_hash"] = _hash([(chapter.chapter_number, chapter.content) for chapter in chapters])
+    fingerprint = _hash(fingerprint_inputs)
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint:
             return validate_review(json.dumps(saved["review"]), chapters)
@@ -499,15 +514,13 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     def parse_review(raw):
         try:
             review = validate_review(raw, chapters)
-            if scope in {"chapter", "final_chapter"}:
+            if scope in {"chapter", "final_chapter", "adjacent_chapters"}:
                 validate_chapter_repair_scope(review)
             if scope == "adjacent_chapters" and (not review.prose_clean or not review.ending_complete or
                 any(issue.category not in {"continuity", "character", "causality"} for issue in review.issues)):
                 raise ValueError("Chapter-pair audits compare factual continuity, character identity, and causes only. Prose and ending checks belong to the separate chapter and whole-book audits.")
-            if scope == "adjacent_chapters":
-                for issue in review.issues:
-                    if issue.source_references and {ref.chapter_number for ref in issue.source_references} != set(review.reviewed_chapters):
-                        raise ValueError("Chapter-pair source references must cite both chapters' conflicting claims separately.")
+            if scope == "adjacent_chapters" and any(not issue.source_references for issue in review.issues):
+                raise ValueError("New chapter-pair reviews must use explicit source_references objects with separate chapter and paragraph numbers.")
             if scope == "source_accuracy" and (not all((review.plot_coherent, review.prose_clean, review.ending_complete))
                 or any(issue.category != "factual" for issue in review.issues) or review.optional_suggestions):
                 raise ValueError("Source audits judge factual support only; keep other checks true and report only factual issues without optional suggestions.")
@@ -600,6 +613,19 @@ def _repair_kind(payload):
 def _repair(session, run, chapter, ledger, issues, settings, client, phase: str, *, escalate_from=None) -> None:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
+    current_sources = {item.chapter_number: _hash(item.content or "") for item in run.chapters}
+    changed_sources = sorted({number for issue in issues for number, source_hash in issue._reviewed_source_hashes.items()
+                              if current_sources.get(number) != source_hash})
+    if changed_sources:
+        # An earlier edit in this manuscript sweep can invalidate a later
+        # diagnosis or supply its missing counterevidence. Rejudge current
+        # prose before spending an attempt on a now-stale allegation.
+        _record(session, run, "autonomous_repair_deferred", {
+            "message": f"Chapter {chapter.chapter_number}: source changed after review; requesting a fresh audit before repair.",
+            "chapter_number": chapter.chapter_number, "phase": phase,
+            "changed_source_chapters": changed_sources,
+        })
+        return
     interrupted = {item["started_event_id"] for item in _events(run, "autonomous_repair_interrupted")}
     all_attempts = [event.payload for event in run.events
                 if event.event_type == "autonomous_repair_started" and event.id not in interrupted
@@ -716,14 +742,36 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
     run.current_chapter = chapter.chapter_number
     session.commit()
     def generate_repair(messages, passage=1, passage_count=1):
-        pipeline._ensure_not_canceled(session, run)
-        _check_context(messages, client, provider)
-        return pipeline.sanitize_chapter_content(pipeline._supervised_provider_chat(
-            session, run, client, provider, model, messages, stage="autonomous_revision",
-            chapter_number=chapter.chapter_number, metadata={"phase": phase, "repair_attempt": len(attempts) + 1,
-                "repair_mode": "coordinated" if coordinated else "passage" if plan is not None else "chapter",
-                "passage": passage, "passage_count": passage_count},
-        ))
+        whole_chapter = plan is None and not coordinated
+        previous_versions = {attempt.get("before_hash") for attempt in all_attempts}
+        for candidate_attempt in range(3 if whole_chapter else 1):
+            pipeline._ensure_not_canceled(session, run)
+            candidate_messages = list(messages)
+            if candidate_attempt:
+                candidate_messages.append({"role": "user", "content": (
+                    f"The previous proposal was rejected: {reason}. Return the complete revised chapter with an actual "
+                    "correction to the diagnosed defect. Work within this chapter, preserve the assigned progression, "
+                    "and keep correct unique passages. Do not copy the unchanged chapter or an earlier rejected version."
+                )})
+            _check_context(candidate_messages, client, provider)
+            candidate = pipeline.sanitize_chapter_content(pipeline._supervised_provider_chat(
+                session, run, client, provider, model, candidate_messages, stage="autonomous_revision",
+                chapter_number=chapter.chapter_number, metadata={"phase": phase, "repair_attempt": len(attempts) + 1,
+                    "repair_mode": "coordinated" if coordinated else "passage" if plan is not None else "chapter",
+                    "passage": passage, "passage_count": passage_count, "candidate_attempt": candidate_attempt + 1},
+            ))
+            if not whole_chapter:
+                return candidate
+            reason = ("no usable change was made" if not candidate.strip() or _text(candidate) == _text(before) else
+                      "the proposal returned to an earlier rejected version" if _hash(candidate) in previous_versions else "")
+            if not reason:
+                return candidate
+            _record(session, run, "autonomous_repair_candidate_rejected", {
+                "message": "Chapter rewrite made no usable progress; retrying from the original source.",
+                "chapter_number": chapter.chapter_number, "phase": phase,
+                "candidate_attempt": candidate_attempt + 1, "reason": reason, "before_hash": _hash(before),
+            })
+        raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change after three proposals: {reason}.")
     def retry_as_chapter(reason):
         _record(session, run, "autonomous_repair_rejected", {
             "message": "Local repair produced no usable candidate; escalating automatically without changing saved prose.",
@@ -915,6 +963,8 @@ def _adjacent_context(run, chapters, ledger) -> dict:
         "author_brief": run_book_brief(run),
         "premise": run.project.premise,
         "world_rules": (run.story_bible or {}).get("world_rules", []),
+        "assigned_chapter_progression": [entry for entry in (run.outline or [])
+                                         if entry["chapter_number"] in {chapter.chapter_number for chapter in chapters}],
         "actual_chapters": [{"chapter_number": chapter.chapter_number,
                              "actual_prose": _numbered_prose(chapter.content or "", chapter.chapter_number)}
                             for chapter in chapters],

@@ -31,9 +31,10 @@ class EditorialIssue(BaseModel):
     problem: str = Field(min_length=1)
     evidence: str = Field(min_length=1, description="Use 'Source paragraphs' when evidence_paragraphs is provided. Otherwise give an exact short quotation from this chapter's actual prose, not its metadata.")
     evidence_paragraphs: list[int] = Field(default_factory=list, description="Paragraph numbers ONLY within the chapter_number being repaired. Never put chapter numbers here. Use an empty list for chapter-pair reviews and source_references instead.")
-    source_references: list[SourceParagraphReference] = Field(default_factory=list, description="For chapter-pair reviews, cite both conflicting source chapters with explicit chapter_number and paragraph_number objects. These are citations, not instructions to edit both chapters. Leave empty for a single-chapter review.")
+    source_references: list[SourceParagraphReference] = Field(default_factory=list, description="For chapter-pair reviews, cite conflicting source passages with explicit chapter_number and paragraph_number objects. Conflicts can occur across chapters or within one supplied chapter. These are citations, not instructions to edit multiple chapters. Leave empty for a single-chapter review.")
     _source_evidence: list[dict] = PrivateAttr(default_factory=list)
-    repair_instruction: str = Field(min_length=1)
+    _reviewed_source_hashes: dict[int, str] = PrivateAttr(default_factory=dict)
+    repair_instruction: str = Field(min_length=1, description="A concrete correction entirely within chapter_number. Other chapters are read-only evidence. Do not request reordering or renumbering chapters. Preserve assigned progression; correct premature claims in the earlier chapter instead of moving a later assigned event.")
     repair_scope: Literal["passage", "chapter"] = Field(default="passage", description="Use chapter for missing sections, broken organization, or a missing major promised outcome that cannot be fixed within the cited passages. Use passage only for localized defects. Evidence anchors a diagnosis; it does not restrict a structural repair to that paragraph.")
 
 

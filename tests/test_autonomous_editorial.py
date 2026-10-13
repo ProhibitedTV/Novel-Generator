@@ -195,6 +195,8 @@ def test_full_adjacent_review_repairs_a_fact_outside_boundary_excerpts(configure
             if contradiction in second['actual_prose']:
                 output['canon_consistent'] = False
                 output['issues'] = [dict(issue(number=2, evidence=contradiction),
+                    source_references=[{'chapter_number': 1, 'paragraph_number': 1},
+                                       {'chapter_number': 2, 'paragraph_number': 1}],
                     problem='The same survey is signed at contradictory times.', repair_instruction='Align the signature date with Chapter 1.')]
         return output
     calls = install_fake_provider(monkeypatch, review_fn=review)
@@ -603,7 +605,7 @@ def test_repair_budget_survives_resume_and_rejects_no_progress(configured_enviro
         session.expire_all()
         with pytest.raises(editor.AutonomousQualityError, match="exhausted"):
             editor.ensure_chapter(session, run, run.chapters[0], ledger, settings, object())
-        assert calls.count(("autonomous_revision", 1)) == 1
+        assert calls.count(("autonomous_revision", 1)) == 3
 
 
 def test_final_gate_cannot_accept_short_book_even_if_reviewer_approves(configured_environment, monkeypatch):
@@ -980,7 +982,8 @@ def test_repeated_pair_diagnosis_is_independently_verified(configured_environmen
     from novel_generator.schemas import ContinuityLedger
     def review(context, numbers):
         result = clean_review(numbers)
-        if 'proposed_review_to_verify' not in context:result['issues'] = [issue(2)]
+        if 'proposed_review_to_verify' not in context:
+            result['issues'] = [dict(issue(2), source_references=[{'chapter_number': 2, 'paragraph_number': 1}])]
         return result
     calls = install_fake_provider(monkeypatch, review_fn=review)
     with get_session_factory()() as session:
@@ -999,7 +1002,7 @@ def test_first_pair_allegation_is_verified_before_any_prose_change(configured_en
         result = clean_review(numbers)
         if 'proposed_review_to_verify' not in context or confirmed:
             result['canon_consistent'] = False
-            result['issues'] = [issue(2)]
+            result['issues'] = [dict(issue(2), source_references=[{'chapter_number': 2, 'paragraph_number': 1}])]
         return result
     calls = install_fake_provider(monkeypatch, review_fn=review)
     with get_session_factory()() as session:
