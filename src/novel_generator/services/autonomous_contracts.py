@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, StrictInt, model_validator
 
 
 class PassageEdit(BaseModel):
@@ -16,6 +16,13 @@ class CoordinatedEdits(BaseModel):
     edits: list[PassageEdit] = Field(min_length=1, max_length=16)
 
 
+class SourceParagraphReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chapter_number: StrictInt = Field(ge=1)
+    paragraph_number: StrictInt = Field(ge=1)
+
+
 class EditorialIssue(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -23,7 +30,9 @@ class EditorialIssue(BaseModel):
     category: Literal["continuity", "causality", "character", "factual", "premature_payoff", "unresolved_payoff", "repetition", "prose", "length"]
     problem: str = Field(min_length=1)
     evidence: str = Field(min_length=1, description="Use 'Source paragraphs' when evidence_paragraphs is provided. Otherwise give an exact short quotation from this chapter's actual prose, not its metadata.")
-    evidence_paragraphs: list[int] = Field(default_factory=list, description="Numbered source paragraphs supporting this issue. Prefer these references to copying dialogue.")
+    evidence_paragraphs: list[int] = Field(default_factory=list, description="Paragraph numbers ONLY within the chapter_number being repaired. Never put chapter numbers here. Use an empty list for chapter-pair reviews and source_references instead.")
+    source_references: list[SourceParagraphReference] = Field(default_factory=list, description="For chapter-pair reviews, cite both conflicting source chapters with explicit chapter_number and paragraph_number objects. These are citations, not instructions to edit both chapters. Leave empty for a single-chapter review.")
+    _source_evidence: list[dict] = PrivateAttr(default_factory=list)
     repair_instruction: str = Field(min_length=1)
     repair_scope: Literal["passage", "chapter"] = Field(default="passage", description="Use chapter for missing sections, broken organization, or a missing major promised outcome that cannot be fixed within the cited passages. Use passage only for localized defects. Evidence anchors a diagnosis; it does not restrict a structural repair to that paragraph.")
 

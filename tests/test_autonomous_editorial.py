@@ -431,7 +431,7 @@ def test_pair_schema_matches_its_factual_scope_and_keeps_actual_conflicts_blocki
         SimpleNamespace(chapter_number=1, content=PROSE), SimpleNamespace(chapter_number=2, content=PROSE)]).passed
 
 
-@pytest.mark.parametrize('scope', ['chapter', 'final_chapter', 'adjacent_chapters', 'source_accuracy'])
+@pytest.mark.parametrize('scope', ['chapter', 'final_chapter', 'source_accuracy'])
 def test_numbered_audits_require_actual_references_instead_of_quoting_absent_rules(scope):
     from novel_generator.services.structured_schema_runtime import extract_schema_marker
     _, schema, _ = extract_schema_marker([editor._coverage_marker([1], scope, paragraph_count=2)])

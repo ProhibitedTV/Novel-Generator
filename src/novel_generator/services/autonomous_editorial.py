@@ -9,7 +9,7 @@ from typing import Any
 
 from ..models import Artifact, ChapterStatus
 from ..repositories import record_event
-from .autonomous_contracts import EditorialIssue, EditorialReview
+from .autonomous_contracts import EditorialIssue, EditorialReview, SourceParagraphReference
 from .context_memory import compile_memory_packet
 from .continuity_lifecycle import LIVE_SNAPSHOT_FIELDS, apply_continuity_lifecycle
 from .ending_debt import compile_ending_debt_audit
@@ -108,7 +108,7 @@ def _book_repeated_passages(chapters):
             for passage, locations in matches[:16]]
 
 
-def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
+def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None, paragraph_counts=None):
     from .structured_schema_runtime import make_schema_marker, response_schema_for_stage
     schema = response_schema_for_stage("autonomous_review")
     schema["properties"]["reviewed_chapters"]["const"] = sorted(chapter_numbers)
@@ -121,10 +121,26 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
         issue = schema["$defs"]["EditorialIssue"]
         issue["required"] = list(dict.fromkeys([*issue["required"], "evidence_paragraphs"]))
         issue["properties"]["evidence"]["const"] = "Source paragraphs"
-        issue["properties"]["evidence_paragraphs"]["minItems"] = 1
-        if paragraph_count is not None:
+        if scope != "adjacent_chapters":
+            issue["properties"]["evidence_paragraphs"]["minItems"] = 1
+        if paragraph_count is not None and scope != "adjacent_chapters":
             issue["properties"]["evidence_paragraphs"]["items"]["enum"] = list(range(1, paragraph_count + 1))
+    definition["properties"]["source_references"]["const"] = []
     if scope == "adjacent_chapters":
+        definition["required"].append("source_references")
+        definition["properties"]["evidence_paragraphs"]["const"] = []
+        references = definition["properties"]["source_references"]
+        references.pop("const")
+        references["minItems"] = 2
+        # The decoder gets the actual paragraph range for EACH chapter. A flat
+        # integer array cannot distinguish chapter 16 from paragraph 16.
+        if paragraph_counts is not None:
+            references["items"] = {"anyOf": [{
+                "type": "object", "additionalProperties": False,
+                "required": ["chapter_number", "paragraph_number"],
+                "properties": {"chapter_number": {"type": "integer", "const": number},
+                               "paragraph_number": {"type": "integer", "enum": list(range(1, paragraph_counts[number] + 1))}},
+            } for number in sorted(chapter_numbers)]}
         for check in ("prose_clean", "ending_complete"):
             schema["properties"][check]["const"] = True
         schema["$defs"]["EditorialIssue"]["properties"]["category"]["enum"] = ["continuity", "character", "causality"]
@@ -136,6 +152,21 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None):
         issue["properties"]["category"]["const"] = "factual"
         schema["properties"]["optional_suggestions"]["maxItems"] = 0
     return make_schema_marker("autonomous_review", schema=schema)
+
+
+PAIR_EVIDENCE_RULES = (
+    "For every issue choose chapter_number as the ONE chapter to repair. Set evidence='Source paragraphs' and "
+    "evidence_paragraphs=[]. Cite BOTH conflicting claims using source_references objects, each with separate "
+    "chapter_number and paragraph_number taken from a [Chapter N, paragraph P] source label. "
+    "Never flatten chapter and paragraph numbers into one list. Citation order does not choose repair order. "
+    "References to the other chapter are supporting context; repair_instruction must change only the selected chapter. "
+    "Explain both conflicting statements and their source chapters in problem."
+)
+
+
+def _source_paragraph_counts(context):
+    return {row["chapter_number"]: len(_paragraphs(row["actual_prose"]))
+            for row in context.get("actual_chapters", [])}
 
 
 def _inline_paragraph_references(evidence, chapter_number):
@@ -168,6 +199,25 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
     source = {chapter.chapter_number: _text(chapter.content or "") for chapter in chapters}
     paragraphs = {chapter.chapter_number: _paragraphs(chapter.content or "") for chapter in chapters}
     def validate_evidence(issue):
+        if issue.source_references:
+            references = {(ref.chapter_number, ref.paragraph_number) for ref in issue.source_references}
+            for number, index in references:
+                if number not in paragraphs or not 1 <= index <= len(paragraphs[number]):
+                    raise ValueError(f"Source reference Chapter {number}, paragraph {index} is outside the supplied actual prose.")
+            target = sorted(index for number, index in references if number == issue.chapter_number)
+            if not target:
+                raise ValueError("Source references must include evidence in the chapter selected for repair.")
+            if issue.evidence_paragraphs and issue.evidence_paragraphs != target:
+                raise ValueError("Target paragraph evidence disagrees with the explicit source references.")
+            # Canonicalize citation order losslessly, then derive local edit
+            # anchors ONLY from the selected chapter. Earlier evidence must
+            # never become a paragraph edit in a different chapter.
+            issue.source_references = [SourceParagraphReference(chapter_number=number, paragraph_number=index)
+                                       for number, index in sorted(references)]
+            issue._source_evidence = [dict(chapter_number=number, paragraph_number=index,
+                                          actual_prose=paragraphs[number][index - 1])
+                                      for number, index in sorted(references)]
+            issue.evidence_paragraphs = target
         if not issue.evidence_paragraphs and not _grounded_evidence(issue.evidence, source.get(issue.chapter_number, "")):
             # Some local models serialize explicit source labels inside evidence
             # instead of its dedicated array. Treat those as references, never
@@ -280,8 +330,8 @@ def _adjudication_messages(scope, context, review, controls):
     source = {key: value for key, value in context.items() if key not in {
         "legacy_qa_concerns_to_verify_against_evidence", "ending_debt_to_verify_against_actual_prose",
     }}
-    allegations = [{key: getattr(issue, key) for key in
-        ("chapter_number", "category", "problem", "evidence", "evidence_paragraphs")}
+    allegations = [{key: issue.model_dump()[key] for key in
+        ("chapter_number", "category", "problem", "evidence", "evidence_paragraphs", "source_references")}
         for issue in review.issues]
     instruction = (
         "You are independently verifying editorial allegations, not rewriting a previous review. "
@@ -304,7 +354,7 @@ def _adjudication_messages(scope, context, review, controls):
             " Only compare factual continuity, character identity, and causes across these complete chapters. "
             "Only continuity, character, and causality issues are allowed. Set prose_clean and ending_complete to true; "
             "separate audits cover those checks. optional_suggestions must be empty. Explain both incompatible claims and their chapters."
-        ) + "\n" + VIEWPOINT_RULES
+        ) + "\n" + VIEWPOINT_RULES + "\n" + PAIR_EVIDENCE_RULES
     elif scope == "whole_book" or context.get("is_final_chapter"):
         if uses_book_contract(context.get("author_brief")):
             instruction += " This is the end of the book. Verify the promised ending_target and complete coverage in the requested book form; there is no next chapter."
@@ -327,7 +377,8 @@ def _adjudication_messages(scope, context, review, controls):
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
     messages.insert(-1, _coverage_marker(review.reviewed_chapters, scope,
-        paragraph_count=len(_paragraphs(context["actual_prose"])) if "actual_prose" in context else None))
+        paragraph_count=len(_paragraphs(context["actual_prose"])) if "actual_prose" in context else None,
+        paragraph_counts=_source_paragraph_counts(context) if scope == "adjacent_chapters" else None))
     return messages
 
 
@@ -351,6 +402,8 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["think"] = config.ollama_adjudication_think
         if getattr(config, "ollama_adjudication_temperature", None) is not None:
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
+    # Citation encoding changes do not invalidate existing source-grounded
+    # verdicts. Invalid responses were never cached as completed reviews.
     fingerprint = _hash({"contract": 22, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]})
@@ -413,8 +466,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             "not optional clarifications, aesthetic preferences, or invented restrictions. Only continuity, character, or causality issues are allowed. "
             "canon_consistent is false for conflicting facts; plot_coherent is false for impossible or contradictory causes. "
             "Set prose_clean and ending_complete to true because separate audits cover them. optional_suggestions must be empty. "
-            "Provide exact evidence from the chapter you ask to repair, preferably its numbered evidence_paragraphs and evidence='Source paragraphs'. "
-            "Explicitly describe BOTH conflicting statements and their chapters in problem. Return valid JSON matching this contract: "
+            + PAIR_EVIDENCE_RULES + " Return valid JSON matching this contract: "
             + json.dumps(EditorialReview.model_json_schema())
             + " Perform one comparison pass. If no demonstrated contradiction remains, return the clean review immediately. "
             "Do not revisit a settled calculation or invent another requirement."
@@ -437,7 +489,9 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         from .provider_controls import make_ollama_controls_marker
         messages.insert(0, make_ollama_controls_marker(**controls))
     messages.insert(-1, _coverage_marker([chapter.chapter_number for chapter in chapters], scope,
-        paragraph_count=len(_paragraphs(chapters[0].content or "")) if len(chapters) == 1 else None))
+        paragraph_count=len(_paragraphs(chapters[0].content or "")) if len(chapters) == 1 else None,
+        paragraph_counts={chapter.chapter_number: len(_paragraphs(chapter.content or "")) for chapter in chapters}
+            if scope == "adjacent_chapters" else None))
     _check_context(messages, client, provider)
     run.current_step = "autonomous_review"
     run.current_chapter = chapters[0].chapter_number if len(chapters) == 1 else None
@@ -450,6 +504,10 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             if scope == "adjacent_chapters" and (not review.prose_clean or not review.ending_complete or
                 any(issue.category not in {"continuity", "character", "causality"} for issue in review.issues)):
                 raise ValueError("Chapter-pair audits compare factual continuity, character identity, and causes only. Prose and ending checks belong to the separate chapter and whole-book audits.")
+            if scope == "adjacent_chapters":
+                for issue in review.issues:
+                    if issue.source_references and {ref.chapter_number for ref in issue.source_references} != set(review.reviewed_chapters):
+                        raise ValueError("Chapter-pair source references must cite both chapters' conflicting claims separately.")
             if scope == "source_accuracy" and (not all((review.plot_coherent, review.prose_clean, review.ending_complete))
                 or any(issue.category != "factual" for issue in review.issues) or review.optional_suggestions):
                 raise ValueError("Source audits judge factual support only; keep other checks true and report only factual issues without optional suggestions.")
@@ -614,6 +672,10 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         # an explicitly selected editor. It may be stronger than the drafter.
         provider, model = pipeline._resolve_stage_route(client, run, "chapter_draft")
     context = _context(run, chapter, ledger)
+    cited_sources = {(row["chapter_number"], row["paragraph_number"]): row
+                    for issue in issues for row in issue._source_evidence}
+    if cited_sources:
+        context["verified_source_evidence"] = [cited_sources[key] for key in sorted(cited_sources)]
     length_instruction = ""
     if any(issue.category == "length" for issue in issues):
         target, minimum, maximum = _target_band(run)
@@ -644,6 +706,12 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         )
         length_instruction = length_instruction.replace("deepen existing scenes", "add useful detail in the requested book form")
     messages[0]["content"] += length_instruction
+    if cited_sources:
+        messages[0]["content"] += (
+            "\nverified_source_evidence contains exact source passages attached by the application. "
+            "Use them to resolve the conflict; passages in other chapters are read-only context. "
+            "Change only the selected chapter and preserve its assigned stopping state."
+        )
     run.current_step = "autonomous_revision"
     run.current_chapter = chapter.chapter_number
     session.commit()

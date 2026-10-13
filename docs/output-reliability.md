@@ -197,6 +197,21 @@ Schema shaping is installed before telemetry. Reconciliation follows lifecycle h
 
 ## Failure philosophy
 
+Chapter-pair audits use explicit `source_references` objects containing separate
+chapter and paragraph numbers. Each chapter's actual paragraph range constrains
+the reviewer and its independent verifier. The application validates every
+reference and attaches the exact source text; ambiguous flattened arrays and
+references outside the supplied prose cannot certify a review.
+
+Validated references are deduplicated and ordered by source location. Local edit
+anchors are derived only from the chapter selected for repair. Supporting
+passages from the other chapter remain read-only source context, including
+passages outside the normal neighboring excerpts. Existing saved reviews remain
+readable, and unchanged source-grounded verdicts retain their checkpoints.
+Automatic retries preserve this citation format and the complete source. A
+genuine contradiction still needs independent verification, an automatic prose
+repair, and a fresh audit of the resulting chapters.
+
 Structured JSON parsing inspects complete top-level containers. An unfinished
 object cannot be accepted as one of its complete nested arrays or dictionaries.
 Fenced JSON and ordinary prose wrappers around a complete payload remain
