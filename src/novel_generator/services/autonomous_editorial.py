@@ -739,6 +739,10 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         )
         length_instruction = length_instruction.replace("deepen existing scenes", "add useful detail in the requested book form")
     messages[0]["content"] += length_instruction
+    messages[0]["content"] += (
+        "\nPreserve correct established events, not the events identified as erroneous in the diagnoses. "
+        "Remove or change a diagnosed contradiction or premature scene when required, and repair its transitions."
+    )
     if cited_sources:
         messages[0]["content"] += (
             "\nverified_source_evidence contains exact source passages attached by the application. "
@@ -751,7 +755,11 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
     def generate_repair(messages, passage=1, passage_count=1):
         whole_chapter = plan is None and not coordinated
         previous_versions = {attempt.get("before_hash") for attempt in all_attempts}
-        for candidate_attempt in range(3 if whole_chapter else 1):
+        repeated_structure = whole_chapter and any(issue.repair_scope == "chapter" and issue.category != "length" for issue in issues) and any(
+            any(issue.get("repair_scope") == "chapter" and issue.get("category") != "length"
+                for issue in attempt.get("issues", [])) for attempt in all_attempts)
+        reason = "a structural diagnosis remains after an earlier chapter rewrite" if repeated_structure else ""
+        for candidate_attempt in range(0 if repeated_structure else 2 if whole_chapter else 1):
             pipeline._ensure_not_canceled(session, run)
             candidate_messages = list(messages)
             if candidate_attempt:
@@ -778,7 +786,39 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
                 "chapter_number": chapter.chapter_number, "phase": phase,
                 "candidate_attempt": candidate_attempt + 1, "reason": reason, "before_hash": _hash(before),
             })
-        raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change after three proposals: {reason}.")
+        # Repeating the same full-source rewrite can keep eliciting a verbatim
+        # copy. Switch representations within this persisted repair attempt:
+        # the model proposes explicit source ranges, and untouched prose stays
+        # byte-for-byte intact. Fresh audits still decide whether the edit works.
+        from .chapter_range_repair import repair as repair_ranges
+        from .provider_controls import make_ollama_controls_marker
+        _record(session, run, "autonomous_repair_strategy_changed", {
+            "message": "Chapter rewrite did not resolve the diagnosis; switching automatically to source paragraph edits.",
+            "chapter_number": chapter.chapter_number, "phase": phase,
+            "from_strategy": "chapter", "to_strategy": "paragraph_ranges", "reason": reason,
+        })
+        def generate_ranges(range_messages, range_attempt):
+            pipeline._ensure_not_canceled(session, run)
+            controls = {}
+            if provider == "ollama":
+                config = getattr(client, "settings", None) or settings
+                if config.ollama_adjudication_think is not None:
+                    controls["think"] = config.ollama_adjudication_think
+                if config.ollama_adjudication_temperature is not None:
+                    controls["temperature"] = config.ollama_adjudication_temperature
+            if controls:
+                range_messages = [make_ollama_controls_marker(**controls), *range_messages]
+            _check_context(range_messages, client, provider)
+            return pipeline._supervised_provider_chat(
+                session, run, client, provider, model, range_messages, stage="autonomous_revision",
+                chapter_number=chapter.chapter_number, metadata={"phase": phase,
+                    "repair_attempt": len(attempts) + 1, "repair_mode": "paragraph_ranges",
+                    "candidate_attempt": range_attempt, "controls": controls},
+            )
+        try:
+            return repair_ranges(before, issues, context, generate_ranges)
+        except ValueError as exc:
+            raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change ({reason}): {exc}") from exc
     def retry_as_chapter(reason):
         _record(session, run, "autonomous_repair_rejected", {
             "message": "Local repair produced no usable candidate; escalating automatically without changing saved prose.",

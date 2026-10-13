@@ -218,13 +218,20 @@ def _wrap_supervised_provider_chat(
         if stage not in _PROSE_STAGES or bool(bound.arguments.get("stream")):
             return output
 
+        # Some editorial calls use the same stage for structured edit sets.
+        # Appending prose to partial JSON destroys its contract and can invent
+        # a new ending. Let the edit validator retry from the original source.
+        from .structured_schema_runtime import _messages_request_json, extract_schema_marker
+        original_messages = list(bound.arguments.get("messages") or [])
+        if _messages_request_json(original_messages) or extract_schema_marker(original_messages)[1] is not None:
+            return output
+
         client = bound.arguments.get("client")
         provider_name = bound.arguments.get("provider_name")
         stop_reason = _provider_stop_reason(client, provider_name)
         if stop_reason not in _TRUNCATION_REASONS:
             return output
 
-        original_messages = list(bound.arguments.get("messages") or [])
         base_metadata = dict(bound.arguments.get("metadata") or {})
         chapter_number = bound.arguments.get("chapter_number")
         merged = output

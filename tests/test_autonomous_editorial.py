@@ -605,7 +605,7 @@ def test_repair_budget_survives_resume_and_rejects_no_progress(configured_enviro
         session.expire_all()
         with pytest.raises(editor.AutonomousQualityError, match="exhausted"):
             editor.ensure_chapter(session, run, run.chapters[0], ledger, settings, object())
-        assert calls.count(("autonomous_revision", 1)) == 3
+        assert calls.count(("autonomous_revision", 1)) == 5  # Two rewrites, then three source-range proposals.
 
 
 def test_final_gate_cannot_accept_short_book_even_if_reviewer_approves(configured_environment, monkeypatch):
