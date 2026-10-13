@@ -162,6 +162,11 @@ def test_unsupported_chapter_reordering_is_rejected_before_editing():
         editor.validate_chapter_repair_scope(EditorialReview.model_validate(data))
     data['issues'][0]['repair_instruction'] = 'Do not reorder the chapters. Correct the premature claim in this chapter.'
     editor.validate_chapter_repair_scope(EditorialReview.model_validate(data))
+    data['issues'][0]['repair_instruction'] = "Reorder the chapter's sections so the cause precedes its consequences."
+    editor.validate_chapter_repair_scope(EditorialReview.model_validate(data))
+    data['issues'][0]['repair_instruction'] = 'Move chapter 17 before chapter 16.'
+    with pytest.raises(ValueError, match='chapter order'):
+        editor.validate_chapter_repair_scope(EditorialReview.model_validate(data))
 
 
 def test_unchanged_chapter_proposal_retries_from_source_and_uses_one_repair_attempt(configured_environment, monkeypatch):

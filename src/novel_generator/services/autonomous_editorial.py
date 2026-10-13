@@ -27,6 +27,11 @@ VIEWPOINT_RULES = (
     "an objective statement of world canon. A later revelation can correct an earlier belief without contradicting "
     "the book. Require incompatible facts established as true about the same event, not merely disagreement "
     "between a character's claim and the narrator or another character. Explain the attribution and framing of both claims. "
+    "Scenes may skip travel. An unmentioned return journey alone is not a physical contradiction: require explicit "
+    "incompatible positions at the same time or an established constraint that prevents travel. A person's or group's "
+    "place of origin does not establish their current location. Objects can have multiple names, descriptions, and functions; "
+    "different names alone do not establish incompatible facts. Require conflicting attributes or actions, not an invented "
+    "rule that the object can have only one function. "
     "Preserve explicit author facts when assessing possible corrections."
 )
 
@@ -254,7 +259,9 @@ def validate_review(raw: str, chapters: list[Any]) -> EditorialReview:
 
 def validate_chapter_repair_scope(review):
     for issue in review.issues:
-        order_commands = re.finditer(r"\b(?:reorder|renumber|swap)\s+(?:(?:the|these|both|two|adjacent)\s+){0,2}chapters?\b",
+        order_commands = re.finditer(r"\breorder\s+(?:(?:the|these|both|two|adjacent)\s+){0,2}chapters\b"
+                                     r"|\b(?:renumber|swap)\s+(?:(?:the|these|both|two|adjacent)\s+){0,2}chapters?\b"
+                                     r"|\b(?:reorder|move)\s+chapter\s+\d+\s+(?:to\s+)?(?:precede|before|after)\b",
                                      issue.repair_instruction, re.IGNORECASE)
         if any(not re.search(r"\b(?:not|never|without)\s*$", issue.repair_instruction[:command.start()], re.IGNORECASE)
                for command in order_commands):
@@ -414,7 +421,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             adjudication_controls["temperature"] = config.ollama_adjudication_temperature
     # Recheck pairs under the complete source-reference contract, including
     # internal contradictions surfaced while comparing their event sequence.
-    fingerprint_inputs = {"contract": 23 if scope in {"adjacent_chapters", "whole_book"} else 22, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
+    fingerprint_inputs = {"contract": 24 if scope == "adjacent_chapters" else 23 if scope == "whole_book" else 22, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]}
     if scope == "whole_book":
@@ -959,12 +966,13 @@ def _book_context(run, chapters, qa_report) -> dict:
 
 def _adjacent_context(run, chapters, ledger) -> dict:
     """Compare complete literal prose; a summary cannot substitute for an earlier fact."""
+    numbers = {chapter.chapter_number for chapter in chapters}
     return {
         "author_brief": run_book_brief(run),
         "premise": run.project.premise,
         "world_rules": (run.story_bible or {}).get("world_rules", []),
         "assigned_chapter_progression": [entry for entry in (run.outline or [])
-                                         if entry["chapter_number"] in {chapter.chapter_number for chapter in chapters}],
+                                         if entry["chapter_number"] in numbers],
         "actual_chapters": [{"chapter_number": chapter.chapter_number,
                              "actual_prose": _numbered_prose(chapter.content or "", chapter.chapter_number)}
                             for chapter in chapters],
