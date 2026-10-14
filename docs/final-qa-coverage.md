@@ -19,6 +19,9 @@ manuscript. A completed status, report file, or acceptance marker alone cannot
 fabricate missing audits. Failed final audits replace earlier passes for the same
 source and scope. The run page exposes checks for each chapter and links the full
 editorial report without manufacturing numeric draft scores.
+The dashboard also separates current final review results from collapsed historical
+draft scores and planning warnings. Earlier revision triggers remain available for
+comparison and are not presented as outstanding final repair instructions.
 
 These are automated editorial checks. Whole-book review uses bounded excerpts,
 chapter summaries, and the ending, alongside the separate full chapter and pair
