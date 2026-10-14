@@ -163,6 +163,11 @@ def test_autonomous_run_detail_shows_current_final_audits_instead_of_draft_score
     assert "4 / 4 final chapter reviews passed; 3 / 3 full chapter-pair" in response.text
     assert response.text.count("data-final-chapter-qa") == 4
     assert "Accepted current manuscript" in response.text and "Earlier draft scorecard" in response.text
+    assert "Current final editorial checks" in response.text
+    assert "Final chapters passed: 4 / 4" in response.text
+    assert "Their revision triggers are not current final repair instructions" in response.text
+    historical = response.text.split('data-historical-draft-diagnostics', 1)[1].split('</details>', 1)[0]
+    assert "Earlier draft quality signals" in historical and "Revision triggers" in historical
     with get_session_factory()() as session:
         run = get_run(session, run_id)
         run.chapters[0].content += " Revised."
@@ -170,6 +175,7 @@ def test_autonomous_run_detail_shows_current_final_audits_instead_of_draft_score
     response = client.get(f"/runs/{run_id}")
     assert "0 / 4 final chapter reviews passed" in response.text
     assert "Acceptance pending or source changed" in response.text
+    assert "Final chapters passed: 0 / 4" in response.text
 
 
 def seed_project_with_completed_compare_runs() -> tuple[str, list[str]]:

@@ -504,10 +504,27 @@
 
   <div class="grid two-up run-dashboard-grid">
     <article class="panel dashboard-panel">
+      {% if manuscript_edition.final_qa_coverage %}
+        {% set final_coverage = manuscript_edition.final_qa_coverage %}
+        <div class="section-header"><div class="section-header-copy">
+          <h2>Current final editorial checks</h2>
+          <p>These reviews apply to the current saved prose. Draft scores below belong to earlier critiques.</p>
+        </div></div>
+        <ul class="bullet-list" data-current-editorial-summary>
+          <li>Final chapters passed: {{ final_coverage.chapter_passes }} / {{ run.requested_chapters }}</li>
+          <li>Neighboring pairs passed: {{ final_coverage.pair_passes }} / {{ final_coverage.pair_target }}</li>
+          <li>Whole-book review: {{ "passed" if final_coverage.whole_book_passed else "pending or needs repair" }}</li>
+          <li>Current manuscript: {{ "accepted" if final_coverage.accepted else "acceptance pending or source changed" }}</li>
+        </ul>
+        <a href="#final-editorial-evidence">Review final evidence</a>
+        <details class="chapter-preview-shell" data-historical-draft-diagnostics>
+          <summary>Earlier draft scores and planning warnings</summary>
+          <p class="field-note">Historical critiques can disagree with later source-grounded audits. Their revision triggers are not current final repair instructions. Keep them for comparison; final coverage above determines automatic acceptance.</p>
+      {% endif %}
       <div class="section-header">
         <div class="section-header-copy">
-          <h2>Quality Signals</h2>
-          <p>These scores come from the chapter critique and tell you whether the prose looks healthy or needs intervention.</p>
+          <h2>{{ "Earlier draft quality signals" if manuscript_edition.final_qa_coverage else "Quality Signals" }}</h2>
+          <p>{{ "Scores from the most recent retained draft critique; they do not certify the final manuscript." if manuscript_edition.final_qa_coverage else "These scores come from the chapter critique and tell you whether the prose looks healthy or needs intervention." }}</p>
         </div>
         <p data-quality-source-label>{% if quality_source_chapter %}Latest chapter: {{ quality_source_chapter }}{% else %}Waiting for the first critique{% endif %}</p>
       </div>
@@ -559,6 +576,7 @@
           <p class="field-note">No canon warnings are available yet.</p>
         {% endif %}
       </div>
+      {% if manuscript_edition.final_qa_coverage %}</details>{% endif %}
     </article>
 
     <article class="panel dashboard-panel">
