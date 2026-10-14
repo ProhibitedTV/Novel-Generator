@@ -53,6 +53,9 @@ def contract_text(brief):
     elif kind == "drama":
         lines += ["Use the requested dramatic format, consistent speaker attribution, playable action, and scene/stage directions.",
                   "Do not turn a script into novelistic prose or treat speaker labels as accidental headings."]
+    if kind in {"fiction", "drama"} and structure == "continuous":
+        lines += ["A central climax can occur before the final chapter when the author's plan includes aftermath. Deliver that irreversible action once; final closure must respect it rather than reenacting the same sacrifice or decision.",
+                  "Character knowledge and commitments accumulate. A reversal needs an on-page cause; a new chapter must not reset discovery or moral growth merely to repeat its assigned theme."]
     if structure == "collection":
         lines += ["Each chapter is an independent piece. Maintain a consistent collection promise and arrangement, but do not force unrelated pieces into one plot.",
                   "Characters and settings may change between pieces. Cross-piece differences are contradictions only when the brief explicitly shares their canon.",
@@ -132,8 +135,8 @@ def source_review_instruction():
 
 _TASKS = {
     "story_bible": "Create the book's complete planning bible. Make its ending_promise reflect the author ending_target. Do not supply thriller defaults for other forms.",
-    "outline": "Plan exactly requested_chapters in order, numbered from 1. Distribute the coverage and total word budget. Complete the book promise in the final chapter.",
-    "outline_chunk": "Plan exactly start_chapter through end_chapter inclusive, in order, preserving earlier outline entries. Only the final requested chapter completes the book promise.",
+    "outline": "Plan exactly requested_chapters in order, numbered from 1. Distribute coverage and total word budget. Complete the full reader promise by the final chapter. Assign each irreversible climax once; subsequent aftermath adds consequences without reenacting it.",
+    "outline_chunk": "Plan exactly start_chapter through end_chapter inclusive, in order, preserving earlier outline entries. Complete the full reader promise by the final requested chapter. Preserve earlier irreversible actions; aftermath must not restage them.",
     "chapter_plan": "Plan this chapter in detail, with concrete scene_beats/sections and a clear ending state. For narrative fiction provide all story_turn fields including alternatives and consequences. Respect its place in the complete book.",
     "chapter_draft": "Write the entire finished chapter from its plan. Include all assigned beats/sections and the assigned ending. Return only manuscript text, without a duplicate chapter title or markdown fences.",
     "chapter_critique": "Critique only the supplied current chapter against its plan, book form, and sources. Distinguish evidenced required defects from optional taste. Do not request future chapters' work here.",

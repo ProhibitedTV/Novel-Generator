@@ -400,7 +400,8 @@ def list_events_after(session: Session, run_id: str, after_sequence: int) -> lis
 
 def replace_artifacts(session: Session, run: GenerationRun, artifacts: list[Artifact]) -> None:
     for artifact in list(run.artifacts):
-        session.delete(artifact)
+        if artifact.kind != "reconstruction-plan":
+            session.delete(artifact)
     session.flush()
     for artifact in artifacts:
         artifact.run_id = run.id

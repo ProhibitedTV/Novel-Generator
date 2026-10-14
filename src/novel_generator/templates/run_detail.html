@@ -267,9 +267,16 @@
       {% if manuscript_edition.final_qa_coverage %}
         {% set coverage = manuscript_edition.final_qa_coverage %}
         <details class="chapter-preview-shell" id="final-editorial-evidence" data-final-qa-evidence>
-          <summary><span>Final editorial evidence</span><span class="summary-meta">{{ "Accepted current manuscript" if coverage.accepted else "Acceptance pending or source changed" }}</span></summary>
+          <summary><span>Final editorial evidence</span><span class="summary-meta">{{ "Accepted current manuscript" if coverage.accepted else "Revision required" if coverage.editorial_concerns else "Acceptance pending or source changed" }}</span></summary>
           <div class="detail-item">
             <p>{{ coverage.chapter_passes }} / {{ manuscript_edition.requested_chapters }} final chapter reviews passed; {{ coverage.pair_passes }} / {{ coverage.pair_target }} full chapter-pair continuity reviews passed; whole-book review {{ "passed" if coverage.whole_book_passed else "pending" }}.</p>
+            {% if coverage.acceptance_contract >= 2 %}
+              <p>{{ coverage.identity_passes }} / {{ run.requested_chapters }} identity reviews passed; {{ coverage.developmental_passes }} / {{ run.requested_chapters }} developmental chapter reviews passed; {{ coverage.cross_passes }} / {{ coverage.cross_target }} distant-chapter comparisons passed. Acceptance contract {{ coverage.acceptance_contract }}.</p>
+            {% else %}<p class="field-note">Earlier acceptance contract: distant-chapter and separate developmental audits were not included.</p>{% endif %}
+            {% for concern in coverage.editorial_concerns %}
+              <p class="error-text">{{ concern.message }}</p>
+              <ul class="bullet-list">{% for issue in concern.issues %}<li>Chapter {{ issue.chapter_number }}: {{ issue.problem }}</li>{% endfor %}</ul>
+            {% endfor %}
             <p class="field-note">Counts apply to the current saved prose. Earlier draft scorecards are cleared when repairs make them stale; {{ coverage.draft_scorecards }} remain. Final audits are separate checks, not replacement scores. Automated acceptance does not establish independent literary or publication quality.</p>
             <p class="field-note">Current manuscript fingerprint: {{ coverage.manuscript_hash }}</p>
             {% if coverage.report_artifact %}<a href="/api/artifacts/{{ coverage.report_artifact.id }}/download">Download final editorial evidence</a>{% endif %}
@@ -515,8 +522,12 @@
           <li>Neighboring pairs passed: {{ final_coverage.pair_passes }} / {{ final_coverage.pair_target }}</li>
           <li>Whole-book review: {{ "passed" if final_coverage.whole_book_passed else "pending or needs repair" }}</li>
           <li>Current manuscript: {{ "accepted" if final_coverage.accepted else "acceptance pending or source changed" }}</li>
+          <li>Developmental chapters passed: {{ final_coverage.developmental_passes }} / {{ run.requested_chapters }}</li>
+          <li>Identity checks passed: {{ final_coverage.identity_passes }} / {{ run.requested_chapters }}</li>
+          <li>Distant pairs passed: {{ final_coverage.cross_passes }} / {{ final_coverage.cross_target }}</li>
         </ul>
         <a href="#final-editorial-evidence">Review final evidence</a>
+        {% for concern in final_coverage.editorial_concerns %}<p class="error-text">{{ concern.message }}</p>{% endfor %}
         <details class="chapter-preview-shell" data-historical-draft-diagnostics>
           <summary>Earlier draft scores and planning warnings</summary>
           <p class="field-note">Historical critiques can disagree with later source-grounded audits. Their revision triggers are not current final repair instructions. Keep them for comparison; final coverage above determines automatic acceptance.</p>
@@ -666,7 +677,7 @@
   {% endif %}
 
   {% if run.source_run_id %}
-    <p class="notice long-value">This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.</p>
+    <p class="notice long-value">{% if run.resume_from_chapter %}This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.{% else %}This is a revised edition. <a href="/runs/{{ run.source_run_id }}">The original manuscript is preserved here.</a>{% endif %}</p>
   {% endif %}
 
   <details class="editor-shell technical-shell">

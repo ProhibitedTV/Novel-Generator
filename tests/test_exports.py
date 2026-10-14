@@ -39,6 +39,19 @@ def test_manuscript_exports_do_not_print_the_planning_premise_or_ending_spoilers
         assert "The Gate" in text and "Ada waited by the gate." in text
 
 
+def test_default_docx_chapters_start_on_new_pages_without_blue_heading_theme(tmp_path):
+    project = Project(title="A finished draft", premise="Private plan")
+    chapters = [ChapterDraft(chapter_number=n, title=f"Chapter {n}", content=f"Unique chapter body {n}.") for n in range(1, 4)]
+    destination = tmp_path / "manuscript.docx"
+    render_docx(project, chapters, destination)
+    document = Document(destination)
+    headings = [p for p in document.paragraphs if p.style.name == "Heading 1"]
+    assert len(headings) == 3 and all(p.paragraph_format.page_break_before is True for p in headings)
+    assert document.styles["Heading 1"].font.color.rgb is None
+    assert "themeColor" not in document.styles["Heading 1"]._element.xml
+    assert all(ch.content in "\n".join(p.text for p in document.paragraphs) for ch in chapters)
+
+
 def test_export_run_artifacts_writes_manuscript_and_qa_report_without_duplicate_headings(tmp_path) -> None:
     project = Project(
         title="The Glass Orchard",
