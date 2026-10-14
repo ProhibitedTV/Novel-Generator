@@ -71,6 +71,14 @@ class ProviderConfig(Base):
     )
 
 
+class ImageGenerationConfig(Base):
+    """Singleton optional image settings, shared by the web process and worker."""
+    __tablename__ = "image_generation_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    options: Mapped[dict] = mapped_column(JSON)
+
+
 class GenerationRun(Base):
     __tablename__ = "generation_runs"
 

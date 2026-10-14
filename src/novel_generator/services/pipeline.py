@@ -3123,6 +3123,8 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
         autonomous_editorial.save_report(session, run, settings, "passed")
     session.commit()
     session.refresh(run, attribute_names=["artifacts"])
+    from .image_packs import extract_optional_image_packs
+    extract_optional_image_packs(session, run, settings)
     if client is not None:
         from .cover_prompts import generate_optional_cover_prompts
         generate_optional_cover_prompts(session, run, completed_chapters, settings, client)

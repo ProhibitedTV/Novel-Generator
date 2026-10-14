@@ -277,6 +277,33 @@
         </details>
       {% endif %}
 
+      {% if image_pack_metadata or image_generation_enabled %}
+        <details class="chapter-preview-shell" id="image-pack-metadata" data-image-pack-metadata>
+          <summary><span>Chapter image metadata</span><span class="summary-meta">Text extraction only</span></summary>
+          <div class="detail-item">
+            <p class="field-note">Explicit IMAGE PACK blocks are extracted from final chapter text. Missing prompts produce warnings. Batch rendering is pending.</p>
+            {% if run.status.value == 'completed' %}<form method="post" action="/runs/{{ run.id }}/image-packs/extract"><button class="secondary">Extract image metadata</button></form>{% endif %}
+            {% if image_pack_metadata %}
+              <a href="/api/artifacts/{{ image_pack_metadata.artifact.id }}/download">Download image metadata</a>
+              {% if not image_pack_metadata.current %}<p class="warning-text">Saved metadata is unavailable or does not match the current accepted text. Extract again after final acceptance.</p>{% endif %}
+              {% if image_pack_metadata.error %}<p class="warning-text">{{ image_pack_metadata.error }}</p>{% endif %}
+              {% if image_pack_metadata.current %}
+                {% for entry in image_pack_metadata.metadata.chapters %}
+                  <details class="chapter-review-section"><summary>Chapter {{ entry.chapter_number }}: {{ entry.chapter_title }}</summary>
+                    {% for warning in entry.warnings %}<p class="warning-text">{{ warning }}</p>{% endfor %}
+                    {% for pack in entry.packs %}
+                      <p>Pack {{ pack.pack_number }}: {{ pack.status }}</p>
+                      {% for warning in pack.warnings %}<p class="warning-text">{{ warning }}</p>{% endfor %}
+                      {% if pack.metadata %}<pre>{{ pack.metadata|tojson(indent=2) }}</pre>{% endif %}
+                    {% endfor %}
+                  </details>
+                {% endfor %}
+              {% endif %}
+            {% endif %}
+          </div>
+        </details>
+      {% endif %}
+
       <div class="edition-layout">
         <div class="edition-output-groups">
           {% for group in manuscript_edition.artifact_groups %}

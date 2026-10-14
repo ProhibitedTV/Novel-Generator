@@ -3005,6 +3005,33 @@ def create_project_ui(
     return _redirect(f"/projects/{project.id}", message="Project created.", message_tone="success")
 
 
+@router.get("/settings/images")
+def image_settings_page(request: Request, db: Session = Depends(get_db)):
+    from ..services.image_settings import get_image_settings
+    return _render(request, "image_settings.html", {"active_nav": "images",
+        "image_settings": get_image_settings(db).model_dump(), "test_result": None, "form_errors": {}})
+
+
+@router.post("/settings/images")
+async def update_image_settings_ui(request: Request, db: Session = Depends(get_db)):
+    from ..services.image_settings import ImageSettings, save_image_settings, probe_image_server
+    form = await request.form()
+    values = {field: form[field] for field in ImageSettings.model_fields if field in form}
+    values["enabled"] = _coerce_checkbox(form.get("enabled"))
+    try:
+        payload = ImageSettings.model_validate(values)
+    except ValidationError as exc:
+        return _render(request, "image_settings.html", {"active_nav": "images", "image_settings": values,
+            "test_result": None, "form_errors": _field_errors(exc)}, status_code=400)
+    save_image_settings(db, payload)
+    if form.get("action") == "test":
+        from starlette.concurrency import run_in_threadpool
+        test_result = await run_in_threadpool(probe_image_server, payload)
+        return _render(request, "image_settings.html", {"active_nav": "images", "image_settings": payload.model_dump(),
+            "test_result": test_result, "form_errors": {}})
+    return _redirect("/settings/images", message="Image settings saved.", message_tone="success")
+
+
 @router.get("/settings/provider")
 def provider_settings_page(
     request: Request,
@@ -3599,12 +3626,30 @@ def create_run_ui(
     return _redirect(f"/runs/{run.id}", message="Run queued.", message_tone="success")
 
 
+@router.post("/runs/{run_id}/image-packs/extract")
+def extract_image_packs_ui(run_id: str, db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)):
+    from ..services.image_packs import extract_image_pack_metadata
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status != RunStatus.COMPLETED:
+        return _redirect(f"/runs/{run_id}", message="Finish the manuscript before extracting image metadata.", message_tone="warning")
+    try:
+        extract_image_pack_metadata(db, run, settings)
+    except ValueError as exc:
+        return _redirect(f"/runs/{run_id}", message=str(exc), message_tone="warning")
+    return _redirect(f"/runs/{run_id}", message="Image metadata extracted. No images rendered.", message_tone="success")
+
+
 @router.get("/runs/{run_id}")
 def run_detail(
     run_id: str,
     request: Request,
     db: Session = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
 ):
+    from ..services.image_packs import image_pack_context
+    from ..services.image_settings import get_image_settings
     run = get_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
@@ -3618,6 +3663,8 @@ def run_detail(
         {
             "active_nav": "projects",
             "run": run,
+            "image_pack_metadata": image_pack_context(run, settings),
+            "image_generation_enabled": get_image_settings(db).enabled,
             "project": run.project,
             "run_genre_profile": run_profile,
             "quality_profile": _quality_profile_context(run.quality_profile),
