@@ -24,9 +24,10 @@ cannot be turned into a completion flag by increasing a budget or skipping a che
 
 ## Outstanding illustration issues
 
-Six illustration issues remain open. Implement them in this dependency order:
+The image settings and text-only metadata foundations are implemented. Continue
+with rendering and its outputs in this dependency order:
 
-1. [#38: Local image generation settings](https://github.com/ProhibitedTV/Novel-Generator/issues/38), then [#39: Extract chapter IMAGE PACK metadata](https://github.com/ProhibitedTV/Novel-Generator/issues/39).
+1. [#38: Local image generation settings](https://github.com/ProhibitedTV/Novel-Generator/issues/38) and [#39: Extract chapter IMAGE PACK metadata](https://github.com/ProhibitedTV/Novel-Generator/issues/39): implemented with disabled defaults, explicit connection testing, source-bound metadata, downloadable extraction evidence, and warnings for absent/malformed packs. See [setup and qualification](local-images.md).
 2. [#40: Post-text image rendering](https://github.com/ProhibitedTV/Novel-Generator/issues/40) and [#41: Rendered image artifacts](https://github.com/ProhibitedTV/Novel-Generator/issues/41). Require persisted per-image recovery, explicit timeouts, and accepted manuscript input.
 3. [#42: Image manifest export](https://github.com/ProhibitedTV/Novel-Generator/issues/42) and [#43: Run image gallery](https://github.com/ProhibitedTV/Novel-Generator/issues/43). Export references must resolve to saved artifacts, and the gallery must distinguish pending, failed, and completed images.
 
@@ -36,5 +37,5 @@ three source-grounded concepts for the accepted small book and reused the pack
 without changing prose or text exports. See [setup and qualification](cover-prompts.md).
 
 An image-provider failure must preserve the accepted text and completed exports.
-These issue-specific implementation and integration checks remain outstanding;
-the roadmap does not count documentation as feature completion.
+Rendering-specific implementation and integration checks remain outstanding;
+settings and extraction tests do not establish image-generation readiness.

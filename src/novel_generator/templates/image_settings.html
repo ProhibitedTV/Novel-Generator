@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Image Settings - Novel Generator{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="section-header"><div><p class="eyebrow">Optional illustrations</p><h1>Local image generation</h1></div>
+    <span class="badge">{{ "Enabled" if image_settings.enabled else "Disabled" }}</span></div>
+  <p>Save a connection to an AUTOMATIC1111-compatible image server. Images are disabled by default. Text generation does not need this connection.</p>
+  <p class="field-note">This release saves image settings and extracts IMAGE PACK metadata after text acceptance. Batch rendering is still pending. A ready connection test does not render an image.</p>
+  {% if test_result %}
+    <div class="callout callout-{{ 'success' if test_result.reachable else 'warning' }}" data-image-connection="{{ test_result.status }}">
+      <h2>{{ "Ready" if test_result.reachable else "Unavailable" }}</h2>
+      {% if test_result.error %}<p>{{ test_result.error }}</p>{% endif %}
+      {% if test_result.model_checkpoint %}<p>Model checkpoint: {{ test_result.model_checkpoint }}</p>{% endif %}
+      {% if test_result.samplers %}<p>Detected samplers: {{ test_result.samplers|join(', ') }}</p>{% endif %}
+    </div>
+  {% else %}<p class="field-note">Connection not tested. Use Save and test to check the current server.</p>{% endif %}
+  <form method="post" action="/settings/images" class="stack-form">
+    <label class="checkbox-row"><input name="enabled" type="checkbox" {% if image_settings.enabled %}checked{% endif %}> Enable optional image stages</label>
+    <label>Server base URL<input name="base_url" type="url" required value="{{ image_settings.base_url }}"></label>
+    <p class="field-note">Enable the server API with --api. For this app in Docker and an image server on Windows, use http://host.docker.internal:7860 and make the server accessible to Docker.</p>
+    <div class="grid two-up">
+    {% for key, label, minimum, maximum, increment in [('width','Width',64,4096,8), ('height','Height',64,4096,8), ('steps','Steps',1,150,1), ('cfg_scale','CFG scale',0,30,0.1), ('seed','Fixed seed',0,4294967295,1)] %}
+      <label>{{ label }}<input name="{{ key }}" type="number" required min="{{ minimum }}" max="{{ maximum }}" step="{{ increment }}" value="{{ image_settings[key] }}"></label>
+    {% endfor %}
+    <label>Sampler<input name="sampler" required maxlength="128" value="{{ image_settings.sampler }}"></label>
+    <label>Seed mode<select name="seed_mode">{% for mode in ['random','fixed'] %}<option {% if image_settings.seed_mode == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}</select></label>
+    <label>Output format<select name="output_format">{% for format in ['png','jpeg','webp'] %}<option {% if image_settings.output_format == format %}selected{% endif %}>{{ format }}</option>{% endfor %}</select></label>
+    </div>
+    {% for field, message in form_errors.items() %}<p class="error-text">{{ field }}: {{ message }}</p>{% endfor %}
+    <div class="hero-actions"><button name="action" value="save">Save settings</button><button class="secondary" name="action" value="test">Save and test</button></div>
+  </form>
+</section>
+{% endblock %}

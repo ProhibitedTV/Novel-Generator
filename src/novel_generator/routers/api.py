@@ -43,6 +43,7 @@ from ..services.provider_errors import ProviderError, ProviderTransportError
 from ..services.providers import ProviderManager, provider_definition
 from ..services.state import approve_outline_review, request_run_cancellation, resume_failed_run
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
+from ..services.image_settings import ImageSettings, get_image_settings, save_image_settings, probe_image_server
 from ..settings import Settings
 
 router = APIRouter(tags=["api"])
@@ -223,6 +224,36 @@ def update_ollama_config(
     settings: Settings = Depends(get_app_settings),
 ) -> ProviderCapabilities:
     return update_provider_api("ollama", payload, db, settings)
+
+
+@router.get("/image-generation/config", response_model=ImageSettings)
+def image_settings_api(db: Session = Depends(get_db)):
+    return get_image_settings(db)
+
+
+@router.put("/image-generation/config", response_model=ImageSettings)
+def update_image_settings_api(payload: ImageSettings, db: Session = Depends(get_db)):
+    return save_image_settings(db, payload)
+
+
+@router.post("/image-generation/test")
+def test_image_server_api(db: Session = Depends(get_db)):
+    return probe_image_server(get_image_settings(db))
+
+
+@router.post("/runs/{run_id}/image-packs/extract")
+def extract_image_packs_api(run_id: str, db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)):
+    from ..services.image_packs import extract_image_pack_metadata
+    run = get_run(db, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    if run.status != RunStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Finish the manuscript before extracting image metadata.")
+    try:
+        artifact, metadata = extract_image_pack_metadata(db, run, settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"artifact_id": artifact.id, "metadata": metadata}
 
 
 @router.post("/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
