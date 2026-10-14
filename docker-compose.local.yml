@@ -13,6 +13,7 @@ services:
   worker:
     restart: unless-stopped
     environment:
+      WORKER_EXCLUSIVE: "true"
       DATABASE_URL: sqlite:////app/data/novel_generator.db
       ARTIFACTS_DIR: /app/artifacts
       OLLAMA_BASE_URL: http://host.docker.internal:11434
