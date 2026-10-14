@@ -578,6 +578,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     _record(session, run, "autonomous_review_completed", {
         "message": f"Automatic {scope} review {'passed' if review.passed else 'requested repairs'}.",
         "scope": scope, "fingerprint": fingerprint, "review": review.model_dump(),
+        "source_hashes": {str(chapter.chapter_number): _hash(chapter.content or "") for chapter in chapters},
         "provider_name": provider, "model_name": model,
         "controls": controls,
     })

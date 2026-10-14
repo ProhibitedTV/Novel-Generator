@@ -43,6 +43,7 @@ from ..services.genre_profiles import genre_profile, genre_profile_options
 from ..services.openai_compatible import OpenAICompatibleClient
 from ..services.ollama import OllamaClient
 from ..services.exports import export_publication_artifact, publication_export_options
+from ..services.editorial_coverage import review_coverage
 from ..services.provider_errors import ProviderError, ProviderTransportError
 from ..services.providers import ProviderManager, TASK_ROUTE_STAGES, provider_definition, provider_options
 from ..services.state import approve_outline_review, request_run_cancellation, resume_failed_run
@@ -2221,8 +2222,13 @@ def _chapter_continuity_chips(chapter: Any) -> list[dict[str, str]]:
 def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
     cards: list[dict[str, Any]] = []
     final_edit_numbers = _chapter_final_edit_numbers(run)
+    coverage = review_coverage(run) if run.quality_profile == "autonomous" else None
     for chapter in _sorted_run_chapters(run):
         risk_chips = _chapter_risk_chips(chapter)
+        final_qa = coverage["chapter_reviews"].get(chapter.chapter_number) if coverage else None
+        if coverage:
+            risk_chips = [_review_chip("Final QA passed", "success")] if final_qa and final_qa["passed"] else [
+                _review_chip("Final QA needs repair", "risk") if final_qa else _review_chip("Final QA pending", "neutral")]
         final_edit_completed = chapter.chapter_number in final_edit_numbers
         cards.append(
             {
@@ -2232,6 +2238,7 @@ def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
                 "continuity_chips": _chapter_continuity_chips(chapter),
                 "has_risk": any(chip["tone"] in {"risk", "warning"} for chip in risk_chips),
                 "final_edit_completed": final_edit_completed,
+                "final_qa": final_qa,
             }
         )
     return cards
@@ -2291,6 +2298,9 @@ def _manuscript_edition_context(run: GenerationRun, chapter_cards: list[dict[str
     total_words = _run_word_count(run)
     completed_chapters = len([chapter for chapter in chapters if chapter.status == ChapterStatus.COMPLETED and chapter.content])
     qa_chapters = len([chapter for chapter in chapters if chapter.qa_notes])
+    coverage = review_coverage(run) if run.quality_profile == "autonomous" else None
+    if coverage:
+        qa_chapters = coverage["chapter_passes"]
     final_edit_numbers = _chapter_final_edit_numbers(run)
     risk_chapters = [card for card in chapter_cards if card["has_risk"]]
     missing_chapters = [chapter for chapter in chapters if not chapter.content]
@@ -2361,6 +2371,7 @@ def _manuscript_edition_context(run: GenerationRun, chapter_cards: list[dict[str
         "completed_chapters": completed_chapters,
         "requested_chapters": run.requested_chapters,
         "qa_chapters": qa_chapters,
+        "final_qa_coverage": coverage,
         "final_edit_chapters": len(final_edit_numbers),
         "risk_chapters": len(risk_chapters),
         "missing_chapters": len(missing_chapters),
@@ -2381,8 +2392,11 @@ def _book_completion_context(run: GenerationRun) -> dict[str, Any]:
     summary_count = len([chapter for chapter in chapters if chapter.summary])
     continuity_count = len([chapter for chapter in chapters if chapter.continuity_update])
     qa_count = len([chapter for chapter in chapters if chapter.qa_notes])
+    coverage = review_coverage(run) if run.quality_profile == "autonomous" else None
+    if coverage:
+        qa_count = coverage["chapter_passes"]
     qa_artifact_count = len([artifact for artifact in run.artifacts if artifact.kind == "qa-report"])
-    manuscript_artifact_count = len([artifact for artifact in run.artifacts if artifact.kind != "qa-report"])
+    manuscript_artifact_count = len([artifact for artifact in run.artifacts if artifact.kind in {"markdown", "docx"}])
     final_edit_count = 1 if any(event.event_type == "final_editing_completed" for event in run.events) else 0
 
     def row(label: str, current: int, target: int, *, required: bool = True) -> dict[str, Any]:
@@ -2402,11 +2416,15 @@ def _book_completion_context(run: GenerationRun) -> dict[str, Any]:
         row("Drafted chapters", drafted_count, requested_chapters),
         row("Chapter summaries", summary_count, requested_chapters),
         row("Continuity checkpoints", continuity_count, requested_chapters),
-        row("Chapter QA", qa_count, requested_chapters),
+        row("Final chapter QA" if coverage else "Chapter QA", qa_count, requested_chapters),
         row("Final edit pass", final_edit_count, 1),
         row("Manuscript QA report", qa_artifact_count, 1),
         row("Manuscript exports", manuscript_artifact_count, 1),
     ]
+    if coverage:
+        rows.insert(6, row("Chapter-pair continuity", coverage["pair_passes"], coverage["pair_target"]))
+        rows.insert(7, row("Whole-book editorial review", int(coverage["whole_book_passed"]), 1))
+        rows.insert(8, row("Current manuscript accepted", int(coverage["accepted"]), 1))
     required_complete = all(item["complete"] for item in rows)
     raw_percent = round((sum(min(item["current"], item["target"]) for item in rows) / sum(item["target"] for item in rows)) * 100)
     percent = raw_percent if required_complete else min(99, raw_percent)

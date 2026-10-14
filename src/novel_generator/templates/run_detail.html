@@ -248,7 +248,7 @@
           <span class="field-note">chapter checkpoints</span>
         </div>
         <div class="edition-stat">
-          <span class="detail-label">QA coverage</span>
+          <span class="detail-label">{{ "Final QA coverage" if manuscript_edition.final_qa_coverage else "QA coverage" }}</span>
           <strong>{{ manuscript_edition.qa_chapters }} / {{ manuscript_edition.requested_chapters }}</strong>
           <span class="field-note">{{ manuscript_edition.risk_chapters }} chapters flagged</span>
         </div>
@@ -263,6 +263,19 @@
           <span class="field-note">words</span>
         </div>
       </div>
+
+      {% if manuscript_edition.final_qa_coverage %}
+        {% set coverage = manuscript_edition.final_qa_coverage %}
+        <details class="chapter-preview-shell" id="final-editorial-evidence" data-final-qa-evidence>
+          <summary><span>Final editorial evidence</span><span class="summary-meta">{{ "Accepted current manuscript" if coverage.accepted else "Acceptance pending or source changed" }}</span></summary>
+          <div class="detail-item">
+            <p>{{ coverage.chapter_passes }} / {{ manuscript_edition.requested_chapters }} final chapter reviews passed; {{ coverage.pair_passes }} / {{ coverage.pair_target }} full chapter-pair continuity reviews passed; whole-book review {{ "passed" if coverage.whole_book_passed else "pending" }}.</p>
+            <p class="field-note">Counts apply to the current saved prose. Earlier draft scorecards are cleared when repairs make them stale; {{ coverage.draft_scorecards }} remain. Final audits are separate checks, not replacement scores. Automated acceptance does not establish independent literary or publication quality.</p>
+            <p class="field-note">Current manuscript fingerprint: {{ coverage.manuscript_hash }}</p>
+            {% if coverage.report_artifact %}<a href="/api/artifacts/{{ coverage.report_artifact.id }}/download">Download final editorial evidence</a>{% endif %}
+          </div>
+        </details>
+      {% endif %}
 
       <div class="edition-layout">
         <div class="edition-output-groups">
@@ -1449,10 +1462,20 @@
               <p class="error-text">{{ chapter.error_message }}</p>
             {% endif %}
 
+            {% if card.final_qa %}
+              <details class="chapter-preview-shell chapter-review-section" data-final-chapter-qa>
+                <summary><span>Final chapter audit</span><span class="summary-meta">{{ "Passed" if card.final_qa.passed else "Needs repair" }}</span></summary>
+                <div class="detail-item">
+                  <p class="field-note">{{ card.final_qa.provider }} / {{ card.final_qa.model }} · {{ card.final_qa.reviewed_at }}</p>
+                  <ul class="bullet-list">{% for label, passed in card.final_qa.checks.items() %}<li>{{ label }}: {{ "passed" if passed else "needs repair" }}</li>{% endfor %}</ul>
+                  {% for issue in card.final_qa.issues %}<p>{{ issue.problem }} Evidence: {{ issue.evidence }}</p>{% endfor %}
+                </div>
+              </details>
+            {% endif %}
             {% if chapter.qa_notes %}
               <details class="chapter-preview-shell chapter-review-section" data-review-section>
                 <summary>
-                  <span>Editorial notes</span>
+                  <span>{{ "Earlier draft scorecard" if run.quality_profile == "autonomous" else "Editorial notes" }}</span>
                   <span class="summary-meta">{{ card.risk_chips|length }} signals</span>
                 </summary>
                 <div class="story-bible-grid">

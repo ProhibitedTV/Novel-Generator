@@ -134,6 +134,44 @@ def outline_entry(chapter_number: int, total_chapters: int = 4) -> dict[str, obj
     }
 
 
+def test_autonomous_run_detail_shows_current_final_audits_instead_of_draft_scorecards(client, monkeypatch):
+    from novel_generator.services.autonomous_editorial import _hash
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run(quality_profile="autonomous")
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        run.outline = [outline_entry(n) for n in range(1, 5)]
+        create_chapters_from_outline(session, run)
+        session.flush()
+        session.refresh(run, attribute_names=["chapters"])
+        for chapter in run.chapters:
+            chapter.content = f"Saved final chapter {chapter.chapter_number}."
+            chapter.status = ChapterStatus.COMPLETED
+            chapter.qa_notes = {"prose_score": 8} if chapter.chapter_number == 1 else None
+        scopes = [("final_chapter", [n]) for n in range(1, 5)] + [
+            ("adjacent_chapters", [n, n + 1]) for n in range(1, 4)] + [("whole_book", [1, 2, 3, 4])]
+        for scope, numbers in scopes:
+            record_event(session, run, "autonomous_review_completed", {
+                "scope": scope, "review": {"reviewed_chapters": numbers, "plot_coherent": True,
+                    "canon_consistent": True, "prose_clean": True, "ending_complete": True, "issues": []}})
+        record_event(session, run, "autonomous_quality_passed", {
+            "manuscript_hash": _hash([(c.chapter_number, c.content) for c in run.chapters])})
+        run.status = RunStatus.COMPLETED
+        session.commit()
+    response = client.get(f"/runs/{run_id}")
+    assert response.status_code == 200
+    assert "4 / 4 final chapter reviews passed; 3 / 3 full chapter-pair" in response.text
+    assert response.text.count("data-final-chapter-qa") == 4
+    assert "Accepted current manuscript" in response.text and "Earlier draft scorecard" in response.text
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        run.chapters[0].content += " Revised."
+        session.commit()
+    response = client.get(f"/runs/{run_id}")
+    assert "0 / 4 final chapter reviews passed" in response.text
+    assert "Acceptance pending or source changed" in response.text
+
+
 def seed_project_with_completed_compare_runs() -> tuple[str, list[str]]:
     session_factory = get_session_factory()
     with session_factory() as session:
