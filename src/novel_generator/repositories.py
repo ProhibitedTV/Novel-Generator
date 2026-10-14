@@ -499,6 +499,17 @@ def recover_running_runs(
         )
     runs = list(session.scalars(stmt))
     for run in runs:
+        if run.cancel_requested:
+            run.status = RunStatus.CANCELED
+            run.current_step = "canceled"
+            run.worker_id = None
+            run.last_heartbeat_at = None
+            run.completed_at = datetime.utcnow()
+            record_event(session, run, "run_canceled", {
+                "message": "Honored the saved cancellation request after worker interruption.",
+                "recovery_reason": reason,
+            })
+            continue
         run.status = RunStatus.QUEUED
         run.current_step = "recovered"
         run.worker_id = None

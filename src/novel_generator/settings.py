@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     openai_compatible_max_tokens: int = Field(default=8192, ge=256, le=65536)
     max_concurrent_runs: int = Field(default=1, ge=1, le=4)
     worker_poll_interval_seconds: float = Field(default=2.0, ge=0.5, le=30.0)
+    # Local SQLite ownership: an OS-held lock permits immediate restart recovery.
+    # Leave false for deployments with independently managed concurrent workers.
+    worker_exclusive: bool = False
     ollama_timeout_seconds: float = Field(default=120.0, ge=10.0, le=1800.0)
     ollama_max_retries: int = Field(default=2, ge=0, le=5)
     ollama_num_ctx: int = Field(default=32768, ge=2048, le=262144)

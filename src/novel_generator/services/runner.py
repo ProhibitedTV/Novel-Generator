@@ -25,13 +25,13 @@ from .truncation_runtime import install_truncation_runtime
 logger = logging.getLogger(__name__)
 
 
-def recover_incomplete_runs(settings: Settings) -> None:
+def recover_incomplete_runs(settings: Settings, *, exclusive_owner: bool = False) -> None:
     session_factory = build_session_factory(settings)
     with session_factory() as session:
         count = recover_running_runs(
             session,
-            stale_after_seconds=settings.run_stale_after_seconds,
-            reason="worker_startup",
+            stale_after_seconds=None if exclusive_owner else settings.run_stale_after_seconds,
+            reason="exclusive_worker_startup" if exclusive_owner else "worker_startup",
         )
         session.commit()
         if count:
