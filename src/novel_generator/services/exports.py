@@ -356,10 +356,14 @@ def render_markdown(project: Project, chapters: list[ChapterDraft]) -> str:
 
 def render_docx(project: Project, chapters: list[ChapterDraft], destination: Path) -> None:
     document = Document()
+    for style_name in ("Title", "Heading 1"):
+        # Inherit reader/default text color instead of Word's blue accent theme.
+        document.styles[style_name].font.color.rgb = None
     document.add_heading(project.title, level=0)
     for chapter in chapters:
         content = sanitize_chapter_content(chapter.content or "")
-        document.add_heading(f"Chapter {chapter.chapter_number}: {chapter.title}", level=1)
+        heading = document.add_heading(f"Chapter {chapter.chapter_number}: {chapter.title}", level=1)
+        heading.paragraph_format.page_break_before = True
         add_manuscript_content(document, content)
     document.save(destination)
 
@@ -436,6 +440,7 @@ def _configure_publication_document(document: Document, profile: ExportProfile) 
     heading = document.styles["Heading 1"]
     heading.font.name = "Times New Roman"
     heading.font.size = Pt(16)
+    heading.font.color.rgb = None
     heading.paragraph_format.space_before = Pt(24)
     heading.paragraph_format.space_after = Pt(18)
     heading.paragraph_format.first_line_indent = None

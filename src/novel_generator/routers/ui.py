@@ -2229,6 +2229,10 @@ def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
         if coverage:
             risk_chips = [_review_chip("Final QA passed", "success")] if final_qa and final_qa["passed"] else [
                 _review_chip("Final QA needs repair", "risk") if final_qa else _review_chip("Final QA pending", "neutral")]
+            developmental_qa = coverage["developmental_reviews"].get(chapter.chapter_number)
+            if developmental_qa:
+                risk_chips.append(_review_chip("Developmental QA passed" if developmental_qa["passed"] else "Developmental repair required",
+                                               "success" if developmental_qa["passed"] else "risk"))
         final_edit_completed = chapter.chapter_number in final_edit_numbers
         cards.append(
             {
@@ -2239,6 +2243,7 @@ def _chapter_review_cards(run: GenerationRun) -> list[dict[str, Any]]:
                 "has_risk": any(chip["tone"] in {"risk", "warning"} for chip in risk_chips),
                 "final_edit_completed": final_edit_completed,
                 "final_qa": final_qa,
+                "developmental_qa": coverage["developmental_reviews"].get(chapter.chapter_number) if coverage else None,
             }
         )
     return cards
@@ -2425,6 +2430,10 @@ def _book_completion_context(run: GenerationRun) -> dict[str, Any]:
         rows.insert(6, row("Chapter-pair continuity", coverage["pair_passes"], coverage["pair_target"]))
         rows.insert(7, row("Whole-book editorial review", int(coverage["whole_book_passed"]), 1))
         rows.insert(8, row("Current manuscript accepted", int(coverage["accepted"]), 1))
+        if coverage["acceptance_contract"] >= 2:
+            rows.insert(8, row("Developmental chapter QA", coverage["developmental_passes"], requested_chapters))
+            rows.insert(9, row("Distant-chapter continuity", coverage["cross_passes"], coverage["cross_target"]))
+            rows.insert(10, row("Stable identity QA", coverage["identity_passes"], requested_chapters))
     required_complete = all(item["complete"] for item in rows)
     raw_percent = round((sum(min(item["current"], item["target"]) for item in rows) / sum(item["target"] for item in rows)) * 100)
     percent = raw_percent if required_complete else min(99, raw_percent)
@@ -3712,6 +3721,8 @@ def publication_export_ui(
             message="Publication exports are available after a run completes.",
             message_tone="warning",
         )
+    if run.quality_profile == "autonomous" and review_coverage(run)["editorial_concerns"]:
+        return _redirect(f"/runs/{run.id}", message="Resolve the recorded editorial concerns in a revised edition before creating a publication export.", message_tone="warning")
 
     chapters = [
         chapter

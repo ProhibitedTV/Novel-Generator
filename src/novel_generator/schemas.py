@@ -839,6 +839,7 @@ class TaskRouteOverride(BaseModel):
 
 
 class TaskRouting(BaseModel):
+    autonomous_adjudication: TaskRouteOverride | None = None
     autonomous_review: TaskRouteOverride | None = None
     autonomous_revision: TaskRouteOverride | None = None
     story_bible: TaskRouteOverride | None = None

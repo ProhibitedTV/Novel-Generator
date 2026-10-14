@@ -73,7 +73,7 @@ def install_fake_provider(monkeypatch, *, review_fn=None, revision=REPAIRED):
             for field in ("actual_prose", "final_chapter_actual_prose"):
                 if field in context:
                     context[field] = re.sub(r"^\[Chapter \d+, paragraph \d+\]\n", "", context[field], flags=re.MULTILINE)
-            if context["scope"] == "adjacent_chapters":
+            if context["scope"] in editor.PAIR_SCOPES:
                 numbers = [item["chapter_number"] for item in context["actual_chapters"]]
             elif context["scope"] == "whole_book":
                 numbers = [item["chapter_number"] for item in context["chapter_map"]]
@@ -147,8 +147,9 @@ def test_final_gate_accepts_advisory_preferences_without_rewriting(configured_en
     def review(context, numbers):
         output = clean_review(numbers)
         evidence = context.get('actual_prose') or context['final_chapter_actual_prose']
-        output['optional_suggestions'] = [dict(issue(evidence=evidence), category='prose',
-            problem='I prefer a longer description of the ferry.', repair_instruction='Consider adding more imagery.')]
+        if context['scope'] != 'canon_identity':
+            output['optional_suggestions'] = [dict(issue(evidence=evidence), category='prose',
+                problem='I prefer a longer description of the ferry.', repair_instruction='Consider adding more imagery.')]
         return output
     calls = install_fake_provider(monkeypatch, review_fn=review)
     with get_session_factory()() as session:
@@ -158,7 +159,8 @@ def test_final_gate_accepts_advisory_preferences_without_rewriting(configured_en
         assert run.chapters[0].content == PROSE
         assert not editor._events(run, 'autonomous_repair_started')
         assert editor._events(run, 'autonomous_quality_passed')
-        assert all(item['review']['optional_suggestions'] for item in editor._events(run, 'autonomous_review_completed'))
+        assert all(item['review']['optional_suggestions'] for item in editor._events(run, 'autonomous_review_completed')
+                   if item['scope'] != 'canon_identity')
         assert ('autonomous_revision', 1) not in calls
 
 
@@ -637,7 +639,7 @@ def test_final_gate_repairs_and_rebuilds_metadata_before_acceptance(configured_e
         assert calls.count(("chapter_summary", 1)) == 2
         assert len(editor._events(run, "autonomous_quality_passed")) == 1
         assert result.publication_readiness_label == "automated checks passed"
-        assert len(editor._events(run, "autonomous_review_completed")) == 4
+        assert len(editor._events(run, "autonomous_review_completed")) == 8
 
 
 def test_revision_can_progress_beyond_three_attempts(configured_environment, monkeypatch):

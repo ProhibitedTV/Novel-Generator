@@ -44,6 +44,7 @@ from ..services.providers import ProviderManager, provider_definition
 from ..services.state import approve_outline_review, request_run_cancellation, resume_failed_run
 from ..services.storage import delete_run_artifacts_dir, delete_run_artifacts_dirs
 from ..services.image_settings import ImageSettings, get_image_settings, save_image_settings, probe_image_server
+from ..services.reconstruction import ReconstructionRequest, queue_reconstruction
 from ..settings import Settings
 
 router = APIRouter(tags=["api"])
@@ -254,6 +255,24 @@ def extract_image_packs_api(run_id: str, db: Session = Depends(get_db), settings
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"artifact_id": artifact.id, "metadata": metadata}
+
+
+@router.post("/runs/{run_id}/reconstruct", response_model=GenerationRunRead)
+def reconstruct_run_api(run_id: str, payload: ReconstructionRequest, db: Session = Depends(get_db), settings: Settings = Depends(get_app_settings)):
+    source = get_run(db, run_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Source run not found.")
+    if source.status != RunStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Finish the source manuscript before reconstructing it.")
+    try:
+        routing = payload.task_routing.model_dump(exclude_none=True) if payload.task_routing is not None else source.task_routing
+        _validate_routing_models(_provider_manager(settings, db), source.provider_name, source.model_name, routing)
+        return GenerationRunRead.model_validate(queue_reconstruction(db, source, payload, settings))
+    except (ProviderError, ProviderTransportError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (ValueError, ValidationError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
