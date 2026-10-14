@@ -400,7 +400,7 @@ def list_events_after(session: Session, run_id: str, after_sequence: int) -> lis
 
 def replace_artifacts(session: Session, run: GenerationRun, artifacts: list[Artifact]) -> None:
     for artifact in list(run.artifacts):
-        if artifact.kind != "reconstruction-plan":
+        if artifact.kind != "reconstruction-plan" and not artifact.kind.startswith("image-") and not artifact.kind.startswith("cover-prompt-pack"):
             session.delete(artifact)
     session.flush()
     for artifact in artifacts:

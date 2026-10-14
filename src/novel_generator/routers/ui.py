@@ -216,6 +216,12 @@ RUN_STAGES[_export_stage_index:_export_stage_index] = [
     },
 ]
 TERMINAL_STATUSES = {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED}
+RUN_STAGES.insert(next(i for i, stage in enumerate(RUN_STAGES) if stage["id"] == "completed"), {
+    "id": "image_render_batch", "label": "Optional illustrations",
+    "description": "Rendering source-bound images one at a time after text acceptance and export.",
+    "why": "Images must use stable prose and preserve completed text when rendering fails.",
+    "result": "Saved images, prompt sidecars, and a manifest including failures and skipped requests.",
+})
 
 CANON_ENTITY_TYPES = [
     "person",
@@ -2279,11 +2285,19 @@ def _artifact_group_context(run: GenerationRun) -> list[dict[str, Any]]:
         },
     ]
     lookup = {group["id"]: group for group in groups}
+    if any(a.kind.startswith(("image-", "cover-prompt-pack")) for a in run.artifacts):
+        images = {"id": "images", "label": "Illustrations and art direction",
+                  "description": "Rendered images, prompts, manifests, and extraction evidence.",
+                  "empty": "No saved image outputs.", "artifacts": []}
+        groups.append(images)
+        lookup["images"] = images
     for artifact in sorted(run.artifacts, key=lambda item: (item.kind, item.filename)):
         if artifact.kind in {"markdown", "docx"}:
             lookup["manuscript"]["artifacts"].append(artifact)
         elif artifact.kind.startswith("publication-"):
             lookup["publication"]["artifacts"].append(artifact)
+        elif artifact.kind.startswith(("image-", "cover-prompt-pack")):
+            lookup["images"]["artifacts"].append(artifact)
         else:
             lookup["editorial"]["artifacts"].append(artifact)
     return groups
@@ -3663,6 +3677,7 @@ def run_detail(
     settings: Settings = Depends(get_app_settings),
 ):
     from ..services.image_packs import image_pack_context
+    from ..services.image_rendering import image_gallery_context
     from ..services.image_settings import get_image_settings
     run = get_run(db, run_id)
     if run is None:
@@ -3678,6 +3693,7 @@ def run_detail(
             "active_nav": "projects",
             "run": run,
             "image_pack_metadata": image_pack_context(run, settings),
+            "image_gallery": image_gallery_context(run, settings),
             "image_generation_enabled": get_image_settings(db).enabled,
             "project": run.project,
             "run_genre_profile": run_profile,
