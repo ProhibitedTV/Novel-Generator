@@ -267,7 +267,7 @@
       {% if manuscript_edition.final_qa_coverage %}
         {% set coverage = manuscript_edition.final_qa_coverage %}
         <details class="chapter-preview-shell" id="final-editorial-evidence" data-final-qa-evidence>
-          <summary><span>Final editorial evidence</span><span class="summary-meta">{{ "Accepted current manuscript" if coverage.accepted else "Acceptance pending or source changed" }}</span></summary>
+          <summary><span>Final editorial evidence</span><span class="summary-meta">{{ "Accepted current manuscript" if coverage.accepted else "Revision required" if coverage.editorial_concerns else "Acceptance pending or source changed" }}</span></summary>
           <div class="detail-item">
             <p>{{ coverage.chapter_passes }} / {{ manuscript_edition.requested_chapters }} final chapter reviews passed; {{ coverage.pair_passes }} / {{ coverage.pair_target }} full chapter-pair continuity reviews passed; whole-book review {{ "passed" if coverage.whole_book_passed else "pending" }}.</p>
             {% if coverage.acceptance_contract >= 2 %}

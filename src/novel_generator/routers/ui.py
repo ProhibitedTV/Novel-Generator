@@ -561,7 +561,12 @@ def _run_health_context(run: GenerationRun) -> dict[str, Any]:
         title = "Canceled before completion"
         body = "This run is preserved for review. Rerun it, regenerate from a chapter, or delete it when you no longer need the history."
     elif run.status == RunStatus.COMPLETED:
-        if progress["completed_chapters"] == run.requested_chapters:
+        concerns = review_coverage(run)["editorial_concerns"] if run.quality_profile == "autonomous" else []
+        if concerns:
+            tone = "error"
+            title = "Completed manuscript needs revision"
+            body = concerns[-1].get("message") or "Later editorial evidence overrides the earlier automatic pass."
+        elif progress["completed_chapters"] == run.requested_chapters:
             tone = "success"
             title = "Run completed with all requested chapters"
             body = "Manuscript artifacts, QA feedback, and chapter checkpoints are ready for review."

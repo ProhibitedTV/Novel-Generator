@@ -167,6 +167,8 @@ def test_recorded_source_concerns_block_publication_helper_but_preserve_download
         run_id = source.id
     response = client.post(f"/runs/{run_id}/publication-export", data={"profile_id": "ebook_docx"}, follow_redirects=False)
     assert response.status_code == 303 and "recorded+editorial+concerns" in response.headers["location"]
+    page = client.get(f"/runs/{run_id}")
+    assert "Completed manuscript needs revision" in page.text and "Revision required" in page.text
     with get_session_factory()() as session:
         source = get_run(session, run_id)
         assert source.chapters[0].content == PROSE
