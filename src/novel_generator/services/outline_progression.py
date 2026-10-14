@@ -11,6 +11,7 @@ from .outline_contracts import OutlineSpineEntry, OutlineProgressionReview
 from .prompts import extract_json_payload
 from .structured_schema_runtime import make_schema_marker
 from .provider_controls import make_ollama_controls_marker
+from .providers import review_model_identity, review_cache_allowed, require_unchanged_review_models
 
 
 PROGRESSION_RULES = (
@@ -76,7 +77,10 @@ def review_outline(session, run, outline, client, prefix=()):
     if len(outline) < 2:
         return OutlineProgressionReview(reviewed_chapters=[row["chapter_number"] for row in outline], progression_coherent=True, issues=[])
     provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
-    verify_provider, verify_model = pipeline._resolve_stage_route(client, run, "autonomous_revision")
+    verifier_stage = "autonomous_adjudication" if (run.task_routing or {}).get("autonomous_adjudication") else "autonomous_revision"
+    verify_provider, verify_model = pipeline._resolve_stage_route(client, run, verifier_stage)
+    reviewer_identity = review_model_identity(client, provider, model)
+    verifier_identity = review_model_identity(client, verify_provider, verify_model)
     config = getattr(client, "settings", None)
     if config is None:
         from ..settings import get_settings
@@ -85,9 +89,10 @@ def review_outline(session, run, outline, client, prefix=()):
         "think": config.ollama_adjudication_think, "temperature": config.ollama_adjudication_temperature}.items() if value is not None}
     context = _context(run, outline, prefix)
     fingerprint = _hash({"contract": 1, "context": context, "reviewer": [provider, model],
-                         "verifier": [verify_provider, verify_model], "controls": controls})
+                         "verifier": [verify_provider, verify_model], "controls": controls,
+                         "reviewer_identity": reviewer_identity, "verifier_identity": verifier_identity})
     for saved in reversed(_events(run, "outline_progression_review_completed")):
-        if saved.get("fingerprint") == fingerprint:
+        if saved.get("fingerprint") == fingerprint and review_cache_allowed(reviewer_identity, verifier_identity):
             return parse_review(json.dumps(saved["review"]), outline)
     schema = OutlineProgressionReview.model_json_schema()
     numbers = [row["chapter_number"] for row in outline]
@@ -118,8 +123,10 @@ def review_outline(session, run, outline, client, prefix=()):
         review = generate(verify_provider, verify_model, messages(review.issues))
         _record(session, run, "outline_progression_adjudicated", {"message": "Verified outline progression allegations before replanning.",
             "proposed_review": proposed, "review": review.model_dump(), "fingerprint": fingerprint})
+    require_unchanged_review_models(client, (provider, model, reviewer_identity), (verify_provider, verify_model, verifier_identity))
     _record(session, run, "outline_progression_review_completed", {"message": "Whole outline progression passed." if review.passed else "Whole outline needs structural repair.",
-        "fingerprint": fingerprint, "review": review.model_dump(), "source_outline_hash": _hash(outline)})
+        "fingerprint": fingerprint, "review": review.model_dump(), "source_outline_hash": _hash(outline),
+        "reviewer_identity": reviewer_identity, "verifier_identity": verifier_identity})
     return review
 
 

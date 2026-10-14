@@ -8,7 +8,7 @@ from ..schemas import ProviderCapabilities
 from ..settings import Settings
 from .openai_compatible import OpenAICompatibleClient
 from .ollama import OllamaClient
-from .provider_errors import ProviderError
+from .provider_errors import ProviderError, ProviderTransportError
 
 
 TASK_ROUTE_STAGES: list[dict[str, str]] = [
@@ -150,6 +150,15 @@ class ProviderManager:
             raise ProviderError(f"{provider_definition(provider_name).label} is disabled.")
         self.client_for(provider_name).ensure_model(model_name)
 
+    def model_identity(self, provider_name: str, model_name: str) -> dict:
+        config = self.config_for(provider_name)
+        if not config.is_enabled:
+            raise ProviderError(f"{provider_definition(provider_name).label} is disabled.")
+        if provider_name == "ollama":
+            return self.client_for(provider_name).model_identity(model_name)
+        # OpenAI-compatible IDs alone do not prove an immutable local model revision.
+        return {"provider": provider_name, "model": model_name, "verified": False}
+
     def chat(self, provider_name: str, model_name: str, messages: list[dict[str, str]], stream: bool = False) -> str:
         return self.client_for(provider_name).chat(model_name, messages, stream=stream)
 
@@ -166,3 +175,23 @@ class ProviderManager:
         if not config.is_enabled:
             raise ProviderError(f"{provider_definition(provider_name).label} is disabled.")
         return provider_name, model_name
+
+
+def review_model_identity(client, provider_name, model_name):
+    if isinstance(client, OllamaClient):
+        return client.model_identity(model_name) if provider_name == "ollama" else None
+    resolver = getattr(client, "model_identity", None)
+    return resolver(provider_name, model_name) if callable(resolver) else None
+
+
+def review_cache_allowed(*identities):
+    # Legacy/custom adapters without metadata retain their existing contract;
+    # standard app providers explicitly disable caching when revision is unknown.
+    return all(identity is None or identity.get("verified") is True for identity in identities)
+
+
+def require_unchanged_review_models(client, *bindings):
+    for provider, model, before in bindings:
+        if before is not None and review_model_identity(client, provider, model) != before:
+            # The normal persisted provider cooldown retries this without applying a repair.
+            raise ProviderTransportError(f"Model '{model}' changed during review; discard this verdict and retry after the model is stable.")
