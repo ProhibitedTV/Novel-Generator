@@ -3128,6 +3128,8 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
     if client is not None:
         from .cover_prompts import generate_optional_cover_prompts
         generate_optional_cover_prompts(session, run, completed_chapters, settings, client)
+    from .image_rendering import render_optional_images
+    render_optional_images(session, run, settings)
     run.current_step = "completed"
     run.current_chapter = None
     run.status = RunStatus.COMPLETED
@@ -3137,7 +3139,7 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
         session,
         run,
         "run_completed",
-        {"message": "Run finished successfully.", "artifact_count": len(artifacts)},
+        {"message": "Run finished successfully.", "artifact_count": len(run.artifacts)},
     )
     session.commit()
 

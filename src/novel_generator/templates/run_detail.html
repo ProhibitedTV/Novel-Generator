@@ -288,7 +288,7 @@
         <details class="chapter-preview-shell" id="image-pack-metadata" data-image-pack-metadata>
           <summary><span>Chapter image metadata</span><span class="summary-meta">Text extraction only</span></summary>
           <div class="detail-item">
-            <p class="field-note">Explicit IMAGE PACK blocks are extracted from final chapter text. Missing prompts produce warnings. Batch rendering is pending.</p>
+            <p class="field-note">Explicit IMAGE PACK blocks are extracted from final chapter text. Missing prompts produce warnings. Enabled images render after final text acceptance and export.</p>
             {% if run.status.value == 'completed' %}<form method="post" action="/runs/{{ run.id }}/image-packs/extract"><button class="secondary">Extract image metadata</button></form>{% endif %}
             {% if image_pack_metadata %}
               <a href="/api/artifacts/{{ image_pack_metadata.artifact.id }}/download">Download image metadata</a>
@@ -307,6 +307,32 @@
                 {% endfor %}
               {% endif %}
             {% endif %}
+          </div>
+        </details>
+      {% endif %}
+
+      {% if image_gallery %}
+        <details class="chapter-preview-shell" id="image-gallery" data-image-gallery open>
+          <summary><span>Book illustrations</span><span class="summary-meta">Images and render status</span></summary>
+          <div class="detail-item">
+            <a href="/api/artifacts/{{ image_gallery.artifact.id }}/download">Download image manifest</a>
+            {% if not image_gallery.current %}<p class="warning-text">Saved images do not match the current accepted manuscript. These are historical outputs.</p>{% endif %}
+            {% if image_gallery.error %}<p class="warning-text">{{ image_gallery.error }}</p>{% endif %}
+            {% for group, images in image_gallery.groups.items() %}
+              <section class="image-gallery-group"><h3>{{ group }}</h3><div class="image-gallery-grid">
+                {% for item in images %}
+                  <article class="image-gallery-card" data-image-status="{{ item.status }}">
+                    <p><strong>{{ item.id }}</strong> · {{ item.status }}</p>
+                    {% if item.image_artifact %}
+                      <a href="/api/artifacts/{{ item.image_artifact.id }}/download"><img loading="lazy" src="/api/artifacts/{{ item.image_artifact.id }}/download" alt="{{ item.chapter_title }} illustration {{ loop.index }}"></a>
+                      <p><a href="/api/artifacts/{{ item.image_artifact.id }}/download">Download image</a>{% if item.sidecar_artifact %} · <a href="/api/artifacts/{{ item.sidecar_artifact.id }}/download">Download prompt and settings</a>{% endif %}</p>
+                    {% endif %}
+                    {% if item.warning %}<p class="warning-text">{{ item.warning }}</p>{% endif %}
+                    {% if item.prompt %}<details><summary>Prompt and settings</summary><p>{{ item.prompt }}</p><p>Negative prompt: {{ item.negative_prompt }}</p><p>Aspect ratio {{ item.aspect_ratio }} · {{ item.width|default('unavailable') }} × {{ item.height|default('unavailable') }} · seed {{ item.seed }}</p></details>{% endif %}
+                  </article>
+                {% endfor %}
+              </div></section>
+            {% endfor %}
           </div>
         </details>
       {% endif %}

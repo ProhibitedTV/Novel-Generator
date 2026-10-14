@@ -133,7 +133,7 @@ def parse_image_packs(text):
 
 def build_image_pack_metadata(run):
     chapters = sorted(run.chapters, key=lambda chapter: chapter.chapter_number)
-    if (run.status != RunStatus.COMPLETED and run.current_step != "export" or
+    if (run.status != RunStatus.COMPLETED and run.current_step not in {"export", "image_render_batch"} or
             [c.chapter_number for c in chapters] != list(range(1, run.requested_chapters + 1)) or
             any(c.status != ChapterStatus.COMPLETED or not (c.content or "").strip() for c in chapters)):
         raise ValueError("Image metadata requires every final completed chapter.")

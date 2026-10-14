@@ -23,14 +23,14 @@ aftermath, staged decisions, motifs, and independent collection pieces. An
 unsupported review cannot require a rewrite. An unresolved required defect
 cannot be turned into a completion flag by increasing a budget or skipping a check.
 
-## Outstanding illustration issues
+## Optional illustrations
 
 The image settings and text-only metadata foundations are implemented. Continue
 with rendering and its outputs in this dependency order:
 
 1. [#38: Local image generation settings](https://github.com/ProhibitedTV/Novel-Generator/issues/38) and [#39: Extract chapter IMAGE PACK metadata](https://github.com/ProhibitedTV/Novel-Generator/issues/39): implemented with disabled defaults, explicit connection testing, source-bound metadata, downloadable extraction evidence, and warnings for absent/malformed packs. See [setup and qualification](local-images.md).
-2. [#40: Post-text image rendering](https://github.com/ProhibitedTV/Novel-Generator/issues/40) and [#41: Rendered image artifacts](https://github.com/ProhibitedTV/Novel-Generator/issues/41). Require persisted per-image recovery, explicit timeouts, and accepted manuscript input.
-3. [#42: Image manifest export](https://github.com/ProhibitedTV/Novel-Generator/issues/42) and [#43: Run image gallery](https://github.com/ProhibitedTV/Novel-Generator/issues/43). Export references must resolve to saved artifacts, and the gallery must distinguish pending, failed, and completed images.
+2. [#40: Post-text image rendering](https://github.com/ProhibitedTV/Novel-Generator/issues/40) and [#41: Rendered image artifacts](https://github.com/ProhibitedTV/Novel-Generator/issues/41): implemented with sequential requests, persisted seeds/model and per-image checkpoints, explicit timeouts, verified image/sidecar artifacts, and accepted manuscript input.
+3. [#42: Image manifest export](https://github.com/ProhibitedTV/Novel-Generator/issues/42) and [#43: Run image gallery](https://github.com/ProhibitedTV/Novel-Generator/issues/43): implemented with source/settings fingerprints, successful/failed/skipped requests, resolving artifact downloads, grouped thumbnails, and stale-output warnings. See [qualification](image-rendering-qualification-2026-10-14.md).
 
 [#44: Cover prompt pack](https://github.com/ProhibitedTV/Novel-Generator/issues/44)
 is implemented independently of rendering. The local qualification produced
@@ -38,5 +38,6 @@ three source-grounded concepts for the accepted small book and reused the pack
 without changing prose or text exports. See [setup and qualification](cover-prompts.md).
 
 An image-provider failure must preserve the accepted text and completed exports.
-Rendering-specific implementation and integration checks remain outstanding;
-settings and extraction tests do not establish image-generation readiness.
+Protocol, persistence, pipeline integration, and browser gallery checks are
+qualified with synthetic image fixtures. Actual image-model/GPU qualification and
+illustration quality remain outstanding; images stay disabled for the revised novel.

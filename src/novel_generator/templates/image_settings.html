@@ -5,7 +5,7 @@
   <div class="section-header"><div><p class="eyebrow">Optional illustrations</p><h1>Local image generation</h1></div>
     <span class="badge">{{ "Enabled" if image_settings.enabled else "Disabled" }}</span></div>
   <p>Save a connection to an AUTOMATIC1111-compatible image server. Images are disabled by default. Text generation does not need this connection.</p>
-  <p class="field-note">This release saves image settings and extracts IMAGE PACK metadata after text acceptance. Batch rendering is still pending. A ready connection test does not render an image.</p>
+  <p class="field-note">Images render one at a time after final text acceptance and export. Missing prompts or failed renders appear in the image manifest; completed manuscript files remain available. A ready connection test does not render an image.</p>
   {% if test_result %}
     <div class="callout callout-{{ 'success' if test_result.reachable else 'warning' }}" data-image-connection="{{ test_result.status }}">
       <h2>{{ "Ready" if test_result.reachable else "Unavailable" }}</h2>
@@ -19,7 +19,7 @@
     <label>Server base URL<input name="base_url" type="url" required value="{{ image_settings.base_url }}"></label>
     <p class="field-note">Enable the server API with --api. For this app in Docker and an image server on Windows, use http://host.docker.internal:7860 and make the server accessible to Docker.</p>
     <div class="grid two-up">
-    {% for key, label, minimum, maximum, increment in [('width','Width',64,4096,8), ('height','Height',64,4096,8), ('steps','Steps',1,150,1), ('cfg_scale','CFG scale',0,30,0.1), ('seed','Fixed seed',0,4294967295,1)] %}
+    {% for key, label, minimum, maximum, increment in [('width','Maximum width',64,4096,8), ('height','Maximum height',64,4096,8), ('steps','Steps',1,150,1), ('cfg_scale','CFG scale',0,30,0.1), ('seed','Fixed seed',0,4294967295,1), ('render_timeout_seconds','Render timeout (seconds)',10,1800,1), ('max_attempts','Attempts per image across resumptions',1,5,1)] %}
       <label>{{ label }}<input name="{{ key }}" type="number" required min="{{ minimum }}" max="{{ maximum }}" step="{{ increment }}" value="{{ image_settings[key] }}"></label>
     {% endfor %}
     <label>Sampler<input name="sampler" required maxlength="128" value="{{ image_settings.sampler }}"></label>

@@ -1,4 +1,4 @@
-"""Optional AUTOMATIC1111-compatible connection settings; never starts rendering."""
+"""Optional AUTOMATIC1111-compatible settings and an explicit read-only probe."""
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -20,6 +20,8 @@ class ImageSettings(BaseModel):
     seed_mode: Literal["random", "fixed"] = "random"
     seed: int = Field(default=0, ge=0, le=4294967295)
     output_format: Literal["png", "jpeg", "webp"] = "png"
+    render_timeout_seconds: int = Field(default=600, ge=10, le=1800)
+    max_attempts: int = Field(default=2, ge=1, le=5)
 
     @field_validator("base_url")
     @classmethod
