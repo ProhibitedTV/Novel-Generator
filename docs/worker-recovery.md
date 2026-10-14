@@ -35,3 +35,22 @@ protection, competing subprocesses, abrupt owner death, unsupported database
 types, and interrupted cancellation. Local acceptance requires a container
 restart followed by `exclusive_worker_startup` requeueing and a new worker claim;
 a RUNNING API status by itself is insufficient evidence.
+
+## October 14 live qualification
+
+PR #88 passed 570 CI tests and was merged before rebuilding both local services.
+The revised Orchard run was active with three completed chapters and a fresh
+Chapter 4 draft checkpoint. The replacement worker recorded
+`exclusive_worker_startup` recovery at 14:01:28 UTC, claimed the run, reused its
+saved Chapter 4 plan, and continued drafting/expanding instead of waiting an hour.
+
+A separate process inside the running worker container attempted the same lease
+and was blocked. The run's worker ID matched the new container hostname. All three
+completed chapter hashes matched the pre-deployment snapshot, and the original
+edition's manuscript and Markdown/DOCX checksums remained unchanged. The web
+container was healthy and the worker could reach host Ollama.
+
+The database backup, snapshot, and qualification record are retained locally under
+`artifacts/runtime/pre-exclusive-deployment*` and
+`artifacts/runtime/exclusive-recovery-qualification.json`. Generated worker lock
+files are ignored by Git and retained on disk; they are not cleanup targets.
