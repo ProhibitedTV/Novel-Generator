@@ -43,6 +43,20 @@ a complete chapter revision. Both paths require another review before generation
 continues. Reviews must cover all
 requested chapters, explicitly answer every required check, and quote real prose
 for each problem; missing checks and invented quotations cannot count as passes.
+Once general and length defects are resolved, a separate stable-identity audit
+must also pass before the draft can feed later chapters. It compares complete
+prose with established character and relationship canon, independently verifies
+proposed defects, and rechecks any repairs. At final editing, unchanged identity
+evidence can be reused; changed source or canon invalidates it. Previously
+completed chapters still receive the final identity gate.
+
+Cancellation checks refresh only cancellation/status controls. They preserve
+pending prose, story-bible, and outline edits instead of expiring the source
+after review context has been built. Externally saved cancellation remains
+effective, and preserving a draft never grants it editorial acceptance.
+New checkpoints and stage attempts also update the worker's loaded history
+directly; reading fresh recovery evidence no longer requires a full run refresh.
+
 Review prompts label the actual prose by chapter and paragraph. Reviewers can
 cite `evidence_paragraphs` instead of copying dialogue: the application validates
 the references and attaches the exact source paragraphs to the diagnosis.

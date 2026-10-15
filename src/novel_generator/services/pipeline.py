@@ -224,9 +224,12 @@ def _ledger_with_chapter_mode(
 
 
 def _ensure_not_canceled(session: Session, run: GenerationRun) -> None:
-    session.refresh(run)
+    # A full refresh cascades expiration into chapter relationships and can
+    # discard pending prose/canon edits after review context was built.
+    # Fetch only the controls this guard needs; preserve the source being checked.
+    session.refresh(run, attribute_names=["cancel_requested", "status"])
     touch_run_heartbeat(session, run)
-    if run.cancel_requested:
+    if run.cancel_requested or run.status == RunStatus.CANCELED:
         run.status = RunStatus.CANCELED
         run.current_step = "canceled"
         run.worker_id = None
