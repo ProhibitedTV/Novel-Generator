@@ -569,6 +569,8 @@ def test_chapter_repairs_are_rereviewed_and_checkpointed(configured_environment,
         run.chapters[0].content = REPAIRED + " Now."
         editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
         assert len(calls) == before + 2  # Both general and identity evidence are source-bound.
+        assert run.chapters[0].content == REPAIRED + " Now."
+        assert editor._events(run, "autonomous_review_completed")[-1]["source_hashes"] == {"1": editor._hash(REPAIRED + " Now.")}
 
 
 def test_local_repair_preserves_neighbors_and_requires_fresh_review(configured_environment, monkeypatch):
