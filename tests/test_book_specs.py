@@ -208,7 +208,7 @@ def test_nonfiction_cannot_bypass_source_audit_even_when_general_review_passes(m
     calls = []
     def review(session, run, chapters, context, client, scope):
         calls.append(scope)
-        issues = [] if scope == "chapter" or "10 mL" in chapter.content else [EditorialIssue(
+        issues = [] if scope in {"chapter", "canon_identity"} or "10 mL" in chapter.content else [EditorialIssue(
             chapter_number=1, category="factual", problem="The source says 10 mL.", evidence=chapter.content,
             repair_instruction="Correct 20 mL to the source's 10 mL.")]
         return EditorialReview(reviewed_chapters=[1], plot_coherent=True, canon_consistent=not issues,
@@ -224,7 +224,7 @@ def test_nonfiction_cannot_bypass_source_audit_even_when_general_review_passes(m
     monkeypatch.setattr(editor, "_repair", repair)
     editor.ensure_chapter(None, target_run, chapter, None, None, None)
     assert [issue.category for issue in repairs] == ["factual"]
-    assert calls == ["chapter", "source_accuracy", "chapter", "source_accuracy"]
+    assert calls == ["chapter", "canon_identity", "source_accuracy", "chapter", "canon_identity", "source_accuracy"]
 
 
 def test_source_audit_constraints_keep_other_checks_separate_and_require_full_coverage():
