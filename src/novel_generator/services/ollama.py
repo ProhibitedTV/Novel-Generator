@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Callable
 from typing import Any
@@ -193,6 +194,21 @@ class OllamaClient:
         data = self._request("GET", "/api/tags")
         models = data.get("models", [])
         return [item.get("name", "").strip() for item in models if item.get("name")]
+
+    def model_identity(self, model_name: str) -> dict:
+        """Resolve mutable tags afresh before reusing an editorial verdict."""
+        canonical = model_name if ":" in model_name.rsplit("/", 1)[-1] else model_name + ":latest"
+        data = self._request("GET", "/api/tags")
+        model = next((item for item in data.get("models", []) if item.get("name") in {model_name, canonical}), None)
+        if model is None:
+            raise OllamaError(f"Model '{model_name}' is not installed.")
+        digest = str(model.get("digest") or "").removeprefix("sha256:").lower()
+        version = self._request("GET", "/api/version").get("version")
+        verified = bool(re.fullmatch(r"[a-f0-9]{64}", digest) and isinstance(version, str) and version.strip())
+        return {"provider": "ollama", "model": model.get("name"), "digest": digest if verified else None,
+                "runtime_version": version, "verified": verified,
+                "defaults": {"context_tokens": self.num_ctx, "output_tokens": self.num_predict,
+                             "structured_temperature": self.structured_temperature, "think": self.think}}
 
     def health(self, default_model: str) -> ProviderCapabilities:
         try:

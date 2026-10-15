@@ -468,9 +468,13 @@ def _adjudication_messages(scope, context, review, controls):
 def _review(session, run, chapters, context: dict, client, scope: str) -> EditorialReview:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
-    provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
+    review_stage = "autonomous_book_review" if scope == "whole_book" and (run.task_routing or {}).get("autonomous_book_review") else "autonomous_review"
+    provider, model = pipeline._resolve_stage_route(client, run, review_stage)
     adjudication_stage = "autonomous_adjudication" if (run.task_routing or {}).get("autonomous_adjudication") else "autonomous_revision"
     adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, adjudication_stage)
+    from .providers import review_model_identity, review_cache_allowed, require_unchanged_review_models
+    reviewer_identity = review_model_identity(client, provider, model)
+    adjudicator_identity = review_model_identity(client, adjudicator_provider, adjudicator_model)
     controls = {}
     adjudication_controls = {}
     if provider == "ollama" or adjudicator_provider == "ollama":
@@ -491,13 +495,14 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     fingerprint_inputs = {"contract": 26 if scope in PAIR_SCOPES else 25 if scope in {"whole_book", "developmental_chapter", "canon_identity"} else 22, "context": context, "provider": provider, "model": model, "scope": scope, "controls": controls,
                          "adjudication_controls": adjudication_controls,
                          "adjudicator": [adjudicator_provider, adjudicator_model]}
+    fingerprint_inputs.update(reviewer_identity=reviewer_identity, adjudicator_identity=adjudicator_identity)
     if scope in {"whole_book", "developmental_chapter"}:
         # Compacted excerpts can stay identical after a middle passage changes.
         # Such a change must still invalidate the complete-book verdict.
         fingerprint_inputs["manuscript_hash"] = _hash([(chapter.chapter_number, chapter.content) for chapter in chapters])
     fingerprint = _hash(fingerprint_inputs)
     for saved in reversed(_events(run, "autonomous_review_completed")):
-        if saved.get("fingerprint") == fingerprint:
+        if saved.get("fingerprint") == fingerprint and review_cache_allowed(reviewer_identity, adjudicator_identity):
             return validate_review(json.dumps(saved["review"]), chapters)
     instruction = (
         "You are an independent fiction editor. Return valid JSON only, matching this contract: "
@@ -633,7 +638,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     prior_repairs = [item for item in _events(run, "autonomous_repair_started")
                      if item.get("chapter_number") in affected]
     if (review.issues and scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", "whole_book", *PAIR_SCOPES, "source_accuracy"}
-            and (scope in PAIR_SCOPES or scope in {"developmental_chapter", "canon_identity"} or len(prior_repairs) >= 2)):
+            and (scope in PAIR_SCOPES or scope in {"developmental_chapter", "canon_identity", "whole_book"} or len(prior_repairs) >= 2)):
         # A separate decision pass checks a repeatedly revised chapter against
         # the actual contract, rather than endlessly following new preferences.
         # Pair allegations are always verified before the first mutation: a
@@ -652,10 +657,14 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             "provider_name": adjudicator_provider, "model_name": adjudicator_model,
             "controls": adjudication_controls,
             "review": review.model_dump(), "fingerprint": fingerprint,
+            "reviewer_identity": reviewer_identity, "adjudicator_identity": adjudicator_identity,
         })
+    require_unchanged_review_models(client, (provider, model, reviewer_identity),
+                                   (adjudicator_provider, adjudicator_model, adjudicator_identity))
     _record(session, run, "autonomous_review_completed", {
         "message": f"Automatic {scope} review {'passed' if review.passed else 'requested repairs'}.",
         "scope": scope, "fingerprint": fingerprint, "review": review.model_dump(),
+        "reviewer_identity": reviewer_identity, "adjudicator_identity": adjudicator_identity,
         "source_hashes": {str(chapter.chapter_number): _hash(chapter.content or "") for chapter in chapters},
         "context_source_hashes": context.get("context_source_hashes", {}),
         "provider_name": provider, "model_name": model,
