@@ -3130,6 +3130,7 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
             break
     else:
         raise RuntimeError("Manuscript export integrity failed after automatic rerender; saved chapter prose is preserved.")
+    _ensure_not_canceled(session, run)
     replace_artifacts(session, run, artifacts)
     if autonomous_editorial.enabled(run):
         autonomous_editorial.save_report(session, run, settings, "passed")

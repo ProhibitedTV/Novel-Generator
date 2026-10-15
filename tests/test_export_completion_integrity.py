@@ -43,6 +43,8 @@ def test_production_completion_requires_matching_exports_and_retries_once(config
 
 @pytest.mark.parametrize('corrupt',[False,True])
 def test_cancel_during_export_neither_completes_nor_retries(configured_environment,monkeypatch,corrupt):
+    from novel_generator.services import image_packs
+    monkeypatch.setattr(image_packs,'extract_optional_image_packs',lambda *args: pytest.fail('Optional work must not start after export cancellation'))
     original=pipeline.export_run_artifacts
     calls=[]
     with get_session_factory()() as session:
