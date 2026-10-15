@@ -24,6 +24,22 @@ class AutonomousQualityError(RuntimeError):
 PAIR_SCOPES = {"adjacent_chapters", "cross_chapter"}
 ACCEPTANCE_CONTRACT = 2
 
+OUTPUT_ARTIFACT_PATTERN = re.compile(
+    r"\b(?:the chapter (?:ends?|ended|concludes?|concluded)(?:\s+(?:on|with|by))?|"
+    r"this (?:scene|chapter) (?:shows|reveals|establishes|foreshadows|sets up)|"
+    r"as an ai(?: language model)?|insert (?:scene|chapter|dialogue) here)\b", re.IGNORECASE,
+)
+OUTPUT_ARTIFACT_RULES = (
+    "Audit only unintended production notes, chapter synopsis, placeholders, or assistant commentary embedded in finished prose. "
+    "Suspected phrases are navigation hints, never proof of a defect. Read the complete chapter and author contract. "
+    "Intentional metafiction, narrator address, quoted dialogue, and nonfiction discussion of chapters are valid when appropriate "
+    "to the requested form. Do not ban a word, tense, narrative distance, or writing style. A sentence describing how this "
+    "chapter ends can be an accidental synopsis instead of actual scene narration; verify its function in context. "
+    "Only confirmed unintended output artifacts fail prose_clean. Set plot_coherent, canon_consistent and ending_complete true. "
+    "Report prose issues only, with exact evidence_paragraphs and evidence='Source paragraphs', targeted repairs preserving "
+    "the passage's intended events, and no optional suggestions. A matching phrase alone must never authorize deletion."
+)
+
 
 VIEWPOINT_RULES = (
     "Distinguish established shared facts from attributed speech, beliefs, guesses, lies, and predictions. "
@@ -124,7 +140,7 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None, parag
     schema["$defs"]["EditorialIssue"]["properties"]["chapter_number"]["enum"] = sorted(chapter_numbers)
     definition = schema["$defs"]["EditorialIssue"]
     definition["required"] = list(dict.fromkeys([*definition["required"], "repair_scope"]))
-    if scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", *PAIR_SCOPES, "source_accuracy"}:
+    if scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", *PAIR_SCOPES, "source_accuracy", "output_artifacts"}:
         # Complete prose in these scopes is always numbered. References also
         # anchor omission diagnoses, which cannot quote an absent sentence.
         issue = schema["$defs"]["EditorialIssue"]
@@ -168,6 +184,11 @@ def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None, parag
     if scope == "developmental_chapter":
         schema["properties"]["canon_consistent"]["const"] = True
         definition["properties"]["category"]["enum"] = ["character", "causality", "premature_payoff", "unresolved_payoff", "repetition", "prose"]
+    if scope == "output_artifacts":
+        for check in ("plot_coherent", "canon_consistent", "ending_complete"):
+            schema["properties"][check]["const"] = True
+        definition["properties"]["category"]["const"] = "prose"
+        schema["properties"]["optional_suggestions"]["maxItems"] = 0
     return make_schema_marker("autonomous_review", schema=schema)
 
 
@@ -454,6 +475,8 @@ def _adjudication_messages(scope, context, review, controls):
         instruction += "\n" + DEVELOPMENTAL_RULES
     if scope == "canon_identity":
         instruction += "\n" + IDENTITY_RULES
+    if scope == "output_artifacts":
+        instruction += "\n" + OUTPUT_ARTIFACT_RULES + "\n" + contract_text(context.get("author_brief"))
     messages = [{"role": "system", "content": instruction}, {"role": "user", "content": json.dumps(
         {"scope": scope, **source, "proposed_review_to_verify": allegations}, ensure_ascii=False)}]
     if controls:
@@ -581,6 +604,8 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         instruction += "\n" + DEVELOPMENTAL_RULES
     if scope == "canon_identity":
         instruction = IDENTITY_RULES + "\n" + contract_text(context.get("author_brief")) + "\n" + json.dumps(EditorialReview.model_json_schema())
+    if scope == "output_artifacts":
+        instruction = OUTPUT_ARTIFACT_RULES + "\n" + contract_text(context.get("author_brief")) + "\n" + json.dumps(EditorialReview.model_json_schema())
     if scope in PAIR_SCOPES:
         instruction += "\n" + BOOKWIDE_CONTINUITY_RULES
     messages = [{"role": "system", "content": instruction},
@@ -599,7 +624,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     def parse_review(raw):
         try:
             review = validate_review(raw, chapters)
-            if scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", *PAIR_SCOPES}:
+            if scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", *PAIR_SCOPES, "output_artifacts"}:
                 validate_chapter_repair_scope(review)
             if scope in PAIR_SCOPES and (not review.prose_clean or not review.ending_complete or
                 any(issue.category not in {"continuity", "character", "causality"} for issue in review.issues)):
@@ -614,6 +639,9 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             if scope == "source_accuracy" and (not all((review.plot_coherent, review.prose_clean, review.ending_complete))
                 or any(issue.category != "factual" for issue in review.issues) or review.optional_suggestions):
                 raise ValueError("Source audits judge factual support only; keep other checks true and report only factual issues without optional suggestions.")
+            if scope == "output_artifacts" and (not all((review.plot_coherent, review.canon_consistent, review.ending_complete))
+                or any(issue.category != "prose" for issue in review.issues) or review.optional_suggestions):
+                raise ValueError("Output-artifact audits judge unintended production text only; keep other checks true and report prose issues without optional suggestions.")
             if review._rejected_optional_suggestions:
                 _record(session, run, "autonomous_advisory_rejected", {
                     "message": "Discarded unsupported optional advice; required editorial checks remain validated.",
@@ -637,8 +665,8 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     affected = {issue.chapter_number for issue in review.issues}
     prior_repairs = [item for item in _events(run, "autonomous_repair_started")
                      if item.get("chapter_number") in affected]
-    if (review.issues and scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", "whole_book", *PAIR_SCOPES, "source_accuracy"}
-            and (scope in PAIR_SCOPES or scope in {"developmental_chapter", "canon_identity", "whole_book"} or len(prior_repairs) >= 2)):
+    if (review.issues and scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", "whole_book", *PAIR_SCOPES, "source_accuracy", "output_artifacts"}
+            and (scope in PAIR_SCOPES or scope in {"developmental_chapter", "canon_identity", "whole_book", "output_artifacts"} or len(prior_repairs) >= 2)):
         # A separate decision pass checks a repeatedly revised chapter against
         # the actual contract, rather than endlessly following new preferences.
         # Pair allegations are always verified before the first mutation: a
@@ -973,6 +1001,9 @@ def ensure_chapter(session, run, chapter, ledger, settings, client) -> None:
     while True:
         review = _review(session, run, [chapter], _context(run, chapter, ledger), client, "chapter")
         issues = [*review.issues, *_length_issues(run, chapter)]
+        artifact_review = _output_artifact_review(session, run, chapter, client)
+        if artifact_review:
+            issues.extend(artifact_review.issues)
         source_review = _source_review(session, run, chapter, client)
         if source_review:
             issues.extend(source_review.issues)
@@ -988,6 +1019,17 @@ def draft_checkpoint(run, chapter):
                and event.payload.get("chapter_number") == chapter.chapter_number
                and (event.event_type == "autonomous_draft_checkpoint" or event.payload.get("phase") == "draft")
                for event in run.events)
+
+
+def _output_artifact_review(session, run, chapter, client):
+    # Hints select an audit, never an automatic rewrite or text deletion.
+    hints = list(dict.fromkeys(match.group() for match in OUTPUT_ARTIFACT_PATTERN.finditer(chapter.content or "")))
+    if not hints:
+        return None
+    return _review(session, run, [chapter], {
+        "chapter_number": chapter.chapter_number, "actual_prose": chapter.content,
+        "author_brief": run_book_brief(run), "suspected_output_artifacts_to_verify": hints[:20],
+    }, client, "output_artifacts")
 
 
 def _source_review(session, run, chapter, client):
@@ -1205,6 +1247,9 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
                 developmental = _review(session, run, [chapter], _developmental_context(run, chapter, before[chapter.chapter_number]), client, "developmental_chapter")
                 issues.extend(developmental.issues)
                 issues.extend(_length_issues(run, chapter))
+                artifact_review = _output_artifact_review(session, run, chapter, client)
+                if artifact_review:
+                    issues.extend(artifact_review.issues)
                 source_review = _source_review(session, run, chapter, client)
                 if source_review:
                     issues.extend(source_review.issues)
