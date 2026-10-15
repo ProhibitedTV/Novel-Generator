@@ -313,7 +313,9 @@ def record_event(session: Session, run: GenerationRun, event_type: str, payload:
         )
         or 1
     )
-    event = RunEvent(run_id=run.id, sequence=next_sequence, event_type=event_type, payload=payload)
+    # Keep an already-loaded event history coherent without refreshing the
+    # entire parent run (which can discard pending chapter/canon changes).
+    event = RunEvent(run=run, sequence=next_sequence, event_type=event_type, payload=payload)
     session.add(event)
     session.flush()
     return event
@@ -342,7 +344,7 @@ def begin_stage_attempt(
         or 1
     )
     attempt = RunStageAttempt(
-        run_id=run.id,
+        run=run,
         stage=stage,
         chapter_number=chapter_number,
         attempt_number=next_attempt,

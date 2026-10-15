@@ -54,6 +54,8 @@ Cancellation checks refresh only cancellation/status controls. They preserve
 pending prose, story-bible, and outline edits instead of expiring the source
 after review context has been built. Externally saved cancellation remains
 effective, and preserving a draft never grants it editorial acceptance.
+New checkpoints and stage attempts also update the worker's loaded history
+directly; reading fresh recovery evidence no longer requires a full run refresh.
 
 Review prompts label the actual prose by chapter and paragraph. Reviewers can
 cite `evidence_paragraphs` instead of copying dialogue: the application validates
