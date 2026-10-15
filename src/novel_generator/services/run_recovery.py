@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
-from ..models import GenerationRun, RunEvent, RunStatus
+from ..models import GenerationRun, RunEvent, RunStageAttempt, RunStatus
 from ..repositories import record_event
 from .provider_errors import ProviderTransportError
 
@@ -29,8 +29,18 @@ def schedule_provider_retry(session, run, settings, error, *, now=None):
         record_event(session, run, "run_canceled", {"message": "Canceled during provider recovery."})
         session.commit()
         return True
-    schedules = list(session.scalars(select(RunEvent).where(
-        RunEvent.run_id == run.id, RunEvent.event_type == "provider_retry_scheduled")))
+    # A multi-day book can survive many unrelated outages. Budget and backoff
+    # apply to consecutive failures since actual inference last succeeded,
+    # rather than exhausting a lifetime allowance despite useful progress.
+    last_success = session.scalar(select(RunStageAttempt.completed_at).where(
+        RunStageAttempt.run_id == run.id, RunStageAttempt.status == "success",
+        RunStageAttempt.completed_at.is_not(None),
+    ).order_by(RunStageAttempt.completed_at.desc()).limit(1))
+    schedules_query = select(RunEvent).where(
+        RunEvent.run_id == run.id, RunEvent.event_type == "provider_retry_scheduled")
+    if last_success is not None:
+        schedules_query = schedules_query.where(RunEvent.created_at >= last_success)
+    schedules = list(session.scalars(schedules_query))
     if len(schedules) >= settings.provider_recovery_attempts:
         return False
     if run.current_step == "autonomous_revision":
@@ -53,6 +63,7 @@ def schedule_provider_retry(session, run, settings, error, *, now=None):
     record_event(session, run, "provider_retry_scheduled", {
         "message": run.error_message, "retry_at": due.isoformat(), "attempt": len(schedules) + 1,
         "interrupted_step": step, "chapter_number": run.current_chapter,
+        "last_successful_inference_at": last_success.isoformat() if last_success else None,
     })
     session.commit()
     session.expire(run, ["events"])

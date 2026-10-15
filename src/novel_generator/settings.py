@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     ollama_adjudication_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     provider_chat_timeout_seconds: float = Field(default=1800.0, ge=30.0, le=7200.0)
     provider_retry_backoff_seconds: float = Field(default=2.0, ge=0.0, le=60.0)
-    provider_recovery_attempts: int = Field(default=96, ge=0, le=1000)
+    provider_recovery_attempts: int = Field(default=96, ge=0, le=1000, description="Consecutive provider recoveries since this run's last successful inference; 0 disables recovery.")
     run_stale_after_seconds: int = Field(default=3600, ge=60, le=86400)
     chapter_summary_window: int = Field(default=4, ge=1, le=12)
     autonomous_chapter_repair_attempts: int = Field(default=12, ge=1, le=100)
