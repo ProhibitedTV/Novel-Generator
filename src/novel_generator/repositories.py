@@ -499,6 +499,21 @@ def recover_running_runs(
         )
     runs = list(session.scalars(stmt))
     for run in runs:
+        # Only runs whose ownership is being recovered may have their calls closed.
+        # A dead worker cannot finish these rows, and leaving them running makes
+        # historical calls indistinguishable from the new owner's actual work.
+        interrupted = list(session.scalars(select(RunStageAttempt).where(
+            RunStageAttempt.run_id == run.id, RunStageAttempt.status == "running",
+        )))
+        for attempt in interrupted:
+            attempt.status = "interrupted"
+            attempt.completed_at = datetime.utcnow()
+            # Recovery observes the interruption, not its exact time or outcome.
+            # Do not count downtime as inference duration or claim provider failure.
+            attempt.duration_ms = None
+            attempt.error_type = "WorkerInterrupted"
+            attempt.error_message = "Worker ownership was recovered before this call's outcome was saved."
+            attempt.attempt_metadata = {**(attempt.attempt_metadata or {}), "recovery_reason": reason}
         if run.cancel_requested:
             run.status = RunStatus.CANCELED
             run.current_step = "canceled"
@@ -508,6 +523,7 @@ def recover_running_runs(
             record_event(session, run, "run_canceled", {
                 "message": "Honored the saved cancellation request after worker interruption.",
                 "recovery_reason": reason,
+                "interrupted_stage_attempts": len(interrupted),
             })
             continue
         run.status = RunStatus.QUEUED
@@ -523,6 +539,7 @@ def recover_running_runs(
                 "message": "Run was re-queued after an interrupted worker.",
                 "recovery_reason": reason,
                 "recovery_count": run.recovery_count,
+                "interrupted_stage_attempts": len(interrupted),
             },
         )
     return len(runs)

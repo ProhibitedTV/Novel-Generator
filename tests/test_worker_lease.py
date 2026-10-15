@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import subprocess
 import sys
 
@@ -6,7 +6,7 @@ import pytest
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import RunStatus
-from novel_generator.repositories import get_run
+from novel_generator.repositories import get_run, begin_stage_attempt, complete_stage_attempt
 from novel_generator.services.runner import recover_incomplete_runs
 from novel_generator.services.worker_lease import exclusive_worker_lease
 from novel_generator.settings import get_settings, Settings
@@ -102,3 +102,45 @@ def test_fresh_interrupted_cancellation_is_honored_instead_of_stranded(configure
         run = get_run(session, run_id)
         assert run.status == RunStatus.CANCELED and run.current_step == "canceled"
         assert run.chapters[0].content == before and run.completed_at is not None
+
+
+@pytest.mark.parametrize('mode', ['exclusive', 'stale', 'canceled', 'live_other_owner'])
+def test_recovery_closes_only_abandoned_attempts_and_keeps_saved_results(configured_environment, mode):
+    settings = get_settings()
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.status = RunStatus.RUNNING
+        run.last_heartbeat_at = datetime.utcnow() - timedelta(days=1) if mode == 'stale' else datetime.utcnow()
+        run.cancel_requested = mode == 'canceled'
+        kwargs = dict(stage='autonomous_review', chapter_number=1, provider_name='ollama', model_name='reviewer')
+        saved = begin_stage_attempt(session, run, **kwargs)
+        complete_stage_attempt(session, saved, 'saved verdict')
+        pending = begin_stage_attempt(session, run, **kwargs, metadata={'source_hash': 'unchanged'})
+        run_id = run.id
+        saved_id, pending_id = saved.id, pending.id
+        prose = run.chapters[0].content
+        session.commit()
+    recover_incomplete_runs(settings, exclusive_owner=mode in {'exclusive', 'canceled'})
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        attempts = {a.id: a for a in run.stage_attempts}
+        assert attempts[saved_id].status == 'success'
+        assert attempts[saved_id].output_chars == len('saved verdict')
+        pending = attempts[pending_id]
+        assert run.chapters[0].content == prose
+        if mode == 'live_other_owner':
+            assert pending.status == 'running' and pending.completed_at is None
+            assert run.status == RunStatus.RUNNING
+        else:
+            assert pending.status == 'interrupted' and pending.completed_at is not None
+            assert pending.error_type == 'WorkerInterrupted' and pending.duration_ms is None
+            assert pending.attempt_metadata['source_hash'] == 'unchanged'
+            assert run.events[-1].payload['interrupted_stage_attempts'] == 1
+            # Repeating recovery for an already queued/canceled run is a no-op.
+            assert run.status == (RunStatus.CANCELED if mode == 'canceled' else RunStatus.QUEUED)
+            finished_at = pending.completed_at
+    recover_incomplete_runs(settings, exclusive_owner=True)
+    if mode != 'live_other_owner':
+        with get_session_factory()() as session:
+            run = get_run(session, run_id)
+            assert next(a for a in run.stage_attempts if a.id == pending_id).completed_at == finished_at

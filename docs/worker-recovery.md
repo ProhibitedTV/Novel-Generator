@@ -12,6 +12,14 @@ chapter prose, plans, summaries, and editorial checkpoints. It need not wait for
 the normal stale-heartbeat timeout. A saved cancellation request instead becomes
 canceled, avoiding an unclaimable queued run.
 
+When ownership is recovered, unfinished stage attempts for that run become
+`interrupted`, with `WorkerInterrupted` and the recovery reason retained. Saved
+successful/failed attempts and manuscript checkpoints stay unchanged. The
+completion timestamp records when recovery detected the interruption; duration
+is unknown and is not counted as inference time. Stale-only recovery leaves
+fresh calls owned by another worker alone. Cancellation also closes abandoned
+attempts rather than leaving them apparently active forever.
+
 Outside this local override, ownership defaults to disabled. Startup remains
 stale-only so fresh work assigned to other workers is left alone. Configuration
 alone never authorizes immediate recovery: the entry point passes exclusive
