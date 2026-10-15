@@ -1001,6 +1001,11 @@ def ensure_chapter(session, run, chapter, ledger, settings, client) -> None:
     while True:
         review = _review(session, run, [chapter], _context(run, chapter, ledger), client, "chapter")
         issues = [*review.issues, *_length_issues(run, chapter)]
+        if not issues:
+            # Resolve already-known defects before spending a second review on
+            # prose that is about to change. Never accept it without identity QA.
+            identity = _review(session, run, [chapter], _identity_context(run, chapter), client, "canon_identity")
+            issues.extend(identity.issues)
         artifact_review = _output_artifact_review(session, run, chapter, client)
         if artifact_review:
             issues.extend(artifact_review.issues)

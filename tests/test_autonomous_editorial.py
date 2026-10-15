@@ -167,6 +167,8 @@ def test_final_gate_accepts_advisory_preferences_without_rewriting(configured_en
 def test_required_defect_is_repaired_while_preferences_remain_advisory(configured_environment, monkeypatch):
     def review(context, numbers):
         output = clean_review(numbers)
+        if context['scope'] == 'canon_identity':
+            return output
         prose = context['actual_prose']
         output['optional_suggestions'] = [dict(issue(evidence=prose), category='prose',
             problem='I prefer more imagery.', repair_instruction='Consider describing the ferry.')]
@@ -181,7 +183,7 @@ def test_required_defect_is_repaired_while_preferences_remain_advisory(configure
         editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
         assert run.chapters[0].content == REPAIRED
         assert len(editor._events(run, 'autonomous_repair_started')) == 1
-        assert editor._events(run, 'autonomous_review_completed')[-1]['review']['optional_suggestions']
+        assert [e for e in editor._events(run, 'autonomous_review_completed') if e['scope']=='chapter'][-1]['review']['optional_suggestions']
 
 
 def test_full_adjacent_review_repairs_a_fact_outside_boundary_excerpts(configured_environment, monkeypatch):
@@ -555,7 +557,7 @@ def test_chapter_repairs_are_rereviewed_and_checkpointed(configured_environment,
         assert run.chapters[0].content == REPAIRED
         assert run.chapters[0].summary is None
         assert run.chapters[0].continuity_update is None
-        assert calls.count(("autonomous_review", 1)) == 2
+        assert calls.count(("autonomous_review", 1)) == 3  # Repair recheck plus identity audit.
         assert len(editor._events(run, "autonomous_repair_started")) == 1
         assert list((get_settings().artifacts_dir / run.id / "editorial-history").glob("*.md"))
         # Resume on exactly the accepted prose reuses the audit without additional model calls.
@@ -566,7 +568,7 @@ def test_chapter_repairs_are_rereviewed_and_checkpointed(configured_environment,
         # Any prose change invalidates that audit.
         run.chapters[0].content = REPAIRED + " Now."
         editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
-        assert len(calls) == before + 1
+        assert len(calls) == before + 2  # Both general and identity evidence are source-bound.
 
 
 def test_local_repair_preserves_neighbors_and_requires_fresh_review(configured_environment, monkeypatch):
@@ -586,7 +588,7 @@ def test_local_repair_preserves_neighbors_and_requires_fresh_review(configured_e
         editor.ensure_chapter(session, run, chapter, ledger, get_settings(), object())
         assert chapter.content == "Mara arrived.\n\nIvo nodded.\n\nThe ledger stayed safe."
         assert chapter.summary is None and chapter.continuity_update is None
-        assert calls.count(("autonomous_review", 1)) == 2
+        assert calls.count(("autonomous_review", 1)) == 3
         assert len(editor._events(run, "autonomous_repair_started")) == 1
 
 
@@ -928,7 +930,7 @@ def test_repeated_reviews_are_adjudicated_without_automatic_acceptance(configure
         ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
         editor.ensure_chapter(session, run, run.chapters[0], ledger, get_settings(), object())
         assert run.chapters[0].content == PROSE
-        assert calls.count(('autonomous_review', 1)) == 2
+        assert calls.count(('autonomous_review', 1)) == 4  # General and identity allegations each need verification.
         saved = editor._events(run, 'autonomous_review_adjudicated')[-1]
         assert saved['proposed_review']['issues'] and not saved['review']['issues']
 
