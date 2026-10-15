@@ -22,3 +22,11 @@ reuse, legitimate book-form language, source preservation, and both draft and
 final repair/recheck paths. Actual manuscript qualification stays in local
 artifacts; repository tests contain synthetic text only. This safeguard does not
 certify general literary quality or publication readiness.
+
+On October 15, 2026, local `gemma4:12b` review with `qwen3.5:9b`
+independent adjudication blocked the saved test chapter's unintended synopsis
+and accepted both intentional metafiction and nonfiction instruction controls.
+Adjudication rejected a false allegation against the nonfiction control; its
+matching wording alone did not authorize a rewrite. All three verdicts matched
+the expected outcomes. This narrow qualification is not an evaluation across
+all genres or artifact patterns. Private source and detailed results stay local.
