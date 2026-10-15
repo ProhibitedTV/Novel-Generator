@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 import json
 import pytest
+from datetime import datetime
 
 from novel_generator.models import ChapterStatus, RunStatus
 from novel_generator.services.local_verification import verification_report
@@ -16,12 +17,34 @@ def _run(tmp_path):
     return SimpleNamespace(
         id="test-run", model_name="local-model", status=RunStatus.COMPLETED, error_message=None,
         requested_chapters=2, target_word_count=1000, artifacts=artifacts,
-        events=[SimpleNamespace(event_type="summary_fallback", payload={"chapter_number": 1})],
+        events=[SimpleNamespace(event_type="summary_fallback", payload={"chapter_number": 1}, sequence=1, created_at=datetime.utcnow())],
         stage_attempts=[],
         chapters=[SimpleNamespace(chapter_number=number, status=ChapterStatus.COMPLETED,
                                   content="Some actual prose.", summary="Summary", continuity_update={"world_state": "Known"},
                                   qa_notes={}) for number in (1, 2)],
     )
+
+
+def _event(run, kind, payload):
+    run.events.append(SimpleNamespace(event_type=kind, payload=payload,
+        sequence=len(run.events) + 1, created_at=datetime.utcnow()))
+
+
+def _accept(run):
+    hashes = {str(c.chapter_number): _hash(c.content) for c in run.chapters}
+    def review(scope, numbers, context=None):
+        _event(run, 'autonomous_review_completed', {'scope': scope,
+            'source_hashes': {str(n): hashes[str(n)] for n in numbers},
+            'context_source_hashes': context or {},
+            'review': {'reviewed_chapters': numbers, 'plot_coherent': True, 'canon_consistent': True,
+                'prose_clean': True, 'ending_complete': True, 'issues': []}})
+    for number in (1, 2):
+        for scope in ('final_chapter', 'canon_identity', 'developmental_chapter'):
+            review(scope, [number], hashes if scope == 'developmental_chapter' else None)
+    review('adjacent_chapters', [1, 2])
+    review('whole_book', [1, 2])
+    _event(run, 'autonomous_quality_passed', {
+        'manuscript_hash': _hash([(c.chapter_number, c.content) for c in run.chapters]), 'acceptance_contract': 2})
 
 
 def test_completion_report_retains_quality_and_length_limits(tmp_path):
@@ -51,12 +74,50 @@ def test_completion_report_requires_all_export_formats(tmp_path):
 
 def test_automatic_acceptance_must_match_current_manuscript(tmp_path):
     run = _run(tmp_path)
-    run.events.append(SimpleNamespace(event_type="autonomous_quality_passed", payload={
-        "manuscript_hash": _hash([(chapter.chapter_number, chapter.content) for chapter in run.chapters])
-    }))
+    _accept(run)
     assert verification_report(run, tmp_path)["autonomous_checks_passed"]
     run.chapters[0].content = "A different ending."
     assert not verification_report(run, tmp_path)["autonomous_checks_passed"]
+
+
+def test_later_current_source_concerns_revoke_qualification_success(tmp_path):
+    run = _run(tmp_path)
+    _accept(run)
+    _event(run, 'editorial_concerns_recorded', {
+        'manuscript_hash': _hash([(c.chapter_number, c.content) for c in run.chapters]),
+        'message': 'Synthetic source inconsistency requires revision.'})
+    report = verification_report(run, tmp_path)
+    assert report['pipeline_complete']
+    assert not report['autonomous_checks_passed']
+    assert not report['editorial_coverage']['accepted']
+    assert report['current_source_concerns'] == 1
+
+
+@pytest.mark.parametrize('missing_scope', ['final_chapter','canon_identity','developmental_chapter','adjacent_chapters','whole_book'])
+def test_pass_event_cannot_replace_missing_current_source_audits(tmp_path,missing_scope):
+    run = _run(tmp_path)
+    _accept(run)
+    run.events = [e for e in run.events if e.payload.get('scope') != missing_scope]
+    assert not verification_report(run,tmp_path)['autonomous_checks_passed']
+
+
+def test_old_concerns_for_different_source_do_not_revoke_new_acceptance(tmp_path):
+    run = _run(tmp_path)
+    _event(run,'editorial_concerns_recorded',{'manuscript_hash':'old-source'})
+    _accept(run)
+    report=verification_report(run,tmp_path)
+    assert report['autonomous_checks_passed'] and report['current_source_concerns']==0
+
+
+def test_legacy_acceptance_is_retained_but_cannot_qualify_current_gate(tmp_path):
+    run=_run(tmp_path)
+    _accept(run)
+    run.events[-1].payload['acceptance_contract']=1
+    run.events=[e for e in run.events if e.payload.get('scope') not in {'canon_identity','developmental_chapter'}]
+    report=verification_report(run,tmp_path)
+    assert report['editorial_coverage']['accepted']
+    assert report['editorial_coverage']['acceptance_contract']==1
+    assert not report['autonomous_checks_passed']
 
 
 def test_custom_story_keeps_brief_and_targets_but_routes_only_to_ollama(tmp_path):

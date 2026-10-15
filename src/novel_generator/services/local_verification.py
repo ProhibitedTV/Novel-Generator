@@ -19,7 +19,8 @@ from ..settings import Settings, get_settings
 from .pipeline import process_run_safe
 from .providers import ProviderManager
 from .runner import install_generation_runtime
-from .autonomous_editorial import _hash
+from .editorial_coverage import review_coverage
+from .autonomous_editorial import ACCEPTANCE_CONTRACT
 
 
 def load_project_spec(path: Path, model: str) -> ProjectCreate:
@@ -47,6 +48,7 @@ def verification_report(run, artifacts_dir: Path) -> dict:
     exported = {"markdown", "docx", "qa-report"} <= artifact_paths.keys() and all(
         Path(path).is_file() and Path(path).stat().st_size > 0 for path in artifact_paths.values()
     )
+    coverage = review_coverage(run)
     return {
         "run_id": run.id,
         "model": run.model_name,
@@ -55,11 +57,13 @@ def verification_report(run, artifacts_dir: Path) -> dict:
         "book_form": {key: brief.get(key) for key in
                       ("book_type", "content_kind", "structure", "genre_profile", "genre_description")},
         "task_routing": getattr(run, "task_routing", None) or {},
-        "autonomous_checks_passed": bool(complete and exported and any(
-            event.event_type == "autonomous_quality_passed"
-            and event.payload.get("manuscript_hash") == _hash([(chapter.chapter_number, chapter.content) for chapter in chapters])
-            for event in run.events
-        )),
+        "autonomous_checks_passed": bool(complete and exported and coverage["accepted"]
+            and coverage["acceptance_contract"] >= ACCEPTANCE_CONTRACT),
+        "editorial_coverage": {key: coverage[key] for key in (
+            "accepted", "acceptance_contract", "chapter_passes", "pair_passes", "pair_target",
+            "developmental_passes", "identity_passes", "cross_passes", "cross_target", "whole_book_passed",
+        )},
+        "current_source_concerns": len(coverage["editorial_concerns"]),
         "error": run.error_message,
         "pipeline_complete": bool(complete and exported),
         "target_words": run.target_word_count,
