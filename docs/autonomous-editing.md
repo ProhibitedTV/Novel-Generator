@@ -165,8 +165,12 @@ the same requirements; the diagnostic report shows the repairs and model routes.
 Temporary provider transport failures schedule an automatic retry after the
 request-level retries are exhausted. The saved cooldown starts at 30 seconds and
 increases to 15 minutes, survives worker restarts, and leaves other queued jobs
-eligible to run. `PROVIDER_RECOVERY_ATTEMPTS=96` limits these recoveries per run
-(0 disables them). Cancel remains available while waiting. Missing models,
+eligible to run. `PROVIDER_RECOVERY_ATTEMPTS=96` limits consecutive recoveries
+since the run's last successful saved model call (0 disables them). Useful
+inference resets the cooldown and retry allowance for a later outage; scattered
+outages over a multi-day book do not consume a lifetime allowance. Failed,
+interrupted, or unfinished calls do not reset it, and all retry history remains
+saved. Cancel remains available while waiting. Missing models,
 invalid output, and editorial failures do not trigger transport recovery. An
 unsaved automatic revision interrupted by transport does not consume an editorial
 repair attempt; the interruption still counts toward the transport recovery limit.

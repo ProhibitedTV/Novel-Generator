@@ -4,7 +4,7 @@ import pytest
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import RunStatus
-from novel_generator.repositories import claim_next_queued_run
+from novel_generator.repositories import claim_next_queued_run, begin_stage_attempt, complete_stage_attempt, get_run
 from novel_generator.services import pipeline
 from novel_generator.services.provider_errors import ProviderError, ProviderTransportError
 from novel_generator.services.run_recovery import schedule_provider_retry, release_provider_retries
@@ -60,6 +60,63 @@ def test_wrapped_transport_error_is_recovered_and_budget_is_persisted(configured
         assert schedule_provider_retry(session, run, settings, error)
         session.expire_all()
         assert not schedule_provider_retry(session, run, settings, error)
+
+
+def test_successful_inference_resets_persisted_outage_budget_and_backoff(configured_environment):
+    settings = get_settings().model_copy(update={"provider_recovery_attempts": 1})
+    factory = get_session_factory()
+    with factory() as session:
+        run = make_run(session)
+        run_id = run.id
+    for outage in range(3):
+        with factory() as session:
+            run = get_run(session, run_id)
+            assert schedule_provider_retry(session, run, settings, ProviderTransportError("offline"))
+            event = run.events[-1]
+            assert event.event_type == 'provider_retry_scheduled'
+            assert event.payload['attempt'] == 1
+            assert bool(event.payload['last_successful_inference_at']) is (outage > 0)
+            due = datetime.fromisoformat(event.payload['retry_at'])
+            assert 29 <= (due - event.created_at).total_seconds() <= 31
+            assert not schedule_provider_retry(session, run, settings, ProviderTransportError("still offline"))
+            assert release_provider_retries(session, now=due) == 1
+            assert claim_next_queued_run(session).id == run_id
+            attempt = begin_stage_attempt(session, run, stage='chapter_summary', chapter_number=1,
+                provider_name='ollama', model_name='test-model')
+            complete_stage_attempt(session, attempt, 'Useful model output')
+            session.commit()
+    with factory() as session:
+        run = get_run(session, run_id)
+        assert len([e for e in run.events if e.event_type == 'provider_retry_scheduled']) == 3
+        assert run.chapters[0].content == PROSE
+
+
+@pytest.mark.parametrize('attempt_status',['running','failed','interrupted'])
+def test_unfinished_or_unsuccessful_inference_does_not_reset_outage_budget(configured_environment,attempt_status):
+    with get_session_factory()() as session:
+        run = make_run(session)
+        settings = get_settings().model_copy(update={"provider_recovery_attempts": 1})
+        assert schedule_provider_retry(session, run, settings, ProviderTransportError('offline'))
+        attempt = begin_stage_attempt(session, run, stage='autonomous_review', chapter_number=1,
+            provider_name='ollama', model_name='test-model')
+        attempt.status = attempt_status
+        if attempt_status != 'running':
+            attempt.completed_at = datetime.utcnow()
+        session.commit()
+        assert not schedule_provider_retry(session, run, settings, ProviderTransportError('still offline'))
+
+
+def test_another_books_success_cannot_reset_a_persistent_outage(configured_environment):
+    with get_session_factory()() as session:
+        run = make_run(session)
+        settings = get_settings().model_copy(update={"provider_recovery_attempts": 1})
+        assert schedule_provider_retry(session, run, settings, ProviderTransportError('offline'))
+        other = make_run(session)
+        attempt = begin_stage_attempt(session, other, stage='chapter_summary', chapter_number=1,
+            provider_name='ollama', model_name='test-model')
+        complete_stage_attempt(session, attempt, 'Another book made progress')
+        session.commit()
+        assert not schedule_provider_retry(session, run, settings, ProviderTransportError('still offline'))
 
 
 def test_pipeline_transport_failure_queues_recovery_without_failing_chapter(configured_environment, monkeypatch):
