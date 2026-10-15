@@ -35,6 +35,12 @@ not establish visual layout quality or publication readiness. These comparisons
 use the current exporter as the rendering reference; exporter regression tests
 separately check how source Markdown becomes Word content.
 
+The production completion path uses the same content check before registering
+exports and marking the run complete. A mismatch triggers one automatic rerender;
+a persistent mismatch fails with source prose preserved. Cancellation is checked
+before retries and before completion, so canceling during export cannot produce
+a completed run or force another render.
+
 The saved two-chapter qualification completed at 1,527 words against its 1,400-word target on October 11. Both report flags were true, the acceptance hash matched the final saved chapters, and the Markdown and DOCX exports contained all their prose. Qwen 3.5 9B generated the initial material; Gemma 4 12B performed independent review and automatic repairs. No human prose edits were used. Development included checkpoint resumes as repairs were introduced, so this establishes recovery, final acceptance, and export behavior for that sample, rather than a fresh unattended run or novel-scale completion. This manuscript test used Ollama 0.40.2 before the runtime update.
 
 After the update to 0.40.3, five live Gemma 4 12B verification controls passed: normal travel, an enacted aftermath, and ordinary theme-word reuse were accepted; a contradictory signing date and an actually missing resolution remained blocking. Qwen 3.5 9B also returned valid non-thinking output in an API health probe. The 24-chapter, 60,000-word continuation is a separate novel-scale run; the miniature test and controls do not certify its eventual completion or publication quality.
