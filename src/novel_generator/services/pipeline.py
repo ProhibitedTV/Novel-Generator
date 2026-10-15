@@ -3108,16 +3108,28 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
     record_event(session, run, "artifact_export_started", {"message": "Rendering manuscript artifacts."})
     session.commit()
 
-    artifacts = export_run_artifacts(
-        settings.artifacts_dir,
-        run.project,
-        run,
-        completed_chapters,
-        qa_markdown,
-        rewrite_markdown,
-        revised_outline_markdown,
-        developmental_qa_markdown,
-    )
+    from .export_integrity import verify_manuscript_exports
+    for export_attempt in range(1, 3):
+        _ensure_not_canceled(session, run)
+        artifacts = export_run_artifacts(
+            settings.artifacts_dir, run.project, run, completed_chapters,
+            qa_markdown, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown,
+        )
+        integrity = verify_manuscript_exports(run, completed_chapters, {
+            artifact.kind: str(settings.artifacts_dir / artifact.relative_path) for artifact in artifacts
+        })
+        verified = all(integrity.get(kind, {}).get("matches_current_source") is True
+                       for kind in ("markdown", "docx"))
+        record_event(session, run, "artifact_export_verified" if verified else "artifact_export_integrity_failed", {
+            "message": "Manuscript export content verified." if verified else "Export content did not match; rerendering once." if export_attempt == 1 else "Export content still does not match; source manuscript preserved.",
+            "attempt": export_attempt, "export_integrity": integrity,
+            "manuscript_hash": autonomous_editorial._hash([(c.chapter_number, c.content) for c in completed_chapters]),
+        })
+        session.commit()
+        if verified:
+            break
+    else:
+        raise RuntimeError("Manuscript export integrity failed after automatic rerender; saved chapter prose is preserved.")
     replace_artifacts(session, run, artifacts)
     if autonomous_editorial.enabled(run):
         autonomous_editorial.save_report(session, run, settings, "passed")
@@ -3130,6 +3142,7 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
         generate_optional_cover_prompts(session, run, completed_chapters, settings, client)
     from .image_rendering import render_optional_images
     render_optional_images(session, run, settings)
+    _ensure_not_canceled(session, run)
     run.current_step = "completed"
     run.current_chapter = None
     run.status = RunStatus.COMPLETED
