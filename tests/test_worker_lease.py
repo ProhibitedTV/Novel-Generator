@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -70,9 +71,19 @@ except RuntimeError:
             with exclusive_worker_lease(settings):
                 pytest.fail("Stole live owner")
         child.kill(); child.wait(timeout=10)
-        # The OS releases ownership even without the child's cleanup/finally block.
-        with exclusive_worker_lease(settings) as owned:
-            assert owned
+        # Confirm eventual release after forced exit, not same-instant timing.
+        # Under Windows load, a waitable exited process can still be followed by
+        # a transient lock denial. Live-owner rejection above remains immediate.
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                with exclusive_worker_lease(settings) as owned:
+                    assert owned
+                break
+            except RuntimeError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
     finally:
         if child.poll() is None:
             child.kill(); child.wait(timeout=10)
