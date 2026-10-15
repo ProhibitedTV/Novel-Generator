@@ -7,6 +7,7 @@ from novel_generator.models import ChapterStatus, RunStatus
 from novel_generator.services.local_verification import verification_report
 from novel_generator.services.autonomous_editorial import _hash
 from novel_generator.services.local_verification import load_project_spec
+from novel_generator.services.exports import render_markdown, render_docx
 
 
 def _run(tmp_path):
@@ -14,15 +15,19 @@ def _run(tmp_path):
     for kind in ("markdown", "docx", "qa-report"):
         (tmp_path / kind).write_text("test artifact", encoding="utf-8")
         artifacts.append(SimpleNamespace(kind=kind, relative_path=kind))
-    return SimpleNamespace(
+    run = SimpleNamespace(
         id="test-run", model_name="local-model", status=RunStatus.COMPLETED, error_message=None,
+        project=SimpleNamespace(title='Synthetic test book',story_brief={}),
         requested_chapters=2, target_word_count=1000, artifacts=artifacts,
         events=[SimpleNamespace(event_type="summary_fallback", payload={"chapter_number": 1}, sequence=1, created_at=datetime.utcnow())],
         stage_attempts=[],
-        chapters=[SimpleNamespace(chapter_number=number, status=ChapterStatus.COMPLETED,
-                                  content="Some actual prose.", summary="Summary", continuity_update={"world_state": "Known"},
+        chapters=[SimpleNamespace(chapter_number=number, title=f'Turn {number}', status=ChapterStatus.COMPLETED,
+                                  content=f"Some actual prose for section {number}.", summary="Summary", continuity_update={"world_state": "Known"},
                                   qa_notes={}) for number in (1, 2)],
     )
+    (tmp_path/'markdown').write_text(render_markdown(run.project,run.chapters),encoding='utf-8')
+    render_docx(run.project,run.chapters,tmp_path/'docx')
+    return run
 
 
 def _event(run, kind, payload):
@@ -50,7 +55,7 @@ def _accept(run):
 def test_completion_report_retains_quality_and_length_limits(tmp_path):
     report = verification_report(_run(tmp_path), tmp_path)
     assert report["pipeline_complete"]
-    assert report["actual_words"] == 6
+    assert report["actual_words"] == 12
     assert report["target_words"] == 1000
     assert report["fallback_events"][0]["type"] == "summary_fallback"
     assert "not proof of logical consistency" in report["quality_note"]
@@ -118,6 +123,69 @@ def test_legacy_acceptance_is_retained_but_cannot_qualify_current_gate(tmp_path)
     assert report['editorial_coverage']['accepted']
     assert report['editorial_coverage']['acceptance_contract']==1
     assert not report['autonomous_checks_passed']
+
+
+@pytest.mark.parametrize('format',['markdown','docx'])
+def test_export_qualification_rejects_stale_or_truncated_content(tmp_path,format):
+    run=_run(tmp_path)
+    _accept(run)
+    shortened=run.chapters[:1]
+    if format=='markdown':
+        (tmp_path/format).write_text(render_markdown(run.project,shortened),encoding='utf-8')
+    else:
+        render_docx(run.project,shortened,tmp_path/format)
+    report=verification_report(run,tmp_path)
+    assert report['editorial_coverage']['accepted']
+    assert not report['export_integrity'][format]['matches_current_source']
+    assert not report['pipeline_complete'] and not report['autonomous_checks_passed']
+
+
+@pytest.mark.parametrize('format',['markdown','docx'])
+def test_export_qualification_requires_current_chapter_order(tmp_path,format):
+    run=_run(tmp_path)
+    chapters=list(reversed(run.chapters))
+    if format=='markdown':
+        (tmp_path/format).write_text(render_markdown(run.project,chapters),encoding='utf-8')
+    else:
+        render_docx(run.project,chapters,tmp_path/format)
+    assert not verification_report(run,tmp_path)['export_integrity'][format]['matches_current_source']
+
+
+def test_unreadable_word_file_is_failed_evidence_instead_of_report_crash(tmp_path):
+    run=_run(tmp_path)
+    (tmp_path/'docx').write_bytes(b'not a Word ZIP file')
+    report=verification_report(run,tmp_path)
+    assert not report['pipeline_complete']
+    assert report['export_integrity']['docx']['error']
+
+
+def test_word_inline_formatting_and_table_cells_are_checked_without_zip_metadata(tmp_path):
+    from docx import Document
+    run=_run(tmp_path)
+    run.chapters[0].content='A **bold** step and *quiet* reply.\n\n| Item | Count |\n| --- | --- |\n| Pears | 3 |'
+    (tmp_path/'markdown').write_text(render_markdown(run.project,run.chapters),encoding='utf-8')
+    render_docx(run.project,run.chapters,tmp_path/'docx')
+    document=Document(tmp_path/'docx')
+    document.core_properties.author='Different export metadata'
+    document.save(tmp_path/'docx')
+    assert verification_report(run,tmp_path)['pipeline_complete']
+    document.tables[0].cell(1,1).text='4'
+    document.save(tmp_path/'docx')
+    assert not verification_report(run,tmp_path)['export_integrity']['docx']['matches_current_source']
+
+
+def test_word_line_breaks_are_content_for_poetry_and_code(tmp_path):
+    from docx import Document
+    run=_run(tmp_path)
+    run.chapters[0].content='First line\nSecond line'
+    (tmp_path/'markdown').write_text(render_markdown(run.project,run.chapters),encoding='utf-8')
+    render_docx(run.project,run.chapters,tmp_path/'docx')
+    assert verification_report(run,tmp_path)['pipeline_complete']
+    document=Document(tmp_path/'docx')
+    paragraph=next(p for p in document.paragraphs if 'First line' in p.text)
+    paragraph.text=paragraph.text.replace('\n','')
+    document.save(tmp_path/'docx')
+    assert not verification_report(run,tmp_path)['export_integrity']['docx']['matches_current_source']
 
 
 def test_custom_story_keeps_brief_and_targets_but_routes_only_to_ollama(tmp_path):

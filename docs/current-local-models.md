@@ -26,6 +26,15 @@ the current gate. `current_source_concerns` distinguishes a generated/exported
 book that still needs revision from a currently accepted manuscript. The preserved
 original Orchard run is such a case: pipeline complete, with qualification false.
 
+`export_integrity` also verifies the saved Markdown against the current rendered
+manuscript and the Word file's ordered paragraph text, including table cells,
+tabs, and text line breaks. A nonempty file alone cannot establish completion.
+Stale, reordered, truncated, unreadable, or text-altered exports fail qualification.
+Word ZIP metadata and formatting differences are ignored; content matching does
+not establish visual layout quality or publication readiness. These comparisons
+use the current exporter as the rendering reference; exporter regression tests
+separately check how source Markdown becomes Word content.
+
 The saved two-chapter qualification completed at 1,527 words against its 1,400-word target on October 11. Both report flags were true, the acceptance hash matched the final saved chapters, and the Markdown and DOCX exports contained all their prose. Qwen 3.5 9B generated the initial material; Gemma 4 12B performed independent review and automatic repairs. No human prose edits were used. Development included checkpoint resumes as repairs were introduced, so this establishes recovery, final acceptance, and export behavior for that sample, rather than a fresh unattended run or novel-scale completion. This manuscript test used Ollama 0.40.2 before the runtime update.
 
 After the update to 0.40.3, five live Gemma 4 12B verification controls passed: normal travel, an enacted aftermath, and ordinary theme-word reuse were accepted; a contradictory signing date and an actually missing resolution remained blocking. Qwen 3.5 9B also returned valid non-thinking output in an API health probe. The 24-chapter, 60,000-word continuation is a separate novel-scale run; the miniature test and controls do not certify its eventual completion or publication quality.
