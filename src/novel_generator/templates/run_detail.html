@@ -822,7 +822,7 @@
           <div class="attempt-diagnostic-list">
             {% for attempt in editorial_next_step.attempt_diagnostics %}
               <div class="attempt-diagnostic">
-                <span class="badge status-{{ 'failed' if attempt.status == 'failed' else 'completed' }}">{{ attempt.status }}</span>
+                <span class="badge status-{{ 'failed' if attempt.status == 'failed' else 'completed' if attempt.status == 'success' else 'running' if attempt.status == 'running' else 'queued' }}">{{ attempt.status }}</span>
                 <div>
                   <strong>{{ attempt.stage }}{% if attempt.chapter_number %} / chapter {{ attempt.chapter_number }}{% endif %}</strong>
                   <p class="field-note">{{ attempt.provider_name }} / {{ attempt.model_name }}{% if attempt.duration_ms is not none %} / {{ attempt.duration_ms }}ms{% endif %}</p>
