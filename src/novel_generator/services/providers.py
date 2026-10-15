@@ -13,6 +13,7 @@ from .provider_errors import ProviderError, ProviderTransportError
 
 TASK_ROUTE_STAGES: list[dict[str, str]] = [
     {"id": "autonomous_adjudication", "label": "Independent defect verification"},
+    {"id": "autonomous_book_review", "label": "Final book reviewer (optional)"},
     {"id": "autonomous_review", "label": "Automatic editorial reviewer"},
     {"id": "autonomous_revision", "label": "Automatic editorial repair"},
     {"id": "story_bible", "label": "Story bible"},

@@ -468,7 +468,8 @@ def _adjudication_messages(scope, context, review, controls):
 def _review(session, run, chapters, context: dict, client, scope: str) -> EditorialReview:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
-    provider, model = pipeline._resolve_stage_route(client, run, "autonomous_review")
+    review_stage = "autonomous_book_review" if scope == "whole_book" and (run.task_routing or {}).get("autonomous_book_review") else "autonomous_review"
+    provider, model = pipeline._resolve_stage_route(client, run, review_stage)
     adjudication_stage = "autonomous_adjudication" if (run.task_routing or {}).get("autonomous_adjudication") else "autonomous_revision"
     adjudicator_provider, adjudicator_model = pipeline._resolve_stage_route(client, run, adjudication_stage)
     from .providers import review_model_identity, review_cache_allowed, require_unchanged_review_models
@@ -637,7 +638,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
     prior_repairs = [item for item in _events(run, "autonomous_repair_started")
                      if item.get("chapter_number") in affected]
     if (review.issues and scope in {"chapter", "final_chapter", "developmental_chapter", "canon_identity", "whole_book", *PAIR_SCOPES, "source_accuracy"}
-            and (scope in PAIR_SCOPES or scope in {"developmental_chapter", "canon_identity"} or len(prior_repairs) >= 2)):
+            and (scope in PAIR_SCOPES or scope in {"developmental_chapter", "canon_identity", "whole_book"} or len(prior_repairs) >= 2)):
         # A separate decision pass checks a repeatedly revised chapter against
         # the actual contract, rather than endlessly following new preferences.
         # Pair allegations are always verified before the first mutation: a

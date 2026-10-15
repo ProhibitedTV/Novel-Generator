@@ -7,6 +7,7 @@ import pytest
 from novel_generator.dependencies import get_session_factory
 from novel_generator.repositories import ensure_provider_configs
 from novel_generator.settings import get_settings
+from novel_generator.schemas import ManuscriptQaReport
 from novel_generator.services import autonomous_editorial as editor, outline_progression as progression, pipeline
 from novel_generator.services.ollama import OllamaClient, OllamaError, OllamaTransportError
 from novel_generator.services.providers import ProviderManager
@@ -143,3 +144,34 @@ def test_standard_openai_compatible_provider_does_not_claim_immutable_revision(c
         manager=ProviderManager(get_settings(),ensure_provider_configs(session,get_settings()))
         manager.config_for('openai_compatible').is_enabled=True
         assert manager.model_identity('openai_compatible','local-model')['verified'] is False
+
+
+def test_optional_final_book_model_keeps_routine_reviewer_and_independent_verification(configured_environment,monkeypatch):
+    client=ModelClient();client.identities['book']={'digest':'9'*64,'runtime_version':'0.40.3','verified':True}
+    install_fake_provider(monkeypatch)
+    original=pipeline._generate_structured_output
+    models=[]
+    def generate(session,run,active,provider,model,messages,parser,*args):
+        models.append(model)
+        return original(session,run,active,provider,model,messages,parser,*args)
+    monkeypatch.setattr(pipeline,'_generate_structured_output',generate)
+    with get_session_factory()() as session:
+        run=make_run(session);route(run)
+        run.task_routing={**run.task_routing,'autonomous_book_review':{'provider_name':'ollama','model_name':'book'}}
+        session.commit()
+        editor._review(session,run,run.chapters,editor._context(run,run.chapters[0],None),client,'chapter')
+        editor._review(session,run,run.chapters,editor._book_context(run,run.chapters,ManuscriptQaReport()),client,'whole_book')
+        assert models==['reviewer','book']
+        assert editor._events(run,'autonomous_review_completed')[-1]['reviewer_identity']['digest']=='9'*64
+        # A proposed whole-book defect is always independently verified before a repair.
+        from test_autonomous_editorial import clean_review,issue
+        models.clear()
+        def with_defect(session,run,active,provider,model,messages,parser,*args):
+            models.append(model)
+            value=clean_review([1])
+            if model=='book':value.update(canon_consistent=False,issues=[issue()])
+            return parser(json.dumps(value))
+        monkeypatch.setattr(pipeline,'_generate_structured_output',with_defect)
+        client.identities['book']['digest']='8'*64
+        review=editor._review(session,run,run.chapters,editor._book_context(run,run.chapters,ManuscriptQaReport()),client,'whole_book')
+        assert review.passed and models==['book','verifier']

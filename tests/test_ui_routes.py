@@ -285,7 +285,7 @@ def test_book_form_and_all_editor_routes_survive_create_and_edit(client, monkeyp
                 story_genre_description="Practical reference", story_genre_requirements="No invented research\nClear examples",
                 story_book_type="field handbook", story_content_kind="nonfiction", story_structure="reference",
                 story_audience="First-time volunteers", story_source_material="Desk manual: label each record before filing it.")
-    for role in ("autonomous_review", "autonomous_revision", "developmental_rewrite", "cover_prompts"):
+    for role in ("autonomous_review", "autonomous_revision", "autonomous_adjudication", "autonomous_book_review", "developmental_rewrite", "cover_prompts"):
         form[f"route_{role}_provider"] = "ollama"
         form[f"route_{role}_model"] = "editor-model"
     response = client.post("/projects/new", data=form, follow_redirects=False)
@@ -301,7 +301,7 @@ def test_book_form_and_all_editor_routes_survive_create_and_edit(client, monkeyp
         assert p.story_brief["genre_requirements"] == ["No invented research", "Clear examples"]
         assert p.story_brief["source_material"] == form["story_source_material"]
         assert p.story_brief["audience"] == "First-time volunteers"
-        for role in ("autonomous_review", "autonomous_revision", "developmental_rewrite", "cover_prompts"):
+        for role in ("autonomous_review", "autonomous_revision", "autonomous_adjudication", "autonomous_book_review", "developmental_rewrite", "cover_prompts"):
             assert p.task_routing[role] == {"provider_name": "ollama", "model_name": "editor-model"}
     page = client.get(f"/projects/{project_id}")
     assert page.status_code == 200
