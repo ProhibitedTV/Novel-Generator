@@ -131,6 +131,10 @@ docker compose logs -f web worker
 
 Persistent SQLite data and generated artifacts are stored in the `app_data` and `app_artifacts` Docker volumes.
 
+Container logs rotate at 10 MB with three files per service. For host RAM/GPU
+checks and cleanup that preserves book data, see [Workstation resources during
+long runs](docs/workstation-resources.md).
+
 ### Option B — Run Ollama in the same Compose stack
 
 Create `.env` as above, then set:
