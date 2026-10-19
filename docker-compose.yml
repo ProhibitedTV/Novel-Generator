@@ -1,5 +1,12 @@
+x-bounded-logging: &bounded-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   web:
+    logging: *bounded-logging
     build:
       context: .
     env_file:
@@ -27,6 +34,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   worker:
+    logging: *bounded-logging
     build:
       context: .
     env_file:
@@ -49,6 +57,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   ollama:
+    logging: *bounded-logging
     image: ollama/ollama:latest
     profiles: ["ollama"]
     ports:
