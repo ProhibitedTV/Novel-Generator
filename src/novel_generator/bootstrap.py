@@ -27,5 +27,7 @@ def run_migrations() -> None:
         Path(database_url.database).parent.mkdir(parents=True, exist_ok=True)
     project_root = _find_project_root()
     config = Config(str(project_root / "alembic.ini"))
+    # Embedded migrations must not disable the already configured web/worker loggers.
+    config.attributes["preserve_application_logging"] = True
     config.set_main_option("script_location", str(project_root / "alembic"))
     command.upgrade(config, "head")
