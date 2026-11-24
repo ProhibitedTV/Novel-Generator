@@ -82,3 +82,11 @@ def test_developmental_prompt_rewrite_removes_full_manuscript_prose() -> None:
     assert "opening_excerpt" in content or "closing_excerpt" in content or "story_turn" in content
     assert chapters[0].content not in content
     assert "Return a JSON object with exactly these keys:" in content
+
+
+def test_developmental_capsules_are_not_misrepresented_as_full_source():
+    messages = [{"role": "user", "content":
+        "Full manuscript chapters:\n[]\n\nReturn a JSON object with exactly these keys:\n{}"}]
+    rewritten = _rewrite_manuscript_chapters(messages, _chapters(2), max_chars=30000)
+    assert "NOT full chapter prose" in rewritten[0]["content"]
+    assert "Full manuscript chapters:" not in rewritten[0]["content"]

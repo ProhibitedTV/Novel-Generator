@@ -58,3 +58,35 @@ not certification of a Kindle or print edition. Front matter, working ebook
 navigation, trim layout, and preview qualification remain distinct production
 work. See the official [ebook formatting guide](https://kdp.amazon.com/en_US/help/topic/G200910130)
 and [Kindle content quality guide](https://kdp.amazon.com/en_US/help/topic/G200952510).
+
+
+## Author-to-editor handoffs
+
+Professional editing separates structural, stylistic, copyediting and proof
+tasks (Editors Canada Professional Editorial Standards:
+https://editors.ca/publications/professional-editorial-standards/). These are
+distinct goals even when a single editor combines some passes.
+
+The pipeline already performs chapter continuity checks, developmental
+planning/revision, final line editing and current-source acceptance. It now
+archives two named working editions: the complete first draft before
+manuscript QA and structural revision, and the post-developmental draft before
+line-level work. The downloads are checksum-verified and immutable once
+registered; they never imply publication acceptance. Existing older runs
+already past a milestone are not retroactively labeled as if their original
+source were still available.
+
+Summaries are a reverse-outline record of what the actual prose says, not
+what the initial plan promised. Developmental prompts identify missing
+evidence instead of assuming an outline event occurred. Compacted chapter
+capsules are explicitly labeled as partial evidence rather than full source.
+The actual source audits remain mandatory for autonomous acceptance.
+Line editing should preserve voice and deliberate craft choices rather than
+performing another structural rewrite.
+
+Next architectural milestones: source-bound developmental plan checkpoints,
+a separate editorial letter and prioritized dependency-aware revision agenda,
+a persisted fiction style sheet, and comparison of line-edited versus
+structurally revised text for unintended changes. These remain future work;
+the new draft editions supply comparison evidence without additional model
+calls.
