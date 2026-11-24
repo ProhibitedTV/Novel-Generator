@@ -3,6 +3,14 @@
 {% block title %}Run for {{ project.title }} - Novel Generator{% endblock %}
 
 {% block content %}
+<nav class="workspace-nav" aria-label="Book workspace" data-workspace-nav data-default-view="{{ 'plan' if awaiting_outline_approval else 'overview' }}">
+    <a href="#book-overview" data-workspace-link="overview">Overview</a>
+    <a href="#book-manuscript" data-workspace-link="manuscript">Read manuscript</a>
+    <a href="#book-plan" data-workspace-link="plan">Story plan</a>
+    <a href="#book-editorial" data-workspace-link="editorial">Editorial review</a>
+    <a href="#book-exports" data-workspace-link="exports">Downloads</a>
+    <a href="#book-activity" data-workspace-link="activity">Technical activity</a>
+  </nav>
 <section
   class="panel run-shell"
   data-run-detail
@@ -49,14 +57,6 @@
     </div>
   </div>
 
-  <nav class="workspace-nav" aria-label="Book workspace" data-workspace-nav data-default-view="{{ 'plan' if awaiting_outline_approval else 'overview' }}">
-    <a href="#book-overview" data-workspace-link="overview">Overview</a>
-    <a href="#book-manuscript" data-workspace-link="manuscript">Read manuscript</a>
-    <a href="#book-plan" data-workspace-link="plan">Story plan</a>
-    <a href="#book-editorial" data-workspace-link="editorial">Editorial review</a>
-    <a href="#book-exports" data-workspace-link="exports">Downloads</a>
-    <a href="#book-activity" data-workspace-link="activity">Technical activity</a>
-  </nav>
 
   <div class="workspace-view" data-workspace-view="overview" id="book-overview">
   <div class="run-command-center">
