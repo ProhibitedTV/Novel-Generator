@@ -1370,8 +1370,6 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
                 issues.extend(review.issues)
                 identity = _review(session, run, [chapter], _identity_context(run, chapter), client, "canon_identity")
                 issues.extend(identity.issues)
-                developmental = _review(session, run, [chapter], _developmental_context(run, chapter, before[chapter.chapter_number]), client, "developmental_chapter")
-                issues.extend(developmental.issues)
                 issues.extend(_length_issues(run, chapter))
                 artifact_review = _output_artifact_review(session, run, chapter, client)
                 if artifact_review:
@@ -1379,6 +1377,29 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
                 source_review = _source_review(session, run, chapter, client)
                 if source_review:
                     issues.extend(source_review.issues)
+            if issues:
+                _apply_final_repairs(session, run, chapters, before, issues, settings, client, round_number)
+                continue
+            # Repair deterministic length failures before expensive book-context
+            # audits. Any changed prose would invalidate dependent audit caches.
+            total = sum(len((chapter.content or "").split()) for chapter in chapters)
+            if not 0.9 * run.target_word_count <= total <= 1.1 * run.target_word_count:
+                target, minimum, maximum = _target_band(run)
+                overlong = total > run.target_word_count
+                candidates = [chapter for chapter in chapters if
+                    (len(chapter.content.split()) > maximum if overlong else len(chapter.content.split()) < minimum)]
+                if not candidates:
+                    raise AutonomousQualityError("The book word target cannot be reached within the configured chapter ranges.")
+                for chapter in candidates:
+                    issues.append(EditorialIssue(chapter_number=chapter.chapter_number, category="length",
+                        problem=f"Book is {total} words against target {run.target_word_count}.", evidence=chapter.content[:120],
+                        repair_instruction=f"Aim for {target} words in this chapter so the whole book meets its target, without consuming later events or padding."))
+            if issues:
+                _apply_final_repairs(session, run, chapters, before, issues, settings, client, round_number)
+                continue
+            for chapter in chapters:
+                developmental = _review(session, run, [chapter], _developmental_context(run, chapter, before[chapter.chapter_number]), client, "developmental_chapter")
+                issues.extend(developmental.issues)
             if issues:
                 _apply_final_repairs(session, run, chapters, before, issues, settings, client, round_number)
                 continue
@@ -1395,18 +1416,6 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
                     issues.extend(review.issues)
             book_review = _review(session, run, chapters, _book_context(run, chapters, qa_report), client, "whole_book")
             issues.extend(book_review.issues)
-            total = sum(len((chapter.content or "").split()) for chapter in chapters)
-            if not 0.9 * run.target_word_count <= total <= 1.1 * run.target_word_count:
-                target, minimum, maximum = _target_band(run)
-                overlong = total > run.target_word_count
-                candidates = [chapter for chapter in chapters if
-                    (len(chapter.content.split()) > maximum if overlong else len(chapter.content.split()) < minimum)]
-                if not candidates:
-                    raise AutonomousQualityError("The book word target cannot be reached within the configured chapter ranges.")
-                for chapter in candidates:
-                    issues.append(EditorialIssue(chapter_number=chapter.chapter_number, category="length",
-                        problem=f"Book is {total} words against target {run.target_word_count}.", evidence=chapter.content[:120],
-                        repair_instruction=f"Aim for {target} words in this chapter so the whole book meets its target, without consuming later events or padding."))
             if not issues and book_review.passed:
                 run.current_chapter = None
                 _record(session, run, "autonomous_quality_passed", {

@@ -1396,3 +1396,36 @@ def test_destructive_local_candidate_escalates_without_overwriting_source(config
         assert rejected["repair_kind"] == mode
         assert "Localized repair changed chapter length" in rejected["reason"]
         assert editor._events(run, "autonomous_repair_escalated")[-1]["from_strategy"] == mode
+
+
+def test_final_length_repair_precedes_expensive_book_context_audits(configured_environment, monkeypatch):
+    scopes = []
+    revised = []
+    def review(context, numbers):
+        scopes.append((context["scope"], bool(revised)))
+        return clean_review(numbers)
+    install_fake_provider(monkeypatch, review_fn=review)
+    fake_chat = pipeline._supervised_provider_chat
+    def chat(session, run, client, provider, model, messages, *, stage, chapter_number=None, **kwargs):
+        if stage == "autonomous_revision":
+            revised.append(chapter_number)
+            return " ".join(["Second"] * 20)
+        return fake_chat(session, run, client, provider, model, messages,
+                         stage=stage, chapter_number=chapter_number, **kwargs)
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=3)
+        run.target_word_count = 60
+        run.min_words_per_chapter = 10
+        run.max_words_per_chapter = 30
+        run.chapters[0].content = " ".join(["First"] * 20)
+        run.chapters[1].content = " ".join(["Second"] * 10)
+        run.chapters[2].content = " ".join(["Third"] * 20)
+        session.commit()
+        editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        assert revised == [2]
+        expensive = {"developmental_chapter", "adjacent_chapters", "cross_chapter", "whole_book"}
+        assert not any(scope in expensive and not repaired for scope, repaired in scopes)
+        assert expensive <= {scope for scope, repaired in scopes if repaired}
+        from novel_generator.services.editorial_coverage import review_coverage
+        assert review_coverage(run)["accepted"]
