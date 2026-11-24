@@ -1653,3 +1653,43 @@ def test_manuscript_reader_only_loads_selected_saved_chapter(client):
     assert client.get(url + "?chapter=4").status_code == 404
     with get_session_factory()() as session:
         assert get_run(session, run_id).status == RunStatus.RUNNING
+
+
+@pytest.mark.parametrize("mode", ["generate", "save", "unreachable_length", "provider_failure"])
+def test_create_book_and_generate_in_one_transaction(client, monkeypatch, mode):
+    from novel_generator.services.providers import ProviderManager
+    from novel_generator.services.provider_errors import ProviderError
+    from novel_generator.repositories import list_projects
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    def ensure(self, provider, model):
+        if mode == "provider_failure":
+            raise ProviderError("Model disappeared after preflight.")
+    monkeypatch.setattr(ProviderManager, "ensure_model", ensure)
+    with get_session_factory()() as session:
+        before = len(list_projects(session))
+    form = dict(title="A complete book", premise="A keeper protects the ferry ledger.",
+                preferred_model="test-model", action="save" if mode == "save" else "generate")
+    if mode == "unreachable_length":
+        form["desired_word_count"] = "100000"
+    response = client.post("/projects/new", data=form, follow_redirects=False)
+    with get_session_factory()() as session:
+        projects = list_projects(session)
+        if mode in {"provider_failure", "unreachable_length"}:
+            assert response.status_code == 400
+            assert len(projects) == before
+            assert "A complete book" in response.text
+        else:
+            assert response.status_code == 303
+            assert len(projects) == before + 1
+            project = next(p for p in projects if p.title == "A complete book")
+            assert project.desired_word_count == 60000 and project.requested_chapters == 24
+            if mode == "save":
+                assert not project.runs
+                assert response.headers["location"].startswith("/projects/")
+            else:
+                run = project.runs[0]
+                assert len(project.runs) == 1
+                assert run.status == RunStatus.QUEUED and run.quality_profile == "autonomous"
+                assert not run.pause_after_outline and run.developmental_rewrite_enabled
+                assert run.min_words_per_chapter == 2000 and run.max_words_per_chapter == 3000
+                assert response.headers["location"].startswith(f"/runs/{run.id}")
