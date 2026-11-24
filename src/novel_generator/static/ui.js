@@ -938,7 +938,7 @@ function setupRunDetail() {
   }
 
   function completedChapterCount(run) {
-    return sortedChapters(run).filter((chapter) => chapter.content && chapter.summary && chapter.continuity_update).length;
+    return sortedChapters(run).filter((chapter) => chapter.status === "completed" && chapter.has_content && chapter.has_summary && chapter.continuity_update && Object.keys(chapter.continuity_update).length).length;
   }
 
   function currentDashboardChapter(run) {
@@ -1023,20 +1023,9 @@ function setupRunDetail() {
   }
 
   function activeRoute(run) {
-    const events = sortedEvents(run).reverse();
-    for (const event of events) {
-      const providerName = String(event.payload?.provider_name || "").trim();
-      const modelName = String(event.payload?.model_name || "").trim();
-      if (providerName || modelName) {
-        return {
-          providerName: providerName || run.provider_name,
-          modelName: modelName || run.model_name,
-        };
-      }
-    }
     return {
-      providerName: run.provider_name,
-      modelName: run.model_name,
+      providerName: run.active_route?.provider_name || run.provider_name,
+      modelName: run.active_route?.model_name || run.model_name,
     };
   }
 
@@ -1057,11 +1046,7 @@ function setupRunDetail() {
   }
 
   function fallbackEvents(run) {
-    return sortedEvents(run)
-      .filter((event) => String(event.event_type || "").includes("fallback"))
-      .slice(-4)
-      .map(eventSummary)
-      .filter(Boolean);
+    return Array.from(run.fallback_events || []).map(eventSummary).filter(Boolean);
   }
 
   function runHealth(run) {
@@ -1069,8 +1054,7 @@ function setupRunDetail() {
     const currentStage = stageFor(normalizedStage);
     const nextStageIndex = stageOrder.indexOf(normalizedStage);
     const nextStage = nextStageIndex >= 0 && nextStageIndex + 1 < stageOrder.length ? stageFor(stageOrder[nextStageIndex + 1]) : null;
-    const runEvents = sortedEvents(run);
-    const latestEvent = eventSummary(runEvents.length ? runEvents[runEvents.length - 1] : null);
+    const latestEvent = eventSummary(run.latest_event);
     const fallbacks = fallbackEvents(run);
     const completedChapters = completedChapterCount(run);
     const allChaptersComplete = completedChapters === Number(run.requested_chapters || 0);
@@ -1512,10 +1496,10 @@ function setupRunDetail() {
       node.style.width = `${progressPercent}%`;
     });
     if (artifactCountNode) {
-      artifactCountNode.textContent = String(Array.from(run.artifacts || []).length);
+      artifactCountNode.textContent = String(run.artifact_count || 0);
     }
     if (eventCountNode) {
-      eventCountNode.textContent = String(sortedEvents(run).length);
+      eventCountNode.textContent = String(run.event_count || 0);
     }
   }
 
@@ -1580,21 +1564,27 @@ function setupRunDetail() {
       item.appendChild(routeNote);
     }
     eventLog.appendChild(item);
+    while (eventLog.children.length > 200) eventLog.firstElementChild.remove();
     eventLog.scrollTop = eventLog.scrollHeight;
     if (eventLogCountNode) {
       eventLogCountNode.textContent = String(eventLog.querySelectorAll("[data-sequence]").length);
     }
   }
 
+  let refreshInFlight = false;
+  let refreshPending = false;
   async function refreshRun() {
-    if (!runId) {
-      return;
-    }
+    if (!runId) return;
+    if (refreshInFlight) { refreshPending = true; return; }
+    refreshInFlight = true;
     try {
-      const run = await fetchJson(`/api/runs/${runId}`);
+      const run = await fetchJson(`/api/runs/${runId}/dashboard`);
       renderRunDashboard(run);
     } catch {
-      // Keep the current page state if the refresh fails; the SSE feed still has the latest event.
+      // Keep the current page state; the lightweight heartbeat retries.
+    } finally {
+      refreshInFlight = false;
+      if (refreshPending) { refreshPending = false; scheduleRefresh(); }
     }
   }
 
@@ -1617,7 +1607,7 @@ function setupRunDetail() {
     return;
   }
 
-  const source = new EventSource(`/api/runs/${runId}/events?after=${lastSequence}`);
+  const source = new EventSource(`/api/runs/${runId}/events?after=${lastSequence}&compact=true`);
 
   function reloadOnTransition(status) {
     if (reloadScheduled || status === initialStatus || (!terminalStatuses.has(status) && !reviewStatuses.has(status))) return;
@@ -1643,6 +1633,7 @@ function setupRunDetail() {
       }
       renderFailure(snapshot.error, snapshot.step);
       reloadOnTransition(snapshot.status);
+      if (!reloadScheduled) scheduleRefresh();
     } catch {
       if (connectionNode) connectionNode.textContent = "Disconnected · retrying";
       if (heartbeatNode) heartbeatNode.textContent = "Showing last saved status; connection will be retried.";

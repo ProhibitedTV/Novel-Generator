@@ -4,14 +4,14 @@ import asyncio
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from ..dependencies import get_app_settings, get_db, get_session_factory
-from ..models import GenerationRun, RunStatus
+from ..models import GenerationRun, RunEvent, RunStatus
 from ..repositories import (
     create_project,
     create_run,
@@ -397,6 +397,26 @@ def api_get_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunRead
     return GenerationRunRead.model_validate(run)
 
 
+@router.get("/runs/{run_id}/dashboard")
+def api_run_dashboard(run_id: str, response: Response, db: Session = Depends(get_db)) -> dict:
+    from ..services.live_dashboard import dashboard_snapshot
+    result = dashboard_snapshot(db, run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    response.headers["Cache-Control"] = "no-store"
+    return result
+
+
+@router.get("/runs/{run_id}/event-history")
+def api_run_event_history(run_id: str, response: Response, before: int | None = Query(default=None, ge=1),
+                          limit: int = Query(default=200, ge=1, le=200), db: Session = Depends(get_db)) -> dict:
+    from ..services.live_dashboard import event_history
+    if db.scalar(select(GenerationRun.id).where(GenerationRun.id == run_id)) is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    response.headers["Cache-Control"] = "no-store"
+    return event_history(db, run_id, before=before, limit=limit)
+
+
 @router.get("/runs/{run_id}/live-status")
 def api_live_status(run_id: str, response: Response, db: Session = Depends(get_db),
                     settings: Settings = Depends(get_app_settings)) -> dict:
@@ -573,7 +593,7 @@ def api_resume_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunR
 
 
 @router.get("/runs/{run_id}/events")
-async def api_run_events(run_id: str, after: int = 0,
+async def api_run_events(run_id: str, after: int = 0, compact: bool = False,
                          last_event_id: str | None = Header(default=None, alias="Last-Event-ID")) -> StreamingResponse:
     session_factory = get_session_factory()
     try:
@@ -586,33 +606,38 @@ async def api_run_events(run_id: str, after: int = 0,
         idle_ticks = 0
         while True:
             with session_factory() as session:
-                run = get_run_minimal(session, run_id)
+                # Release the database session before yielding to slow clients.
+                run = session.execute(select(GenerationRun.status, GenerationRun.current_step,
+                                             GenerationRun.current_chapter).where(
+                    GenerationRun.id == run_id)).one_or_none()
                 if run is None:
-                    yield "event: error\ndata: {\"message\":\"Run not found.\"}\n\n"
-                    return
-                events = list_events_after(session, run_id, last_sequence)
-                for event in events:
-                    last_sequence = event.sequence
-                    payload = {
-                        "sequence": event.sequence,
-                        "event_type": event.event_type,
-                        "payload": event.payload,
-                        "created_at": event.created_at.isoformat(),
-                        "run_status": run.status.value,
-                        "current_step": run.current_step,
-                        "current_chapter": run.current_chapter,
-                    }
-                    yield f"id: {event.sequence}\ndata: {json.dumps(payload)}\n\n"
-
-                terminal = run.status in TERMINAL_RUN_STATUSES
-                if terminal and not events:
-                    final_payload = {
-                        "run_status": run.status.value,
-                        "current_step": run.current_step,
-                        "current_chapter": run.current_chapter,
-                    }
-                    yield f"event: terminal\ndata: {json.dumps(final_payload)}\n\n"
-                    return
+                    frames = ['event: error\ndata: {"message":"Run not found."}\n\n']
+                    events = []
+                    finished = True
+                else:
+                    from ..services.live_dashboard import compact_event_payload
+                    events = session.execute(select(
+                        RunEvent.sequence, RunEvent.event_type, RunEvent.payload, RunEvent.created_at,
+                    ).where(RunEvent.run_id == run_id, RunEvent.sequence > last_sequence)
+                      .order_by(RunEvent.sequence.asc()).limit(100)).all()
+                    frames = []
+                    state = {"run_status": run.status.value, "current_step": run.current_step,
+                             "current_chapter": run.current_chapter}
+                    for event in events:
+                        last_sequence = event.sequence
+                        payload = {
+                            "sequence": event.sequence, "event_type": event.event_type,
+                            "payload": compact_event_payload(event.payload) if compact else event.payload,
+                            "created_at": event.created_at.isoformat(), **state,
+                        }
+                        frames.append(f"id: {event.sequence}\ndata: {json.dumps(payload)}\n\n")
+                    finished = run.status in TERMINAL_RUN_STATUSES and not events
+                    if finished:
+                        frames.append(f"event: terminal\ndata: {json.dumps(state)}\n\n")
+            for frame in frames:
+                yield frame
+            if finished:
+                return
             idle_ticks = 0 if events else idle_ticks + 1
             if idle_ticks >= 15:
                 yield ": keepalive\n\n"
