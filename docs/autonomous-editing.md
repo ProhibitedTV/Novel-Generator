@@ -235,3 +235,10 @@ recorded failure. These are historical observations, not inferred throughput or
 proof of literary quality. Missing timings and unverified model identities are
 not treated as successful evidence. Review diagnostics for private text before
 sharing them.
+
+Final editorial sweeps stage local chapter, identity, artifact/source and length
+checks before developmental book-context audits, followed by the complete pair
+and whole-book audits. Repairs run before advancing to the next expensive tier
+when a preceding tier fails; all required reviews still have to pass on the
+final source. This avoids spending pairwise inference on a version already
+known to require revision.
