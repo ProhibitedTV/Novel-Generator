@@ -308,3 +308,19 @@ def test_publication_export_rejects_incomplete_manuscript(tmp_path, profile, num
             tmp_path, project, run, chapters, profile, front_matter=_front_matter()
         )
     assert not (tmp_path / run.id).exists()
+
+
+def test_atomic_export_preserves_existing_file_on_partial_write(tmp_path):
+    from novel_generator.services.exports import _atomic_write
+    destination = tmp_path / "manuscript.docx"
+    destination.write_bytes(b"previous complete file")
+    def broken_writer(path):
+        path.write_bytes(b"partial new file")
+        raise OSError("Disk write interrupted")
+    with pytest.raises(OSError, match="Disk write interrupted"):
+        _atomic_write(destination, broken_writer)
+    assert destination.read_bytes() == b"previous complete file"
+    assert list(tmp_path.iterdir()) == [destination]
+    _atomic_write(destination, lambda path: path.write_bytes(b"complete replacement"))
+    assert destination.read_bytes() == b"complete replacement"
+    assert list(tmp_path.iterdir()) == [destination]
