@@ -1624,9 +1624,21 @@ def test_manuscript_reader_only_loads_selected_saved_chapter(client):
     assert "2 of 4 chapters with saved prose" in first.text
     assert f'href="{url}?chapter=3"' in first.text
     assert "data-event-log" not in first.text
+    assert 'data-reader-controls hidden' in first.text
+    assert 'data-reader-font' in first.text and 'data-reader-theme' in first.text
+    assert 'data-reader-focus aria-pressed="false"' in first.text
+    assert 'data-reader-contents open' in first.text
+    assert 'href="#main-content"' in first.text
+    assert "Chapter 1 of 4" in first.text
     third = client.get(url + "?chapter=3")
     assert third.status_code == 200
     assert "Unique third prose." in third.text
+    assert "last currently saved chapter" in third.text
+    assert 'data-reader-chapter="3"' in third.text
+    workspace = client.get(f"/runs/{run_id}")
+    assert workspace.status_code == 200
+    assert f'data-open-reader href="/runs/{run_id}/read">Read saved chapters' in workspace.text
+    assert "<summary>Run actions</summary>" in workspace.text
     assert "Unique first prose" not in third.text
     assert f'href="{url}?chapter=1"' in third.text
     assert client.get(url + "?chapter=2").status_code == 404

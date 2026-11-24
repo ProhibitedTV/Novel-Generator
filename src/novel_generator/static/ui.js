@@ -10,7 +10,57 @@ document.addEventListener("DOMContentLoaded", () => {
   setupReviewSections(document);
   setupProviderConsole();
   setupRunDetail();
+  setupManuscriptReader(document);
 });
+
+function readerPreference(key, value) {
+  try {
+    const name = "novel-generator:reader:" + key;
+    if (value === undefined) return window.localStorage.getItem(name);
+    window.localStorage.setItem(name, value);
+  } catch {
+    // Reading remains fully usable if storage is disabled.
+  }
+  return null;
+}
+
+function setupManuscriptReader(root) {
+  const reader = root.querySelector("[data-reader]");
+  if (!reader) return;
+  const controls = reader.querySelector("[data-reader-controls]");
+  if (!controls) return;
+  const font = reader.querySelector("[data-reader-font]");
+  const theme = reader.querySelector("[data-reader-theme]");
+  const focus = reader.querySelector("[data-reader-focus]");
+  const contents = reader.querySelector("[data-reader-contents]");
+  const fonts = ["small", "medium", "large", "extra"];
+  const themes = ["light", "paper", "dark"];
+  function apply() {
+    reader.dataset.font = fonts.includes(font.value) ? font.value : "medium";
+    reader.dataset.theme = themes.includes(theme.value) ? theme.value : "light";
+    reader.dataset.focus = focus.getAttribute("aria-pressed") === "true" ? "true" : "false";
+    readerPreference("font", reader.dataset.font);
+    readerPreference("theme", reader.dataset.theme);
+  }
+  const savedFont = readerPreference("font");
+  const savedTheme = readerPreference("theme");
+  font.value = fonts.includes(savedFont) ? savedFont : "medium";
+  theme.value = themes.includes(savedTheme) ? savedTheme : "light";
+  font.addEventListener("change", apply);
+  theme.addEventListener("change", apply);
+  focus.addEventListener("click", () => {
+    const enabled = focus.getAttribute("aria-pressed") !== "true";
+    focus.setAttribute("aria-pressed", String(enabled));
+    focus.textContent = enabled ? "Exit focus mode" : "Focus mode";
+    apply();
+  });
+  if (contents && window.matchMedia("(max-width: 700px)").matches) contents.open = false;
+  apply();
+  controls.hidden = false;
+  if (reader.dataset.readerRun && reader.dataset.readerChapter) {
+    readerPreference("chapter:" + reader.dataset.readerRun, reader.dataset.readerChapter);
+  }
+}
 
 function setupConfirmActions(root) {
   const confirmForms = Array.from(root.querySelectorAll("form[data-confirm]"));
@@ -1503,6 +1553,18 @@ function setupRunDetail() {
     }
   }
 
+  function updateReaderLinks(run) {
+    const links = runDetail.querySelectorAll("[data-open-reader]");
+    const available = sortedChapters(run).filter(chapter => chapter.has_content);
+    const last = readerPreference("chapter:" + runId);
+    const bookmark = available.find(chapter => String(chapter.chapter_number) === last);
+    links.forEach(link => {
+      link.hidden = !available.length;
+      link.href = "/runs/" + encodeURIComponent(runId) + "/read" + (bookmark ? "?chapter=" + bookmark.chapter_number : "");
+      link.textContent = bookmark ? "Continue reading" : "Read saved chapters";
+    });
+  }
+
   function renderRunDashboard(run) {
     latestRunData = run;
     runDetail.dataset.runStatus = run.status || runDetail.dataset.runStatus || "";
@@ -1519,6 +1581,7 @@ function setupRunDetail() {
     renderQuality(run);
     renderContinuity(run);
     updateDashboardCounts(run);
+    updateReaderLinks(run);
     updateElapsed();
 
     const route = activeRoute(run);
