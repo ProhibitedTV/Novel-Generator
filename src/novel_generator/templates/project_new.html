@@ -62,7 +62,7 @@
       <div class="form-section story-brief-shell">
         <div class="section-header-copy">
           <h3>Book brief</h3>
-          <p>Define the form, audience, reader promise, and required coverage. Add character details for narrative books.</p>
+          <p>Choose the kind of book. Add more direction only when you need it.</p>
         </div>
         <div class="grid compact">
           <label>
@@ -99,6 +99,10 @@
               {% endfor %}
             </select>
           </label>
+        </div>
+        <details class="compact-details">
+          <summary>Optional story direction, ending and source material</summary>
+        <div class="grid compact">
           <label>
             Intended audience
             <input type="text" name="story_audience" value="{{ form_values.story_audience }}" placeholder="Who is this book for? Include age and reading level when relevant.">
@@ -139,6 +143,7 @@
           Source material for nonfiction
           <textarea name="story_source_material" rows="5" placeholder="Paste the factual source content with source names or citations. URLs alone are not retrieved. Fiction may leave this empty.">{{ form_values.story_source_material }}</textarea>
         </label>
+        </details>
         <details class="compact-details">
           <summary>Character engine</summary>
           <div class="grid compact">
