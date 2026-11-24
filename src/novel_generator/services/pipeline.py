@@ -1739,6 +1739,60 @@ def _pause_for_outline_review(session: Session, run: GenerationRun) -> None:
     session.commit()
 
 
+def _load_draft_continuity(session, run, chapter, ledger, story_bible, outline_entry, plan, client):
+    """Recover invalid autonomous metadata without replacing the chapter prose."""
+    autonomous = autonomous_editorial.enabled(run)
+
+    def parse_update(raw):
+        update = parse_continuity_update(raw)
+        if autonomous:
+            _ledger_from_update(ledger, update)
+        return update
+
+    if chapter.continuity_update:
+        try:
+            update = ChapterContinuityUpdate.model_validate(chapter.continuity_update)
+            if autonomous:
+                _ledger_from_update(ledger, update)
+        except (ValueError, RuntimeError):
+            if not autonomous:
+                raise
+            record_event(session, run, "continuity_checkpoint_invalidated", {
+                "message": f"Chapter {chapter.chapter_number} continuity checkpoint is invalid; regenerating metadata from saved prose.",
+                "chapter_number": chapter.chapter_number,
+            })
+            chapter.continuity_update = None
+            session.commit()
+        else:
+            record_event(session, run, "continuity_checkpoint_reused", {
+                "message": f"Reused saved continuity update for chapter {chapter.chapter_number}.",
+                "chapter_number": chapter.chapter_number,
+            })
+            return update
+
+    continuity_provider_name, continuity_model_name = _resolve_stage_route(client, run, "continuity_update")
+    run.current_step = "continuity_update"
+    run.current_chapter = chapter.chapter_number
+    try:
+        return _generate_structured_output(
+            session, run, client, continuity_provider_name, continuity_model_name,
+            lambda: build_continuity_update_messages(run.project, chapter, ledger, story_bible),
+            parse_update if autonomous else parse_continuity_update,
+            f"chapter {chapter.chapter_number} continuity update",
+            "continuity_update", chapter.chapter_number,
+        )
+    except Exception as exc:
+        if autonomous:
+            raise autonomous_editorial.AutonomousQualityError("Continuity extraction failed; autonomous mode cannot invent a checkpoint from the outline.") from exc
+        update = _fallback_continuity_update(chapter, ledger, outline_entry, plan)
+        record_event(session, run, "continuity_update_fallback", {
+            "message": f"Chapter {chapter.chapter_number} continuity used deterministic fallback.",
+            "chapter_number": chapter.chapter_number,
+            "error": str(exc),
+        })
+        return update
+
+
 def _draft_chapter(
     session: Session,
     run: GenerationRun,
@@ -2072,47 +2126,7 @@ def _draft_chapter(
             )
         session.commit()
 
-    if chapter.continuity_update:
-        continuity_update = ChapterContinuityUpdate.model_validate(chapter.continuity_update)
-        record_event(
-            session,
-            run,
-            "continuity_checkpoint_reused",
-            {
-                "message": f"Reused saved continuity update for chapter {chapter.chapter_number}.",
-                "chapter_number": chapter.chapter_number,
-            },
-        )
-    else:
-        continuity_provider_name, continuity_model_name = _resolve_stage_route(client, run, "continuity_update")
-        run.current_step = "continuity_update"
-        try:
-            continuity_update = _generate_structured_output(
-                session,
-                run,
-                client,
-                continuity_provider_name,
-                continuity_model_name,
-                lambda: build_continuity_update_messages(project, chapter, ledger, story_bible),
-                parse_continuity_update,
-                f"chapter {chapter.chapter_number} continuity update",
-                "continuity_update",
-                chapter.chapter_number,
-            )
-        except Exception as exc:
-            continuity_update = _fallback_continuity_update(chapter, ledger, outline_entry, plan)
-            if autonomous_editorial.enabled(run):
-                raise autonomous_editorial.AutonomousQualityError("Continuity extraction failed; autonomous mode cannot invent a checkpoint from the outline.") from exc
-            record_event(
-                session,
-                run,
-                "continuity_update_fallback",
-                {
-                    "message": f"Chapter {chapter.chapter_number} continuity used deterministic fallback.",
-                    "chapter_number": chapter.chapter_number,
-                    "error": str(exc),
-                },
-            )
+    continuity_update = _load_draft_continuity(session, run, chapter, ledger, story_bible, outline_entry, plan, client)
     ledger_after = _ledger_from_update(ledger, continuity_update)
     ledger_after = _ledger_with_chapter_mode(ledger_after, chapter.chapter_number, outline_entry.chapter_mode)
     if continuity_update.timeline != ledger_after.timeline:
@@ -3126,8 +3140,16 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
     for chapter in chapters:
         if chapter.status == ChapterStatus.COMPLETED and chapter.content and chapter.summary and chapter.continuity_update:
             ledger = _continuity_ledger_from_run(run)
-            ledger_after = _ledger_from_update(ledger, ChapterContinuityUpdate.model_validate(chapter.continuity_update))
             outline_entry = _outline_entry(run, chapter.chapter_number)
+            if autonomous_editorial.enabled(run):
+                # A completed chapter can contain legacy invalid metadata.
+                # Keep the prose and summary; repair only the checkpoint.
+                update = _load_draft_continuity(session, run, chapter, ledger, story_bible,
+                                                outline_entry, None, client)
+                chapter.continuity_update = update.model_dump(exclude_unset=True)
+            else:
+                update = ChapterContinuityUpdate.model_validate(chapter.continuity_update)
+            ledger_after = _ledger_from_update(ledger, update)
             ledger_after = _ledger_with_chapter_mode(ledger_after, chapter.chapter_number, outline_entry.chapter_mode)
             run.continuity_ledger = ledger_after.model_dump()
             _sync_summary_context(run, settings.chapter_summary_window)
