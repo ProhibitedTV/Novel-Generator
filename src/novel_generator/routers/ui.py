@@ -2907,10 +2907,11 @@ def create_project_ui(
     request: Request,
     title: str = Form(""),
     premise: str = Form(""),
-    desired_word_count: str = Form("40000"),
-    requested_chapters: str = Form("12"),
-    min_words_per_chapter: str = Form("1200"),
-    max_words_per_chapter: str = Form("2200"),
+    desired_word_count: str = Form("60000"),
+    requested_chapters: str = Form("24"),
+    min_words_per_chapter: str = Form("2000"),
+    max_words_per_chapter: str = Form("3000"),
+    action: str = Form("save"),
     preferred_provider_name: str = Form("ollama"),
     preferred_model: str = Form(""),
     notes: str = Form(""),
@@ -3056,7 +3057,7 @@ def create_project_ui(
         "task_routing": _task_routing_payload(raw_form_values),
     }
     provider_config, provider_status, _ = _provider_status(settings, db)
-    provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
+    provider_configs_by_name, provider_statuses_by_name, manager = _provider_catalog(settings, db)
     try:
         payload = ProjectCreate.model_validate(payload_values)
     except ValidationError as exc:
@@ -3086,6 +3087,26 @@ def create_project_ui(
         )
 
     payload = payload.model_copy(update={"notes": payload.notes or None})
+    if action == "generate":
+        # Validate and queue in the same transaction, so a failed start never
+        # leaves an orphan project or silently falls back to a lesser profile.
+        try:
+            if not payload.requested_chapters * payload.min_words_per_chapter <= payload.desired_word_count <= payload.requested_chapters * payload.max_words_per_chapter:
+                raise ValueError("The word target must be reachable within the chapter count and word range.")
+            manager.ensure_model(payload.preferred_provider_name, payload.preferred_model)
+            project = create_project(db, payload)
+            run = create_run(db, project, RunCreate(project_id=project.id,
+                quality_profile="autonomous", pause_after_outline=False,
+                developmental_rewrite_enabled=True))
+            record_event(db, run, "run_queued", {"message": "Autonomous book queued from the new project form.",
+                "provider_name": run.provider_name, "model_name": run.model_name})
+            db.commit()
+        except (ProviderError, ProviderTransportError, ValueError) as exc:
+            db.rollback()
+            return _render(request, "project_new.html",
+                _project_new_context(request, db, settings, form_values=raw_form_values,
+                                     form_errors={"__all__": str(exc)}), status_code=400)
+        return _redirect(f"/runs/{run.id}", message="Book queued for automatic writing and editing.")
     project = create_project(db, payload)
     db.commit()
     return _redirect(f"/projects/{project.id}", message="Project created.", message_tone="success")

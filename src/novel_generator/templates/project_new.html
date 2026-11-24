@@ -338,8 +338,10 @@
         <textarea name="notes" rows="4" placeholder="Optional worldbuilding, POV, continuity reminders, or revision notes.">{{ form_values.notes }}</textarea>
       </label>
 
+      <p class="field-note">Generate starts automatic writing, continuity checks, editing and export with no outline approval pause. You can leave the run unattended; saved checkpoints are retained.</p>
       <div class="form-actions">
-        <button type="submit">Create project</button>
+        <button type="submit" name="action" value="generate">Create and generate book</button>
+        <button class="secondary" type="submit" name="action" value="save">Save project only</button>
         <a class="button secondary" href="/projects">Cancel</a>
       </div>
     </form>
