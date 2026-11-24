@@ -1322,3 +1322,37 @@ def test_legacy_invalid_metadata_checkpoint_is_reextracted(configured_environmen
         assert calls.count(("continuity_update", 1)) == 1
         assert len(editor._events(run, "autonomous_metadata_invalidated")) == 1
         assert chapter.continuity_update["new_entities_introduced"] == []
+
+
+@pytest.mark.parametrize("saved_invalid", [False, True])
+def test_draft_continuity_recovers_from_invalid_canon_without_rewriting(configured_environment, monkeypatch, saved_invalid):
+    calls = []
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        run.story_bible = {**run.story_bible, "canon_registry": [{"name": "Iris", "kind": "person"}]}
+        bible = pipeline._story_bible_from_run(run)
+        ledger = pipeline._build_initial_ledger(bible)
+        good = ChapterContinuityUpdate(
+            chapter_outcome="Ledger secured", current_patch_status="Safe", world_state="Safe",
+            timeline_entry="Ledger secured",
+        ).model_dump()
+        bad = {**good, "new_entities_introduced": [
+            {"name": "Conflicting claimant", "kind": "person", "aliases": ["Iris"]}]}
+        if saved_invalid:
+            chapter.continuity_update = bad
+        session.commit()
+        def chat(session, run, client, provider, model, messages, *, stage, **kwargs):
+            assert stage == "continuity_update"
+            calls.append(messages)
+            return json.dumps(bad if not saved_invalid and len(calls) == 1 else good)
+        monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+        update = pipeline._load_draft_continuity(session, run, chapter, ledger, bible,
+                                                 pipeline._outline_entry(run, 1), None, object())
+        assert not update.new_entities_introduced
+        assert chapter.content == PROSE
+        assert len(calls) == (1 if saved_invalid else 2)
+        if saved_invalid:
+            assert len(editor._events(run, "continuity_checkpoint_invalidated")) == 1
+        else:
+            assert len(editor._events(run, "continuity_output_rejected")) == 1
