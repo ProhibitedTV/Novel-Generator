@@ -196,3 +196,25 @@ repair attempt; the interruption still counts toward the transport recovery limi
 Evidence-anchored causal repairs now edit only cited paragraphs, using the chapter context as read-only input. These repairs have a persistent, separate `AUTONOMOUS_TARGETED_REPAIR_ATTEMPTS` budget (default 12 per chapter per phase). Historical full-chapter attempts remain counted; no budgets are reset. Every candidate still receives a full review, and ungrounded or oversized repairs fall back to the existing chapter budget. Quotation formatting and omitted excerpts can map to separate source paragraphs without changing intervening prose.
 
 Coupled defects now use one coordinated JSON edit set for all grounded non-length issues. This prevents causal revisions from starving repetition repairs and lets the editor remove a wholly redundant passage. Every selected id must appear exactly once, all replacements are validated before saving, and text outside selected spans is unchanged. Coordinated attempts have their own persisted strategy bucket using the existing targeted limit; historical attempts and cycle checks remain intact. Missing ids, duplicate ids, oversized responses, and deleting every selected passage fail validation, with two correction retries. This is a new edit strategy, not automatic manuscript acceptance.
+
+
+## Overnight qualification
+
+For a shorter end-to-end fiction qualification, using an already installed local
+model and a new output directory, run:
+
+```powershell
+python -m novel_generator.services.local_verification --model gemma4:latest --chapters 8 --words-per-chapter 1500 --output-dir artifacts/overnight-fiction
+```
+
+For a full novel qualification, use 24 chapters at 2500 words instead and a
+different output directory. These are target lengths, not time estimates.
+The isolated driver now follows the same persisted transport cooldown and
+automatically reclaims the run when the provider returns. It prints a waiting
+diagnostic rather than terminating during an outage. Start with the chosen
+models installed and the provider reachable. A process or host restart still
+requires restarting the CLI with its original arguments plus `--resume`;
+use the supervised Compose worker for automatic process-restart recovery.
+A terminal editorial failure is reported rather than silently accepted. Inspect
+`report.json` and the manuscript directory after the command settles.
+Do not run competing GPU-intensive qualification and production jobs.

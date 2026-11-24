@@ -251,3 +251,58 @@ def test_qualification_resume_requires_exact_manifest_and_existing_database(tmp_
         prepare_qualification_directory(output, config, resume=False)
     with pytest.raises(ValueError, match="manifest"):
         prepare_qualification_directory(tmp_path, config, resume=True)
+
+
+def test_qualification_driver_waits_and_resumes_after_transport_failure(configured_environment, monkeypatch):
+    from novel_generator.dependencies import get_session_factory
+    from novel_generator.settings import get_settings
+    from novel_generator.services import local_verification as verification
+    from novel_generator.services.run_recovery import schedule_provider_retry
+    from novel_generator.services.provider_errors import ProviderTransportError
+    from test_autonomous_editorial import make_run, PROSE
+    from datetime import timedelta
+    factory = get_session_factory()
+    settings = get_settings()
+    calls, waits = [], []
+    clock = [datetime.utcnow()]
+    original_release = verification.release_provider_retries
+    monkeypatch.setattr(verification, "release_provider_retries",
+                        lambda session: original_release(session, now=clock[0]))
+    monkeypatch.setattr(verification.time, "sleep",
+                        lambda seconds: clock.__setitem__(0, clock[0] + timedelta(minutes=16)))
+    def process(session, run, settings, provider):
+        calls.append(run.id)
+        assert run.chapters[0].content == PROSE
+        if len(calls) == 1:
+            assert schedule_provider_retry(session, run, settings, ProviderTransportError("offline"), now=clock[0])
+        else:
+            run.status = RunStatus.COMPLETED
+            session.commit()
+    monkeypatch.setattr(verification, "process_run_safe", process)
+    with factory() as session:
+        run = make_run(session)
+        run.status = RunStatus.QUEUED
+        run.current_step = "queued"
+        session.commit()
+        run_id = run.id
+        finished = verification.drive_qualification(session, factory, run_id, settings, object(),
+                                                      on_wait=lambda row: waits.append(row.error_message))
+        assert finished.status == RunStatus.COMPLETED
+        assert calls == [run_id, run_id]
+        assert len(waits) == 1 and "automatic retry" in waits[0]
+        assert finished.chapters[0].content == PROSE
+
+
+@pytest.mark.parametrize("terminal", [RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELED, RunStatus.AWAITING_APPROVAL])
+def test_qualification_driver_never_reclaims_terminal_or_paused_run(configured_environment, monkeypatch, terminal):
+    from novel_generator.dependencies import get_session_factory
+    from novel_generator.settings import get_settings
+    from novel_generator.services import local_verification as verification
+    from test_autonomous_editorial import make_run
+    monkeypatch.setattr(verification, "process_run_safe", lambda *args: pytest.fail("Unexpected new inference"))
+    factory = get_session_factory()
+    with factory() as session:
+        run = make_run(session)
+        run.status = terminal
+        session.commit()
+        assert verification.drive_qualification(session, factory, run.id, get_settings(), object()).status == terminal
