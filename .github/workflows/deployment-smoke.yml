@@ -32,7 +32,6 @@ jobs:
         run: |
           curl --fail --silent --show-error http://localhost:8000/api/health/live
           docker compose exec -T web python - <<'PY'
-          from pathlib import Path
           from sqlalchemy import text
           from novel_generator.dependencies import get_session_factory
           from novel_generator.repositories import create_project
@@ -51,7 +50,17 @@ jobs:
               session.commit()
           (settings.artifacts_dir / "deployment-smoke.txt").write_text("preserved", encoding="utf-8")
           PY
-          docker compose logs worker | grep -F "runtime transforms."
+          # A running container is not necessarily an initialized worker.
+          # Allow bounded time for imports, migrations and runtime installation.
+          ready=false
+          for attempt in $(seq 1 30); do
+            if docker compose logs --no-color worker 2>&1 | grep -F "runtime transforms."; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
       - name: Recreate containers without removing named volumes
         run: docker compose up -d --force-recreate --wait --wait-timeout 120
       - name: Verify persistent database and artifact volumes
@@ -65,7 +74,17 @@ jobs:
               assert any(project.title == "Deployment persistence smoke" for project in list_projects(session))
           assert (get_settings().artifacts_dir / "deployment-smoke.txt").read_text(encoding="utf-8") == "preserved"
           PY
-          docker compose logs worker | grep -F "runtime transforms."
+          # A running container is not necessarily an initialized worker.
+          # Allow bounded time for imports, migrations and runtime installation.
+          ready=false
+          for attempt in $(seq 1 30); do
+            if docker compose logs --no-color worker 2>&1 | grep -F "runtime transforms."; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          test "$ready" = true
           for service in web worker; do
             container="$(docker compose ps -q "$service")"
             test "$(docker inspect -f '{{.State.Running}}' "$container")" = true
