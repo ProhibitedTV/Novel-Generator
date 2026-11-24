@@ -21,7 +21,7 @@ The product is built around one practical goal: get to a complete book draft, th
 - Run confidence views for stage, event, chapter, word, provider, and artifact progress
 - Outline review workspace for long outlines, including 32- and 64-chapter projects
 - Chapter-level checkpointing, in-place resume, and regeneration from any chapter onward
-- Draft, balanced, strict, and publication quality profiles
+- Autonomous (default web workflow), draft, balanced, strict, and publication quality profiles
 - Bounded continuity memory, causal narrative horizons, long-range callback recall, and character/subplot arc audits
 - Adaptive manuscript pacing, late-book convergence, and live continuity lifecycle cleanup
 - Bounded whole-manuscript developmental and QA context
@@ -237,6 +237,10 @@ Both entrypoints automatically migrate the database to the current Alembic head 
 
 ## First-Launch Checklist
 
+For a pinned, reproducible test of the November 24 release candidate, see the
+[release-candidate runbook](docs/release-candidate-2026-11-24.md). This is a
+software test candidate, not a claim of proven publication quality.
+
 For a reproducible real-model check using the worker's complete generation safeguards, run:
 
 ```bash
@@ -252,8 +256,8 @@ and 24 final repair rounds, with persisted budgets and cycle detection. Use `--p
 with a project JSON for your own premise, genre, and length targets; sample 60,000-word briefs
 are in `examples/novels`. `--review-model` and `--revision-model` select separate installed
 Ollama models for those tasks. `--base-url`, `--context-tokens`, and `--output-dir` are configurable;
-the output directory must not already exist. A zero exit code means all requested chapters,
-continuity checkpoints, and export formats were produced. Inspect the report's actual word count,
+the output directory must not already exist. In autonomous mode, a zero exit code also requires current-source editorial acceptance,
+chapter and total word-count checks, and verified exports. Inspect the report's actual word count,
 fallback events, final QA, and prose separately before judging consistency or novel-length success.
 
 Before starting a long novel run:
