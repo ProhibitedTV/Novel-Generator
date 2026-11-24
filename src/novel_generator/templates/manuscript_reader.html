@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Read {{ run.book_title }} — Novel Generator{% endblock %}
+{% block content %}
+<section class="panel reader-shell">
+  <header class="section-header">
+    <div class="section-header-copy">
+      <p class="eyebrow">Manuscript reader</p>
+      <h1>{{ run.book_title }}</h1>
+      <p class="field-note">{{ chapters|length }} of {{ run.requested_chapters }} chapters with saved prose · {{ run.status.value.replace("_", " ") }}</p>
+    </div>
+    <div class="hero-actions">
+      <a class="button secondary" href="/runs/{{ run.id }}#book-overview">Back to book</a>
+      {% if chapters %}<a class="button secondary" href="/api/runs/{{ run.id }}/recovery-draft">Download saved draft</a>{% endif %}
+    </div>
+  </header>
+  <p class="reader-note">You are reading saved draft prose, not a certified publication export. Refresh to see newer saved revisions.</p>
+  {% if selected %}
+    <div class="reader-layout">
+      <aside class="reader-toc">
+        <h2>Contents</h2>
+        <ol>
+          {% for item in chapters %}
+            <li><a href="/runs/{{ run.id }}/read?chapter={{ item.chapter_number }}"{% if item.chapter_number == selected.chapter_number %} aria-current="page"{% endif %}><span>{{ item.chapter_number }}.</span> {{ item.title }}</a></li>
+          {% endfor %}
+        </ol>
+      </aside>
+      <article class="reader-page">
+        <nav class="reader-pagination" aria-label="Chapter navigation">
+          {% if previous %}<a class="button secondary" href="/runs/{{ run.id }}/read?chapter={{ previous.chapter_number }}">Previous</a>{% else %}<span></span>{% endif %}
+          <span class="field-note">Chapter {{ selected.chapter_number }}</span>
+          {% if following %}<a class="button secondary" href="/runs/{{ run.id }}/read?chapter={{ following.chapter_number }}">Next</a>{% else %}<span></span>{% endif %}
+        </nav>
+        <h2>{{ selected.title }}</h2>
+        <p class="field-note">{{ selected.status.value }} · {{ prose.split()|length }} words</p>
+        <div class="reader-prose">{{ prose }}</div>
+        <nav class="reader-pagination" aria-label="Continue reading">
+          {% if previous %}<a class="button secondary" href="/runs/{{ run.id }}/read?chapter={{ previous.chapter_number }}">Previous chapter</a>{% else %}<span></span>{% endif %}
+          <a href="/runs/{{ run.id }}#chapter-{{ selected.chapter_number }}">Editorial details</a>
+          {% if following %}<a class="button" href="/runs/{{ run.id }}/read?chapter={{ following.chapter_number }}">Next chapter</a>{% else %}<span></span>{% endif %}
+        </nav>
+      </article>
+    </div>
+  {% else %}
+    <p class="empty-state">No saved prose yet. Return when the worker has saved a chapter.</p>
+  {% endif %}
+</section>
+{% endblock %}
