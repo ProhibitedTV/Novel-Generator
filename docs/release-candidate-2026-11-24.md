@@ -51,6 +51,18 @@ python -m novel_generator.services.local_verification --model gemma4:latest --ch
 
 Use a fresh output directory for each new experiment. If you need to resume after the process stops, rerun the identical command with `--resume` appended. The existing isolated database and configuration are reused. Record any manual intervention; a manually resumed run is recovery evidence, not an uninterrupted autonomous qualification. Temporary provider outages should instead be handled by the running process's persistent cooldown queue (default `PROVIDER_RECOVERY_ATTEMPTS=-1`). Do not intentionally interrupt the only long qualification just to test this: use a separate small test.
 
+To inspect the saved progress of an isolated run from another terminal, use
+the following command on a version that supports `--inspect` (added after
+the pinned RC1 software commit):
+
+```bash
+python -m novel_generator.services.local_verification --inspect artifacts/rc-20261124-full
+```
+
+This reads the existing database in read-only mode, does not use Ollama or
+acquire a worker lease, and prints a snapshot without replacing the final
+report. Exit zero means inspection succeeded, not that the book passed.
+
 ## 4. Evaluate the result
 
 Inspect `report.json` in the isolated output directory when the CLI settles. A successful autonomous report must contain:

@@ -395,3 +395,48 @@ def test_qualification_evidence_does_not_invent_missing_metrics(tmp_path):
     assert evidence["stages"] == []
     assert evidence["observed_editorial_model_identities"] == []
     assert evidence["last_failure"] is None
+
+
+def test_inspection_reads_active_qualification_without_starting_or_mutating_it(configured_environment, tmp_path, monkeypatch, capsys):
+    import sqlite3
+    from novel_generator.dependencies import get_session_factory
+    from novel_generator.settings import get_settings
+    from novel_generator.services import local_verification as verification
+    from sqlalchemy.engine import make_url
+    from test_autonomous_editorial import make_run
+
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        run.current_step = "chapter_draft"
+        run.current_chapter = 2
+        run.chapters[1].content = None
+        run.chapters[1].status = ChapterStatus.PENDING
+        session.commit()
+        run_id = run.id
+    output = tmp_path / "inspect-run"
+    output.mkdir()
+    (output / "qualification.json").write_text('{"version": 1}', encoding="utf-8")
+    database = output / "verification.db"
+    with sqlite3.connect(make_url(get_settings().database_url).database) as src, sqlite3.connect(database) as dest:
+        src.backup(dest)
+    before = database.read_bytes()
+    def forbidden(*args, **kwargs):
+        pytest.fail("Read-only inspection must not start a worker, migrate, or call a provider.")
+    for name in ("run_migrations", "run_qualification", "exclusive_worker_lease", "ProviderManager"):
+        monkeypatch.setattr(verification, name, forbidden)
+    monkeypatch.setattr("sys.argv", ["local_verification", "--inspect", str(output)])
+    assert verification.main() == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["run_id"] == run_id
+    assert report["inspection_only"] and not report["autonomous_checks_passed"]
+    assert report["progress"] == {"current_step": "chapter_draft", "current_chapter": 2,
+        "requested_chapters": 2, "chapters_with_saved_prose": 1, "completed_chapters": 1}
+    assert database.read_bytes() == before
+    assert not (output / "report.json").exists()
+
+
+def test_inspection_does_not_create_missing_database(tmp_path):
+    from novel_generator.services.local_verification import inspect_qualification
+    with pytest.raises(ValueError, match="existing qualification"):
+        inspect_qualification(tmp_path)
+    assert not (tmp_path / "verification.db").exists()
