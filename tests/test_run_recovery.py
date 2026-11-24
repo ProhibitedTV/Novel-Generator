@@ -158,3 +158,40 @@ def test_interrupted_revision_does_not_spend_editorial_budget(configured_environ
         editor._repair(session, run, run.chapters[0], ledger, issues, settings, object(), "draft")
         assert run.chapters[0].content == REPAIRED
         assert len(editor._events(run, "autonomous_repair_interrupted")) == 1
+
+
+def test_terminal_failure_records_original_stage_and_nested_cause(configured_environment, monkeypatch):
+    def fail(*args):
+        try:
+            raise ValueError("Pacing requirement was not met")
+        except ValueError as exc:
+            raise RuntimeError("Outline rejected") from exc
+    monkeypatch.setattr(pipeline, "process_run", fail)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.current_step = "outline"
+        session.commit()
+        pipeline.process_run_safe(session, run, get_settings(), object())
+        session.refresh(run, ["events"])
+        failure = next(e.payload for e in run.events if e.event_type == "run_failed")
+        assert run.status == RunStatus.FAILED
+        assert failure["failed_step"] == "outline"
+        assert failure["error_type"] == "RuntimeError"
+        assert failure["causes"][1]["message"] == "Pacing requirement was not met"
+        assert run.chapters[0].content == PROSE
+
+
+def test_live_status_distinguishes_provider_cooldown_and_redacts_common_credentials(configured_environment):
+    from novel_generator.services.run_diagnostics import read_status, safe_message
+    now = datetime(2026, 9, 22, 12)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.last_heartbeat_at = now
+        session.flush()
+        assert read_status(session, run.id, stale_after_seconds=60)["heartbeat_stale"]
+        schedule_provider_retry(session, run, get_settings(), ProviderTransportError("offline"), now=now)
+        status = read_status(session, run.id, stale_after_seconds=60)
+        assert status["step"] == "provider_wait" and not status["heartbeat_stale"]
+        assert status["retry_at_utc"] == (now + timedelta(seconds=30)).isoformat()
+        assert "private-token" not in safe_message("Authorization: Bearer private-token")
+        assert "my-password" not in safe_message("https://user:my-password@localhost")

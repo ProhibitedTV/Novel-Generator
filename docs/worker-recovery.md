@@ -62,3 +62,27 @@ The database backup, snapshot, and qualification record are retained locally und
 `artifacts/runtime/pre-exclusive-deployment*` and
 `artifacts/runtime/exclusive-recovery-qualification.json`. Generated worker lock
 files are ignored by Git and retained on disk; they are not cleanup targets.
+
+
+## Unattended operation and diagnostics
+
+The run workspace shows a connection check, last persisted heartbeat, and the
+provider cooldown separately. A heartbeat is evidence of a saved worker
+update, not proof that a long inference is making progress. If the connection
+drops, the page keeps its previous state and retries; reconnecting event streams
+resume after the last seen sequence instead of duplicating the event list.
+
+On failure or provider cooldown, **Copy diagnostics**, **View text**, and
+**Download diagnostics** expose the current error, recent failure/recovery
+events, actual failed stage for newly recorded failures, and recent failed
+inference attempts. Inspect before sharing; provider error text can contain
+private excerpts. The endpoint intentionally does not include manuscript text,
+raw model outputs, or provider configuration records. Existing historical
+failures may lack the original failed stage or causal chain.
+
+Normal quality failures still stop with resumable checkpoints. If failure
+handling itself escapes the pipeline, the worker exits nonzero; Compose
+restarts it, and exclusive startup recovery restores interrupted work from
+committed checkpoints. Both standard services now have a restart policy.
+Persistent model/quality failures and exhausted recovery budgets require
+intervention; this does not guarantee infinite retry.

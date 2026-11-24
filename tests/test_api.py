@@ -449,3 +449,58 @@ def test_liveness_does_not_probe_providers(client, monkeypatch):
     response = client.get('/api/health/live')
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_run_diagnostics_are_copyable_read_only_and_include_failure_context(client, monkeypatch):
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+    _, run_id = create_project_and_run(client)
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        run.status = RunStatus.FAILED
+        run.current_step = "failed"
+        run.error_message = "Outline rejected."
+        record_event(session, run, "run_failed", {
+            "message": "Outline rejected.", "failed_step": "outline",
+            "causes": [{"type": "ValueError", "message": "Missing quiet chapter 13-14."}],
+            "raw_output": "PRIVATE_MODEL_OUTPUT",
+        })
+        record_event(session, run, "outline_validation_rejected", {"error": "Pacing violation.",
+            "repair_error": "Still missing breather.", "raw_output": "PRIVATE_MODEL_OUTPUT"})
+        session.commit()
+    status_response = client.get(f"/api/runs/{run_id}/live-status")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "failed"
+    assert status_response.headers["cache-control"] == "no-store"
+    diagnostic = client.get(f"/api/runs/{run_id}/diagnostics")
+    assert diagnostic.status_code == 200 and diagnostic.headers["content-type"].startswith("text/plain")
+    assert "failed_step: outline" in diagnostic.text
+    assert "Missing quiet chapter 13-14." in diagnostic.text
+    assert "Still missing breather." in diagnostic.text
+    assert "PRIVATE_MODEL_OUTPUT" not in diagnostic.text
+    assert diagnostic.headers["cache-control"] == "no-store"
+    page = client.get(f"/runs/{run_id}")
+    assert 'data-copy-diagnostics' in page.text and 'data-run-error' in page.text
+    assert f'/api/runs/{run_id}/diagnostics' in page.text
+    assert client.get(f"/api/runs/{run_id}").json()["status"] == "failed"
+    assert client.get("/api/runs/nonexistent/diagnostics").status_code == 404
+    assert client.get("/api/runs/nonexistent/live-status").status_code == 404
+
+
+def test_event_stream_reconnect_does_not_replay_previous_events(client, monkeypatch):
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+    _, run_id = create_project_and_run(client)
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        record_event(session, run, "first_test", {"message": "OLD_EVENT"})
+        session.commit()
+        session.refresh(run, ["events"])
+        sequence = max(e.sequence for e in run.events)
+        record_event(session, run, "second_test", {"message": "NEW_EVENT"})
+        run.status = RunStatus.CANCELED
+        run.current_step = "canceled"
+        session.commit()
+    for url, headers in [(f"/api/runs/{run_id}/events?after={sequence}", {}),
+                         (f"/api/runs/{run_id}/events", {"Last-Event-ID": str(sequence)})]:
+        with client.stream("GET", url, headers=headers) as response:
+            payload = "".join(response.iter_text())
+        assert "OLD_EVENT" not in payload and "NEW_EVENT" in payload and "event: terminal" in payload
