@@ -1195,7 +1195,7 @@ def test_destructive_rewrite_is_retried_without_losing_source(configured_environ
     with get_session_factory()() as session:
         run = make_run(session)
         chapter = run.chapters[0]
-        source = "The deed was burned. " + "She walked across the silent orchard. " * 100
+        source = ("The deed was burned. " + "She walked across the silent orchard. " * 100).strip()
         expected = source.replace("The deed was burned.", "The deed was sealed.", 1)
         chapter.content = source
         chapter.word_count = len(source.split())
@@ -1224,7 +1224,7 @@ def test_destructive_range_fallback_leaves_saved_chapter_unchanged(configured_en
     with get_session_factory()() as session:
         run = make_run(session)
         chapter = run.chapters[0]
-        source = "The deed was burned. " + "She walked across the silent orchard. " * 100
+        source = ("The deed was burned. " + "She walked across the silent orchard. " * 100).strip()
         chapter.content = source
         chapter.word_count = len(source.split())
         session.commit()
