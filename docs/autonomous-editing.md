@@ -179,8 +179,12 @@ the same requirements; the diagnostic report shows the repairs and model routes.
 Temporary provider transport failures schedule an automatic retry after the
 request-level retries are exhausted. The saved cooldown starts at 30 seconds and
 increases to 15 minutes, survives worker restarts, and leaves other queued jobs
-eligible to run. `PROVIDER_RECOVERY_ATTEMPTS=96` limits consecutive recoveries
-since the run's last successful saved model call (0 disables them). Useful
+eligible to run. `PROVIDER_RECOVERY_ATTEMPTS=-1` (default) keeps waiting for
+transport recovery without requiring a manual resume, even after multi-day
+outages. A positive value caps consecutive recoveries since the last successful
+saved model call; 0 disables them. Existing `.env` values are honored, so change
+a previously configured value of 96 to -1 before starting the worker if indefinite
+waiting is desired. Cancel remains available during cooldown. Useful
 inference resets the cooldown and retry allowance for a later outage; scattered
 outages over a multi-day book do not consume a lifetime allowance. Failed,
 interrupted, or unfinished calls do not reset it, and all retry history remains

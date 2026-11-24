@@ -84,13 +84,16 @@ Normal quality failures still stop with resumable checkpoints. If failure
 handling itself escapes the pipeline, the worker exits nonzero; Compose
 restarts it, and exclusive startup recovery restores interrupted work from
 committed checkpoints. Both standard services now have a restart policy.
-Persistent model/quality failures and exhausted recovery budgets require
-intervention; this does not guarantee infinite retry.
+Persistent model/quality failures and explicitly bounded recovery budgets can
+still require intervention; indefinite transport recovery does not relax editorial
+acceptance or retry invalid model output.
 
 
 ### Retry exhaustion and interrupted repairs
 
-Provider outages consume a bounded consecutive retry window. A manual resume
+Provider outages use a persisted, capped cooldown. By default, autonomous
+runs wait indefinitely for the provider (`PROVIDER_RECOVERY_ATTEMPTS=-1`);
+operators can opt into a bounded consecutive retry window instead. A manual resume
 after a terminal failure starts a new transport retry window; it does not erase
 historical failures or increase editorial repair budgets. Exhaustion and invalid
 persisted cooldowns are recorded in the copyable diagnostics. Invalid cooldowns
