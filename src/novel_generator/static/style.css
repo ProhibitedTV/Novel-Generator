@@ -2621,3 +2621,50 @@ code {
   max-height: 360px;
   object-fit: contain;
 }
+
+
+/* Focused author workspaces: keep all diagnostics available, one view at a time. */
+.workspace-nav {
+  position: sticky;
+  top: .5rem;
+  z-index: 20;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem;
+  padding: .4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-strong);
+}
+.workspace-nav a {
+  padding: .65rem .85rem;
+  border-radius: var(--radius-sm);
+  font-size: .9rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.workspace-nav a:hover { background: var(--accent-soft); color: var(--ink); }
+.workspace-nav a[aria-current="page"] {
+  background: var(--accent);
+  color: white;
+}
+.workspace-view {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  scroll-margin-top: 5rem;
+}
+.workspace-view[hidden] { display: none !important; }
+.workspace-view:empty { display: none; }
+.workspace-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+@media (max-width: 640px) {
+  .workspace-nav { position: static; }
+  .workspace-view { scroll-margin-top: 1rem; }
+  .workspace-nav a { flex: 1 1 40%; text-align: center; }
+  .workspace-shortcuts > a { flex: 1 1 100%; text-align: center; }
+}

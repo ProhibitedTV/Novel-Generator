@@ -3,6 +3,14 @@
 {% block title %}Run for {{ project.title }} - Novel Generator{% endblock %}
 
 {% block content %}
+<nav class="workspace-nav" aria-label="Book workspace" data-workspace-nav data-default-view="{{ 'plan' if awaiting_outline_approval else 'overview' }}">
+    <a href="#book-overview" data-workspace-link="overview">Overview</a>
+    <a href="#book-manuscript" data-workspace-link="manuscript">Read manuscript</a>
+    <a href="#book-plan" data-workspace-link="plan">Story plan</a>
+    <a href="#book-editorial" data-workspace-link="editorial">Editorial review</a>
+    <a href="#book-exports" data-workspace-link="exports">Downloads</a>
+    <a href="#book-activity" data-workspace-link="activity">Technical activity</a>
+  </nav>
 <section
   class="panel run-shell"
   data-run-detail
@@ -18,9 +26,9 @@
   <script type="application/json" data-run-stages-json>{{ run_stage_data|tojson }}</script>
   <div class="section-header">
     <div class="page-header-copy">
-      <p class="eyebrow">Run</p>
+      <p class="eyebrow">Book workspace</p>
       <h1>{{ project.title }}</h1>
-      <p class="hero-copy">Follow progress, review the plan, inspect quality signals, and recover chapters without leaving the run.</p>
+      <p class="hero-copy">Follow your book from first draft to editorial review and export.</p>
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
@@ -32,10 +40,13 @@
           <button class="secondary" type="submit">Cancel and edit project</button>
         </form>
       {% elif run.status.value in ["queued", "running"] %}
-        <form method="post" action="/runs/{{ run.id }}/cancel">
+        <form method="post" action="/runs/{{ run.id }}/cancel" data-confirm="Stop this run? Saved chapter checkpoints will be retained.">
           <button class="danger" type="submit">Cancel run</button>
         </form>
       {% elif show_rerun %}
+        {% if editorial_next_step.resume_available %}
+          <form method="post" action="/runs/{{ run.id }}/resume"><button type="submit">Resume saved run</button></form>
+        {% endif %}
         <form method="post" action="/runs/{{ run.id }}/rerun">
           <button type="submit">Run again with same settings</button>
         </form>
@@ -46,6 +57,8 @@
     </div>
   </div>
 
+
+  <div class="workspace-view" data-workspace-view="overview" id="book-overview">
   <div class="run-command-center">
     <div class="run-status-strip">
       <div class="run-status-primary">
@@ -108,7 +121,7 @@
 
     <section class="callout callout-{{ run_health.tone }} run-health-card" data-run-health>
       <div class="callout-copy">
-        <p class="eyebrow">Run confidence</p>
+        <p class="eyebrow">What needs your attention</p>
         <h2 data-run-health-title>{{ run_health.title }}</h2>
         <p data-run-health-body>{{ run_health.body }}</p>
       </div>
@@ -200,6 +213,8 @@
         <span class="field-note">package ready</span>
       </div>
     </div>
+    <details class="compact-details">
+      <summary>See book completion checklist</summary>
     <div class="book-completion-grid">
       {% for item in book_completion.rows %}
         <div class="book-completion-item book-completion-{{ item.tone }}">
@@ -208,8 +223,16 @@
         </div>
       {% endfor %}
     </div>
+    </details>
   </section>
+  <div class="workspace-shortcuts">
+    <a class="button" href="#book-manuscript">Read saved chapters</a>
+    <a class="button secondary" href="#book-editorial">Check editorial readiness</a>
+    <a class="button secondary" href="#book-exports">Download files</a>
+  </div>
+  </div>
 
+  <div class="workspace-view" data-workspace-view="manuscript" id="book-manuscript">
   {% if manuscript_edition.show %}
     <section class="panel edition-workspace" id="manuscript-edition" data-edition-workspace>
       <div class="section-header">
@@ -401,7 +424,12 @@
       </div>
     </section>
   {% endif %}
+  {% if not manuscript_edition.show %}
+    <p class="empty-state">Saved chapters will appear here as the book is drafted.</p>
+  {% endif %}
+  </div>
 
+  <div class="workspace-view" data-workspace-view="activity" id="book-activity">
   <div class="run-stepper" data-run-stepper>
     {% for stage in run_stages %}
       <article class="run-stage" data-stage="{{ stage.id }}">
@@ -538,6 +566,8 @@
     </article>
   </div>
 
+  </div>
+  <div class="workspace-view" data-workspace-view="editorial" id="book-editorial">
   <div class="grid two-up run-dashboard-grid">
     <article class="panel dashboard-panel">
       {% if manuscript_edition.final_qa_coverage %}
@@ -691,6 +721,7 @@
     </article>
   </div>
 
+  </div>
   {% if awaiting_outline_approval %}
     <p class="notice notice-warning">This run is paused after the story bible and outline review. Approve it to continue drafting, or cancel it and reopen the project editor before the long chapter pass begins.</p>
   {% elif run.status.value == "completed" %}
@@ -709,6 +740,7 @@
     <p class="notice long-value">{% if run.resume_from_chapter %}This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.{% else %}This is a revised edition. <a href="/runs/{{ run.source_run_id }}">The original manuscript is preserved here.</a>{% endif %}</p>
   {% endif %}
 
+  <div class="workspace-view" data-workspace-view="activity">
   <details class="editor-shell technical-shell">
     <summary>Technical details</summary>
     <div class="detail-list">
@@ -748,8 +780,10 @@
       </div>
     </div>
   </details>
+  </div>
 </section>
 
+<div class="workspace-view" data-workspace-view="editorial">
 {% if editorial_next_step.show %}
   <section class="panel editorial-next-panel">
     <div class="section-header">
@@ -842,6 +876,8 @@
   </section>
 {% endif %}
 
+</div>
+<div class="workspace-view" data-workspace-view="activity">
 {% if run.task_routing %}
   <section class="panel">
     <div class="section-header">
@@ -871,6 +907,8 @@
   </section>
 {% endif %}
 
+</div>
+<div class="workspace-view" data-workspace-view="plan" id="book-plan">
 {% if story_bible or outline_entries %}
   <section class="grid two-up">
     <article class="panel">
@@ -1312,10 +1350,13 @@
       {% endif %}
     </article>
   </section>
+{% else %}
+  <section class="panel"><p class="empty-state">The story plan will appear once the worker generates an outline.</p></section>
 {% endif %}
+</div>
 
-<section class="grid two-up">
-  <article class="panel">
+<div class="workspace-view" data-workspace-view="activity">
+<section class="panel">
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Recent pipeline actions</h2>
@@ -1337,12 +1378,15 @@
         </li>
       {% endfor %}
     </ul>
-  </article>
+</section>
+</div>
 
+<div class="workspace-view" data-workspace-view="exports" id="book-exports">
+<section class="grid two-up">
   <article class="panel">
     <div class="section-header">
       <div class="section-header-copy">
-        <h2>Artifacts</h2>
+        <h2>Downloads</h2>
         <p>Finished exports stay attached to this run for download later.</p>
       </div>
       <p>{{ run.artifacts|length }} ready</p>
@@ -1437,7 +1481,9 @@
     {% endif %}
   </article>
 </section>
+</div>
 
+<div class="workspace-view" data-workspace-view="manuscript">
 <section class="panel">
   <div class="section-header">
     <div class="section-header-copy">
@@ -1670,4 +1716,5 @@
     <p class="empty-state">No chapters created yet. They will appear here as the worker checkpoints progress.</p>
   {% endif %}
 </section>
+</div>
 {% endblock %}

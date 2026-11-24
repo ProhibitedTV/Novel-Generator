@@ -373,6 +373,10 @@ def test_project_detail_renders_quality_profile_controls_and_preflight(client, m
     assert "Run preflight" in response.text
     assert 'data-run-preflight' in response.text
     assert 'href="#queue-run"' in response.text
+    assert 'data-default-view="queue"' in response.text
+    for view in ("queue", "history", "settings", "canon", "manage"):
+        assert f'data-workspace-link="{view}"' in response.text
+        assert f'data-workspace-view="{view}"' in response.text
     assert 'id="queue-run"' in response.text
     assert 'id="run-history"' in response.text
     assert 'id="edit-project"' in response.text
@@ -625,7 +629,12 @@ def test_run_detail_renders_stepper_and_event_log_hooks(client, monkeypatch) -> 
     assert 'data-run-stages-json' in response.text
     assert 'data-run-elapsed' in response.text
     assert "What The Worker Is Doing" in response.text
-    assert "Run confidence" in response.text
+    assert "What needs your attention" in response.text
+    assert 'data-default-view="overview"' in response.text
+    for view in ("overview", "manuscript", "plan", "editorial", "exports", "activity"):
+        assert f'data-workspace-link="{view}"' in response.text
+        assert f'data-workspace-view="{view}"' in response.text
+    assert 'href="#book-exports"' in response.text
     assert "Complete book target" in response.text
     assert 'data-run-chapter-progress-bar' in response.text
     assert 'data-run-word-progress-bar' in response.text
@@ -658,7 +667,7 @@ def test_run_detail_surfaces_fallback_recovery_guidance(client, monkeypatch) -> 
     response = client.get(f"/runs/{run_id}")
 
     assert response.status_code == 200
-    assert "Run confidence" in response.text
+    assert "What needs your attention" in response.text
     assert "Running: Outline" in response.text
     assert "Outline chunk 1-8 was unusable after repair" in response.text
     assert "outline chunk fallback" in response.text
@@ -783,6 +792,7 @@ def test_run_detail_renders_outline_approval_controls(client, monkeypatch) -> No
     response = client.get(f"/runs/{run_id}")
 
     assert response.status_code == 200
+    assert 'data-default-view="plan"' in response.text
     assert "Approve and continue" in response.text
     assert "Cancel and edit project" in response.text
     assert "Story bible" in response.text

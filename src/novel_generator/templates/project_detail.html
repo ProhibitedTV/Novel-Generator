@@ -54,21 +54,22 @@
   </section>
 {% endif %}
 
-<section class="project-command-bar" aria-label="Project command shortcuts">
+<section class="project-command-bar" aria-label="Project summary">
   <div class="project-command-summary">
     <span class="detail-label">Complete book target</span>
     <strong>{{ project.requested_chapters }} chapters / {{ project.desired_word_count }} words</strong>
     <span class="field-note long-value">{{ project.preferred_provider_name }} / {{ project.preferred_model }}</span>
   </div>
-  <div class="project-command-actions">
-    <a class="button" href="#queue-run">Queue full draft</a>
-    <a class="button secondary" href="#run-history">Run history</a>
-    <a class="button secondary" href="#canon">Canon</a>
-    <a class="button secondary" href="#edit-project">Edit defaults</a>
-  </div>
 </section>
+<nav class="workspace-nav" aria-label="Project workspace" data-workspace-nav data-default-view="{{ 'settings' if open_edit_form else 'queue' }}">
+  <a href="#queue-run" data-workspace-link="queue">Start a draft</a>
+  <a href="#run-history" data-workspace-link="history">My drafts</a>
+  <a href="#edit-project" data-workspace-link="settings">Project settings</a>
+  <a href="#canon" data-workspace-link="canon">Story canon</a>
+  <a href="#manage-project" data-workspace-link="manage">Manage project</a>
+</nav>
 
-<section class="panel" id="edit-project">
+<section class="panel workspace-view" data-workspace-view="settings" id="edit-project">
   <details class="editor-shell" {% if open_edit_form %}open{% endif %}>
     <summary>Edit project defaults</summary>
 
@@ -343,7 +344,7 @@
   </details>
 </section>
 
-<section class="panel canon-panel" id="canon">
+<section class="panel canon-panel workspace-view" data-workspace-view="canon" id="canon">
   <div class="section-header">
     <div class="section-header-copy">
       <h2>Canon Registry</h2>
@@ -458,7 +459,7 @@
   {% endif %}
 </section>
 
-<section class="grid two-up form-layout" id="queue-run">
+<section class="grid two-up form-layout" data-workspace-view="queue" id="queue-run">
   <article class="panel">
     <div class="section-header">
       <div class="section-header-copy">
@@ -707,7 +708,7 @@
         </ul>
       {% endif %}
     </section>
-    <details class="compact-details run-flow" open>
+    <details class="compact-details run-flow">
       <summary>Novel process</summary>
       <p class="field-note">The worker follows a writerly path: design the story, draft scenes, revise structure, polish prose, then export.</p>
       <ol class="run-flow-list">
@@ -769,7 +770,7 @@
   </aside>
 </section>
 
-<section class="panel" id="run-history">
+<section class="panel workspace-view" data-workspace-view="history" id="run-history">
   <div class="section-header">
     <div class="section-header-copy">
       <h2>Run history</h2>
@@ -840,7 +841,7 @@
   {% endif %}
 </section>
 
-<section class="panel danger-panel">
+<section class="panel danger-panel workspace-view" data-workspace-view="manage" id="manage-project">
   <div class="section-header">
     <div class="section-header-copy">
       <h2>Manage project</h2>
