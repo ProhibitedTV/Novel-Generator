@@ -323,6 +323,8 @@ class OllamaClient:
                 options["num_ctx"] = runtime.choose(self.num_ctx, required_context)
             except ValueError as exc:
                 raise OllamaError(f"{model_name}: {exc}") from exc
+            if runtime.batch_size:
+                options["num_batch"] = runtime.batch_size
             payload["options"] = options
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
@@ -380,16 +382,24 @@ class OllamaClient:
                     body = exc.response.text[:4000]
                     if memory_failure(exc.response.status_code, body):
                         current = int(options["num_ctx"])
-                        smaller = runtime.backoff(self.num_ctx, current, required_context)
-                        if smaller is None or attempt >= self.max_retries:
+                        smaller = runtime.backoff(self.num_ctx, current, required_context) if attempt < self.max_retries else None
+                        # A smaller prompt-processing batch can reduce transient
+                        # compute allocation even when the context cannot shrink.
+                        batch = next((n for n in (256, 128, 64)
+                                      if n < (runtime.batch_size or 512)), None)
+                        if attempt >= self.max_retries or (smaller is None and batch is None):
                             raise OllamaTransportError(
                                 f"Ollama memory pressure for {model_name}: requested context {current}, "
                                 f"estimated required {required_context}, output allowance {effective_num_predict}. "
-                                "No further safe context reduction is available within the retry budget. "
+                                "No further safe context/batch adjustment is available within the retry budget. "
                                 "Free memory, use a smaller installed model, or reduce workload size. "
                                 "The program has not shortened the source or switched models."
                             ) from exc
-                        options["num_ctx"] = smaller
+                        if smaller is not None:
+                            options["num_ctx"] = smaller
+                        else:
+                            runtime.batch_size = batch
+                            options["num_batch"] = batch
                         memory_retries += 1
                 if attempt >= self.max_retries:
                     break

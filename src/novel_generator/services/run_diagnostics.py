@@ -50,6 +50,25 @@ def read_status(session, run_id, *, stale_after_seconds):
         RunStageAttempt.model_name, RunStageAttempt.status, RunStageAttempt.started_at,
     ).where(RunStageAttempt.run_id == run_id)
       .order_by(RunStageAttempt.id.desc()).limit(1)).one_or_none()
+    # Read only the latest successful Ollama inference metrics, not the
+    # entire attempt history or prompt/response text.
+    metric_row = session.execute(select(
+        RunStageAttempt.stage, RunStageAttempt.model_name, RunStageAttempt.attempt_metadata,
+    ).where(RunStageAttempt.run_id == run_id, RunStageAttempt.provider_name == "ollama",
+            RunStageAttempt.status == "success")
+      .order_by(RunStageAttempt.id.desc()).limit(1)).one_or_none()
+    adaptive = None
+    if metric_row is not None:
+        metrics = (metric_row.attempt_metadata or {}).get("provider_metrics") or {}
+        if metrics.get("adaptive_policy"):
+            allowed = ("adaptive_policy", "configured_context_tokens", "effective_context_tokens",
+                       "estimated_required_context_tokens", "model_context_limit",
+                       "observed_resident_context", "observed_resident_bytes",
+                       "observed_resident_vram_bytes", "adaptive_memory_retries",
+                       "effective_num_batch", "completion_tokens_per_second",
+                       "prompt_tokens_per_second")
+            adaptive = {"stage": metric_row.stage, "model": metric_row.model_name,
+                        **{key: metrics[key] for key in allowed if key in metrics}}
     retry_at = None
     if row.current_step == "provider_wait":
         retry = session.scalar(select(RunEvent.payload).where(
@@ -64,6 +83,7 @@ def read_status(session, run_id, *, stale_after_seconds):
         "heartbeat_stale": row.status.value == "running" and (age is None or age >= stale_after_seconds),
         "recovery_count": row.recovery_count, "error": safe_message(row.error_message),
         "cancel_requested": row.cancel_requested, "retry_at_utc": retry_at,
+        "last_adaptive_inference": adaptive,
         "latest_attempt": None if latest is None else {
             "stage": latest.stage, "chapter": latest.chapter_number, "provider": latest.provider_name,
             "model": latest.model_name, "status": latest.status, "started_at": _utc(latest.started_at).isoformat(),

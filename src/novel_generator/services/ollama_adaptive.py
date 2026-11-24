@@ -49,6 +49,7 @@ class RuntimeState:
     resident_vram_bytes: int | None = None
     preferred_context: int | None = None
     memory_ceiling: int | None = None
+    batch_size: int | None = None
 
     def candidates(self, ceiling):
         return sorted({*[n for n in TIERS if n <= ceiling], ceiling})
@@ -91,6 +92,7 @@ class RuntimeState:
             "adaptive_policy": POLICY_VERSION, "configured_context_tokens": configured,
             "effective_context_tokens": effective, "estimated_required_context_tokens": required,
             "adaptive_memory_retries": retries,
+            **({"effective_num_batch": self.batch_size} if self.batch_size else {}),
         }
         for key, value in (
             ("model_context_limit", self.advertised_limit),
