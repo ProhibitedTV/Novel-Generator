@@ -222,6 +222,9 @@
           {% if manuscript_edition.primary_artifact %}
             <a class="button" href="/api/artifacts/{{ manuscript_edition.primary_artifact.id }}/download">Download manuscript</a>
           {% endif %}
+          {% if run.chapters|selectattr("content")|list %}
+            <a class="button secondary" href="/api/runs/{{ run.id }}/recovery-draft">Download recovery draft (unreviewed)</a>
+          {% endif %}
           {% if manuscript_edition.qa_artifact %}
             <a class="button secondary" href="/api/artifacts/{{ manuscript_edition.qa_artifact.id }}/download">Download QA</a>
           {% endif %}
