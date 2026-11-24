@@ -132,3 +132,29 @@ def test_quality_profile_migration_defaults_existing_runs(tmp_path: Path, monkey
     get_settings.cache_clear()
     get_session_factory.cache_clear()
     get_templates.cache_clear()
+
+
+def test_embedded_migration_preserves_application_logging(tmp_path, monkeypatch, caplog):
+    import logging
+    from novel_generator.bootstrap import run_migrations
+    from novel_generator.services.runner import logger
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{(tmp_path / 'logging.db').as_posix()}")
+    monkeypatch.setenv("ARTIFACTS_DIR", str(tmp_path / "artifacts"))
+    get_settings.cache_clear()
+    root = logging.getLogger()
+    old_disabled = logger.disabled
+    try:
+        logger.disabled = False
+        with caplog.at_level(logging.INFO):
+            before_handlers = list(root.handlers)
+            before_level = root.level
+            run_migrations()
+            assert root.handlers == before_handlers
+            assert root.level == before_level
+            assert not logger.disabled
+            logger.info("Worker startup remains observable.")
+            assert "Worker startup remains observable." in caplog.text
+    finally:
+        logger.disabled = old_disabled
+        get_settings.cache_clear()

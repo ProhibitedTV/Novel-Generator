@@ -40,6 +40,7 @@ The product is built around one practical goal: get to a complete book draft, th
 ## Verified Status
 
 `main` is tested by GitHub Actions on every pull request and every push to `main`. CI uses Python 3.12, installs the package with `python -m pip install -e .[dev]`, and runs the full pytest suite.
+A separate deployment smoke workflow builds the Docker images, starts the packaged web and worker without Ollama, checks liveness, and verifies database/artifact persistence across container recreation. Neither check qualifies literary quality.
 
 The web process and worker both run Alembic migrations automatically at startup. For normal use you do **not** need to run `alembic upgrade head` yourself.
 
