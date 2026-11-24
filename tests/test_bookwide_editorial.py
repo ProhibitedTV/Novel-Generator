@@ -173,3 +173,34 @@ def test_recorded_source_concerns_block_publication_helper_but_preserve_download
         source = get_run(session, run_id)
         assert source.chapters[0].content == PROSE
         assert not any(a.kind.startswith("publication-") for a in source.artifacts)
+
+
+@pytest.mark.parametrize("cached", [False, True])
+def test_distant_repair_defers_when_intervening_context_changes(configured_environment, monkeypatch, cached):
+    from novel_generator.services import pipeline
+    def review(context, numbers):
+        output = clean_review(numbers)
+        output["canon_consistent"] = False
+        output["issues"] = [{**issue(number=3), "evidence": "Source paragraphs", "evidence_paragraphs": [],
+            "source_references": [{"chapter_number": 1, "paragraph_number": 1},
+                                  {"chapter_number": 3, "paragraph_number": 1}]}]
+        return output
+    calls = install_fake_provider(monkeypatch, review_fn=review)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=3)
+        ledger = pipeline._build_initial_ledger(pipeline._story_bible_from_run(run))
+        pair = [run.chapters[0], run.chapters[2]]
+        context = editor._cross_chapter_context(run, pair, ledger)
+        verdict = editor._review(session, run, pair, context, object(), "cross_chapter")
+        if cached:
+            count = len(calls)
+            verdict = editor._review(session, run, pair, context, object(), "cross_chapter")
+            assert len(calls) == count
+        assert set(verdict.issues[0]._reviewed_source_hashes) == {1, 2, 3}
+        run.chapters[1].content = REPAIRED
+        session.commit()
+        monkeypatch.setattr(editor, "_repair", lambda *a, **kw: pytest.fail("Stale supporting evidence must not trigger a repair"))
+        editor._apply_final_repairs(session, run, run.chapters, {1: ledger, 2: ledger, 3: ledger},
+                                    verdict.issues, get_settings(), object(), 0)
+        assert run.chapters[2].content == PROSE
+        assert editor._events(run, "autonomous_reaudit_required")[-1]["chapter_number"] == 3
