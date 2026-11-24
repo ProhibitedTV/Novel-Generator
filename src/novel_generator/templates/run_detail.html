@@ -31,6 +31,9 @@
       <p class="hero-copy">Follow your book from first draft to editorial review and export.</p>
     </div>
     <div class="hero-actions">
+      {% if finished_manuscript_download %}
+        <a class="button" data-finished-manuscript-download href="/api/artifacts/{{ finished_manuscript_download.id }}/download">Download finished manuscript (Word)</a>
+      {% endif %}
       <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
       <a class="button secondary" data-open-reader href="/runs/{{ run.id }}/read"{% if not run.chapters|selectattr("content")|list %} hidden{% endif %}>Read saved chapters</a>
       {% if awaiting_outline_approval %}
@@ -277,7 +280,7 @@
           {% if manuscript_edition.qa_artifact %}
             <a class="button secondary" href="/api/artifacts/{{ manuscript_edition.qa_artifact.id }}/download">Download QA</a>
           {% endif %}
-          {% if run.status.value == "completed" %}
+          {% if editorial_next_step.publication_available %}
             <a class="button secondary" href="#publication-export">Create publication export</a>
           {% endif %}
         </div>
@@ -1489,7 +1492,7 @@
       </div>
       <p>Optional</p>
     </div>
-    {% if run.status.value == "completed" %}
+    {% if editorial_next_step.publication_available %}
       <form class="form-stack" method="post" action="/runs/{{ run.id }}/publication-export">
         <div class="field-grid two-column">
           <label>
@@ -1539,7 +1542,7 @@
         <button type="submit">Create layout export</button>
       </form>
     {% else %}
-      <p class="empty-state">Publication exports become available after the run completes.</p>
+      <p class="empty-state">{{ "Current manuscript requires editorial verification before publication export. Saved drafts remain available." if run.status.value == "completed" else "Publication exports become available after the run completes." }}</p>
     {% endif %}
   </article>
 </section>

@@ -204,3 +204,57 @@ def test_distant_repair_defers_when_intervening_context_changes(configured_envir
                                     verdict.issues, get_settings(), object(), 0)
         assert run.chapters[2].content == PROSE
         assert editor._events(run, "autonomous_reaudit_required")[-1]["chapter_number"] == 3
+
+
+@pytest.mark.parametrize("state", ["unreviewed", "accepted", "changed", "wrong_length"])
+def test_autonomous_publication_ui_matches_current_acceptance(client, monkeypatch, state):
+    install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        if state != "unreviewed":
+            editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        if state == "changed":
+            run.chapters[0].content = REPAIRED
+        if state == "wrong_length":
+            run.target_word_count = 1000
+        run.status = RunStatus.COMPLETED
+        session.commit()
+        run_id = run.id
+    page = client.get(f"/runs/{run_id}")
+    assert page.status_code == 200
+    if state == "accepted":
+        assert "Automatic editorial checks passed" in page.text
+        assert f'action="/runs/{run_id}/publication-export"' in page.text
+    else:
+        assert "Editorial verification required" in page.text
+        assert "Automatic editorial checks passed" not in page.text
+        assert f'action="/runs/{run_id}/publication-export"' not in page.text
+        response = client.post(f"/runs/{run_id}/publication-export",
+                               data={"profile_id": "ebook_docx"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert "editorial+verification" in response.headers["location"]
+        with get_session_factory()() as session:
+            assert not any(a.kind.startswith("publication-") for a in get_run(session, run_id).artifacts)
+
+
+@pytest.mark.parametrize("export_state", ["verified", "missing", "corrupted"])
+def test_primary_finished_download_requires_matching_exports(client, monkeypatch, export_state):
+    from novel_generator.services import pipeline
+    install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        qa = editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        pipeline._export_completed_run(session, run, run.chapters, get_settings(), qa)
+        docx = next(a for a in run.artifacts if a.kind == "docx")
+        markdown = next(a for a in run.artifacts if a.kind == "markdown")
+        if export_state == "missing":
+            (get_settings().artifacts_dir / docx.relative_path).unlink()
+        elif export_state == "corrupted":
+            (get_settings().artifacts_dir / markdown.relative_path).write_text("Incomplete", encoding="utf-8")
+        run_id, artifact_id = run.id, docx.id
+    page = client.get(f"/runs/{run_id}")
+    assert page.status_code == 200
+    assert ("data-finished-manuscript-download" in page.text) == (export_state == "verified")
+    if export_state == "verified":
+        assert f'href="/api/artifacts/{artifact_id}/download">Download finished manuscript (Word)' in page.text
+    assert "Read saved chapters" in page.text

@@ -44,6 +44,7 @@ from ..services.openai_compatible import OpenAICompatibleClient
 from ..services.ollama import OllamaClient
 from ..services.exports import export_publication_artifact, publication_export_options
 from ..services.editorial_coverage import review_coverage
+from ..services.autonomous_editorial import ACCEPTANCE_CONTRACT
 from ..services.provider_errors import ProviderError, ProviderTransportError
 from ..services.providers import ProviderManager, TASK_ROUTE_STAGES, provider_definition, provider_options
 from ..services.state import approve_outline_review, request_run_cancellation, resume_failed_run
@@ -536,6 +537,38 @@ def _run_progress_context(run: GenerationRun) -> dict[str, Any]:
     }
 
 
+def _autonomous_current_acceptance(run: GenerationRun, coverage=None) -> bool:
+    """Do not confuse a terminal worker status with a qualified manuscript."""
+    coverage = review_coverage(run) if coverage is None else coverage
+    chapters = _sorted_run_chapters(run)
+    counts = [len((chapter.content or "").split()) for chapter in chapters]
+    return bool(coverage["accepted"] and coverage["acceptance_contract"] >= ACCEPTANCE_CONTRACT
+        and run.requested_chapters > 0
+        and [chapter.chapter_number for chapter in chapters] == list(range(1, run.requested_chapters + 1))
+        and all(chapter.status == ChapterStatus.COMPLETED for chapter in chapters)
+        and all(run.min_words_per_chapter <= count <= run.max_words_per_chapter for count in counts)
+        and run.target_word_count > 0
+        and 0.9 * run.target_word_count <= sum(counts) <= 1.1 * run.target_word_count)
+
+
+def _finished_manuscript_download(run: GenerationRun, settings: Settings):
+    """Offer a single primary download only for verified current exports."""
+    if run.status != RunStatus.COMPLETED or run.quality_profile != "autonomous":
+        return None
+    if not _autonomous_current_acceptance(run):
+        return None
+    artifacts = {artifact.kind: artifact for artifact in run.artifacts if artifact.kind in {"markdown", "docx"}}
+    if set(artifacts) != {"markdown", "docx"}:
+        return None
+    from ..services.export_integrity import verify_manuscript_exports
+    integrity = verify_manuscript_exports(run, _sorted_run_chapters(run), {
+        kind: str(settings.artifacts_dir / artifact.relative_path) for kind, artifact in artifacts.items()
+    })
+    if not all(integrity.get(kind, {}).get("matches_current_source") is True for kind in artifacts):
+        return None
+    return artifacts["docx"]
+
+
 def _run_health_context(run: GenerationRun) -> dict[str, Any]:
     current_stage, next_stage = _stage_context(run)
     latest_event = _latest_event_summary(run)
@@ -567,11 +600,16 @@ def _run_health_context(run: GenerationRun) -> dict[str, Any]:
         title = "Canceled before completion"
         body = "This run is preserved for review. Rerun it, regenerate from a chapter, or delete it when you no longer need the history."
     elif run.status == RunStatus.COMPLETED:
-        concerns = review_coverage(run)["editorial_concerns"] if run.quality_profile == "autonomous" else []
+        coverage = review_coverage(run) if run.quality_profile == "autonomous" else None
+        concerns = coverage["editorial_concerns"] if coverage else []
         if concerns:
             tone = "error"
             title = "Completed manuscript needs revision"
             body = concerns[-1].get("message") or "Later editorial evidence overrides the earlier automatic pass."
+        elif coverage is not None and not _autonomous_current_acceptance(run, coverage):
+            tone = "warning"
+            title = "Saved manuscript needs editorial verification"
+            body = "Your chapters are preserved. Current-source acceptance or length evidence is incomplete. Read the draft or create a revised edition before publication export."
         elif progress["completed_chapters"] == run.requested_chapters:
             tone = "success"
             title = "Run completed with all requested chapters"
@@ -2449,19 +2487,19 @@ def _book_completion_context(run: GenerationRun) -> dict[str, Any]:
         row("Final chapter QA" if coverage else "Chapter QA", qa_count, requested_chapters),
         row("Final edit pass", final_edit_count, 1),
         row("Manuscript QA report", qa_artifact_count, 1),
-        row("Manuscript exports", manuscript_artifact_count, 1),
+        row("Manuscript exports", len({artifact.kind for artifact in run.artifacts if artifact.kind in {"markdown", "docx"}}), 2) if coverage else row("Manuscript exports", manuscript_artifact_count, 1),
     ]
     if coverage:
         rows.insert(6, row("Chapter-pair continuity", coverage["pair_passes"], coverage["pair_target"]))
         rows.insert(7, row("Whole-book editorial review", int(coverage["whole_book_passed"]), 1))
-        rows.insert(8, row("Current manuscript accepted", int(coverage["accepted"]), 1))
+        rows.insert(8, row("Current manuscript accepted", int(_autonomous_current_acceptance(run, coverage)), 1))
         if coverage["acceptance_contract"] >= 2:
             rows.insert(8, row("Developmental chapter QA", coverage["developmental_passes"], requested_chapters))
             rows.insert(9, row("Distant-chapter continuity", coverage["cross_passes"], coverage["cross_target"]))
             rows.insert(10, row("Stable identity QA", coverage["identity_passes"], requested_chapters))
     required_complete = all(item["complete"] for item in rows)
     raw_percent = round((sum(min(item["current"], item["target"]) for item in rows) / sum(item["target"] for item in rows)) * 100)
-    percent = raw_percent if required_complete else min(99, raw_percent)
+    percent = raw_percent if required_complete and run.status == RunStatus.COMPLETED else min(99, raw_percent)
     if run.status == RunStatus.COMPLETED and required_complete:
         title = "Complete book package"
         body = "All requested chapters, continuity checkpoints, QA, final edit, and manuscript exports are present."
@@ -2557,8 +2595,12 @@ def _run_editorial_next_step_context(run: GenerationRun, chapter_cards: list[dic
         title = "Editorial next step"
         body = "Use QA, chapter risks, comparison, and export options to decide whether this draft is ready or needs a targeted rerun."
         if run.quality_profile == "autonomous":
-            title = "Automatic editorial checks passed"
-            body = "Download the manuscript and automatic quality report. Every final chapter and the whole-book audit passed the configured checks; the report records revisions and the exact manuscript checked."
+            if _autonomous_current_acceptance(run):
+                title = "Automatic editorial checks passed"
+                body = "Download the manuscript and automatic quality report. The current manuscript passed the configured checks. Read it before publishing."
+            else:
+                title = "Editorial verification required"
+                body = "Saved prose remains available to read and download. The current manuscript has not satisfied the current acceptance requirements."
     elif run.status == RunStatus.FAILED:
         title = "Recovery next step"
         body = run.error_message or "The run stopped before completion. Start with the failure stage, then rerun or regenerate from the safest chapter boundary."
@@ -2578,7 +2620,7 @@ def _run_editorial_next_step_context(run: GenerationRun, chapter_cards: list[dic
         "regenerate_suggestions": suggestions[:3],
         "compare_available": run.status == RunStatus.COMPLETED and len(completed_runs) >= 2,
         "comparison_run_count": len(completed_runs),
-        "publication_available": run.status == RunStatus.COMPLETED,
+        "publication_available": run.status == RunStatus.COMPLETED and (run.quality_profile != "autonomous" or _autonomous_current_acceptance(run)),
         "resume_available": run.status == RunStatus.FAILED,
         "attempt_diagnostics": _run_attempt_diagnostics(run),
     }
@@ -3733,6 +3775,7 @@ def run_detail(
             "outline_review": outline_review,
             "chapter_review_cards": chapter_review_cards,
             "book_completion": _book_completion_context(run),
+            "finished_manuscript_download": _finished_manuscript_download(run, settings),
             "manuscript_edition": _manuscript_edition_context(run, chapter_review_cards),
             "editorial_next_step": _run_editorial_next_step_context(run, chapter_review_cards),
             "editorial_agenda": agenda_summary(run),
@@ -3811,8 +3854,12 @@ def publication_export_ui(
             message="Publication exports are available after a run completes.",
             message_tone="warning",
         )
-    if run.quality_profile == "autonomous" and review_coverage(run)["editorial_concerns"]:
-        return _redirect(f"/runs/{run.id}", message="Resolve the recorded editorial concerns in a revised edition before creating a publication export.", message_tone="warning")
+    if run.quality_profile == "autonomous":
+        coverage = review_coverage(run)
+        if coverage["editorial_concerns"]:
+            return _redirect(f"/runs/{run.id}", message="Resolve the recorded editorial concerns in a revised edition before creating a publication export.", message_tone="warning")
+        if not _autonomous_current_acceptance(run, coverage):
+            return _redirect(f"/runs/{run.id}", message="Current manuscript requires editorial verification before publication export. Saved drafts remain available.", message_tone="warning")
 
     chapters = [
         chapter
