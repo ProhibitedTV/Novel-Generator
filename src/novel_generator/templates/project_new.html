@@ -59,6 +59,46 @@
       </label>
       {% if form_errors.premise %}<p class="field-error">{{ form_errors.premise }}</p>{% endif %}
 
+      <div class="form-section">
+        <div class="section-header-copy">
+          <h3>Book length</h3>
+          <p>These are starting values, not permanent locks. Every run can still be adjusted later.</p>
+        </div>
+        <div class="grid compact">
+          <label>
+            Total words
+            <input class="{{ 'input-invalid' if form_errors.desired_word_count }}" type="number" name="desired_word_count" value="{{ form_values.desired_word_count }}" min="1000">
+          </label>
+          <label>
+            Chapters
+            <input class="{{ 'input-invalid' if form_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ form_values.requested_chapters }}" min="1">
+          </label>
+        </div>
+        {% if form_errors.desired_word_count %}<p class="field-error">{{ form_errors.desired_word_count }}</p>{% endif %}
+        {% if form_errors.requested_chapters %}<p class="field-error">{{ form_errors.requested_chapters }}</p>{% endif %}
+
+        <label class="checkbox-row">
+          <input type="checkbox" name="auto_chapter_range" value="1" {% if form_values.auto_chapter_range %}checked{% endif %}>
+          Automatically set chapter length from the book target (recommended)
+        </label>
+        <details class="compact-details"{% if not form_values.auto_chapter_range or form_errors.min_words_per_chapter or form_errors.max_words_per_chapter %} open{% endif %}>
+          <summary>Manual chapter word limits</summary>
+          <p class="field-note">Uncheck automatic chapter length above to use these limits instead. Automatic mode allows approximately 80–120% of the average chapter length.</p>
+        <div class="grid compact">
+          <label>
+            Min words per chapter
+            <input class="{{ 'input-invalid' if form_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ form_values.min_words_per_chapter }}" min="100">
+          </label>
+          <label>
+            Max words per chapter
+            <input class="{{ 'input-invalid' if form_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ form_values.max_words_per_chapter }}" min="100">
+          </label>
+        </div>
+        {% if form_errors.min_words_per_chapter %}<p class="field-error">{{ form_errors.min_words_per_chapter }}</p>{% endif %}
+        {% if form_errors.max_words_per_chapter %}<p class="field-error">{{ form_errors.max_words_per_chapter }}</p>{% endif %}
+        </details>
+      </div>
+
       <div class="form-section story-brief-shell">
         <div class="section-header-copy">
           <h3>Book brief</h3>
@@ -301,38 +341,6 @@
         </div>
       </details>
 
-      <div class="form-section">
-        <div class="section-header-copy">
-          <h3>Basic defaults for new runs</h3>
-          <p>These are starting values, not permanent locks. Every run can still be adjusted later.</p>
-        </div>
-        <div class="grid compact">
-          <label>
-            Total words
-            <input class="{{ 'input-invalid' if form_errors.desired_word_count }}" type="number" name="desired_word_count" value="{{ form_values.desired_word_count }}" min="1000">
-          </label>
-          <label>
-            Chapters
-            <input class="{{ 'input-invalid' if form_errors.requested_chapters }}" type="number" name="requested_chapters" value="{{ form_values.requested_chapters }}" min="1">
-          </label>
-        </div>
-        {% if form_errors.desired_word_count %}<p class="field-error">{{ form_errors.desired_word_count }}</p>{% endif %}
-        {% if form_errors.requested_chapters %}<p class="field-error">{{ form_errors.requested_chapters }}</p>{% endif %}
-
-        <div class="grid compact">
-          <label>
-            Min words per chapter
-            <input class="{{ 'input-invalid' if form_errors.min_words_per_chapter }}" type="number" name="min_words_per_chapter" value="{{ form_values.min_words_per_chapter }}" min="100">
-          </label>
-          <label>
-            Max words per chapter
-            <input class="{{ 'input-invalid' if form_errors.max_words_per_chapter }}" type="number" name="max_words_per_chapter" value="{{ form_values.max_words_per_chapter }}" min="100">
-          </label>
-        </div>
-        {% if form_errors.min_words_per_chapter %}<p class="field-error">{{ form_errors.min_words_per_chapter }}</p>{% endif %}
-        {% if form_errors.max_words_per_chapter %}<p class="field-error">{{ form_errors.max_words_per_chapter }}</p>{% endif %}
-      </div>
-
       <label>
         Notes
         <textarea name="notes" rows="4" placeholder="Optional worldbuilding, POV, continuity reminders, or revision notes.">{{ form_values.notes }}</textarea>
@@ -393,15 +401,15 @@
           <li class="mini-step">
             <span class="mini-step-marker">2</span>
             <div>
-              <strong>Queue a full draft run</strong>
-              <p class="field-note">By default the run pauses after the story bible and outline so you can stop a weak structure before spending hours on chapters.</p>
+              <strong>Start automatic generation</strong>
+              <p class="field-note">Create and generate queues the complete book. The autonomous profile plans, drafts and edits without waiting for outline approval.</p>
             </div>
           </li>
           <li class="mini-step">
             <span class="mini-step-marker">3</span>
             <div>
-              <strong>Approve, draft, and review</strong>
-              <p class="field-note">Once approved, the worker drafts every chapter, performs editorial QA, and exports the manuscript plus a QA report.</p>
+              <strong>Read and download</strong>
+              <p class="field-note">After the current manuscript passes its checks, download the verified exports. Review the book before publication.</p>
             </div>
           </li>
         </ol>

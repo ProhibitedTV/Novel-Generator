@@ -2704,6 +2704,14 @@ def _projects_context(request: Request, db: Session, settings: Settings) -> dict
     }
 
 
+def _automatic_chapter_bounds(total_words: str, chapter_count: str) -> tuple[int, int]:
+    """Use an 80–120% band around the requested average, without rounding away feasibility."""
+    total, chapters = int(total_words), int(chapter_count)
+    if chapters < 1 or total < chapters:
+        raise ValueError("Choose a positive chapter count and at least one word per chapter.")
+    return max(1, total * 4 // (chapters * 5)), (total * 6 + chapters * 5 - 1) // (chapters * 5)
+
+
 def _project_new_context(
     request: Request,
     db: Session,
@@ -2716,6 +2724,7 @@ def _project_new_context(
     provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     projects = list_projects(db)
     form_payload = _project_form_values(provider_config.provider_name, provider_config.default_model, values=form_values)
+    form_payload.setdefault("auto_chapter_range", True)
     return {
         "active_nav": "projects",
         "provider_config": provider_config,
@@ -2912,6 +2921,7 @@ def create_project_ui(
     min_words_per_chapter: str = Form("2000"),
     max_words_per_chapter: str = Form("3000"),
     action: str = Form("save"),
+    auto_chapter_range: str | None = Form(None),
     preferred_provider_name: str = Form("ollama"),
     preferred_model: str = Form(""),
     notes: str = Form(""),
@@ -2976,6 +2986,7 @@ def create_project_ui(
     settings: Settings = Depends(get_app_settings),
 ):
     raw_form_values = {
+        "auto_chapter_range": _coerce_checkbox(auto_chapter_range),
         "title": title,
         "premise": premise,
         "desired_word_count": desired_word_count,
@@ -3058,6 +3069,15 @@ def create_project_ui(
     }
     provider_config, provider_status, _ = _provider_status(settings, db)
     provider_configs_by_name, provider_statuses_by_name, manager = _provider_catalog(settings, db)
+    if raw_form_values["auto_chapter_range"]:
+        try:
+            minimum, maximum = _automatic_chapter_bounds(desired_word_count, requested_chapters)
+            payload_values.update(min_words_per_chapter=minimum, max_words_per_chapter=maximum)
+        except ValueError:
+            return _render(request, "project_new.html",
+                _project_new_context(request, db, settings, form_values=raw_form_values,
+                    form_errors={"__all__": "Enter a positive whole-number word target and chapter count, with at least one word per chapter."}),
+                status_code=400)
     try:
         payload = ProjectCreate.model_validate(payload_values)
     except ValidationError as exc:
