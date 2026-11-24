@@ -76,6 +76,27 @@ def _candidate_text(chapter: Any) -> str:
     )
 
 
+def _source_matches(chapter: Any, focus_terms: set[str]) -> list[dict[str, Any]]:
+    """Retrieve exact, bounded excerpts from saved prose, never from the outline."""
+    if not focus_terms:
+        return []
+    ranked = []
+    for number, paragraph in enumerate(
+        (p for p in re.split(r"\n\s*\n", str(getattr(chapter, "content", "") or "")) if p.strip()), 1
+    ):
+        overlap = _terms(paragraph) & focus_terms
+        # A single common name is insufficient to select an evidentiary excerpt.
+        if len(overlap) < 2:
+            continue
+        score = len(overlap) * 10 + sum(2 for token in overlap if len(token) >= 7)
+        ranked.append((score, number, paragraph.strip()))
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    return [
+        {"paragraph_number": number, "excerpt": paragraph[:600], "truncated": len(paragraph) > 600}
+        for _, number, paragraph in ranked[:2]
+    ]
+
+
 def _row(chapter: Any, *, selection: str, overlap: set[str]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "chapter_number": int(getattr(chapter, "chapter_number", 0) or 0),
@@ -135,11 +156,16 @@ def compile_chapter_recall(
         if number in recent_numbers:
             continue
         candidate_terms = _terms(_candidate_text(chapter))
-        overlap = candidate_terms & focus_terms
+        # The actual manuscript may contain important object or relationship
+        # facts absent from its summary and plan.
+        source_terms = _terms(getattr(chapter, "content", "") or "")
+        source_overlap = source_terms & focus_terms
+        overlap = (candidate_terms & focus_terms) | (source_overlap if len(source_overlap) >= 2 else set())
         if not overlap:
             continue
         # Prefer strong semantic overlap, then more recent old chapters when scores tie.
         score = len(overlap) * 10 + sum(2 for token in overlap if len(token) >= 7)
+        score += 5 * len(source_overlap) if len(source_overlap) >= 2 else 0
         ranked.append((score, number, chapter, overlap))
     ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
     relevant = ranked[:relevant_count]
@@ -163,6 +189,7 @@ def compile_chapter_recall(
             "Use an older recalled chapter only when it genuinely informs the current scene; do not recap it for the reader.",
             "Preserve recalled irreversible consequences and knowledge state instead of replaying or rediscovering them.",
             "A callback should create new meaning, leverage, emotion, or consequence rather than repeat the original beat.",
+            "Actual source excerpts are read-only evidence; prefer them over conflicting summaries or plans. An excerpt may be incomplete, so do not infer facts absent from it.",
         ],
         "chapters": [],
     }
@@ -172,8 +199,20 @@ def compile_chapter_recall(
             continue
         payload["chapters"].append(row)
 
+    # Add primary-source evidence after selecting the base rows, so excerpts
+    # cannot crowd out an already selected chapter. Retain the same total budget.
+    chapter_by_number = {int(getattr(chapter, "chapter_number", 0) or 0): chapter for chapter in prior}
     payload["_chapter_recall"]["included"] = len(payload["chapters"])
     payload["_chapter_recall"]["relevant_callback_count"] = sum(
         1 for row in payload["chapters"] if row.get("selection") == "relevant_callback"
     )
+    for row in payload["chapters"]:
+        excerpts = _source_matches(chapter_by_number[row["chapter_number"]], focus_terms)
+        for excerpt in excerpts:
+            row.setdefault("actual_source_excerpts", []).append(excerpt)
+            if _json_chars(payload) > budget:
+                row["actual_source_excerpts"].pop()
+                if not row["actual_source_excerpts"]:
+                    del row["actual_source_excerpts"]
+                break
     return ChapterRecall(payload=payload, output_chars=_json_chars(payload))

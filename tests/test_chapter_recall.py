@@ -97,3 +97,34 @@ def test_recall_wrapper_injects_selected_old_chapter_without_full_history() -> N
     assert "red cipher key" in prompt
     assert '"chapter_number":1' in prompt or '"chapter_number":2' in prompt
     assert '"chapter_number":7' in prompt and '"chapter_number":8' in prompt
+
+
+def test_long_range_recall_retrieves_fact_omitted_from_outline_and_summary():
+    run = _run()
+    run.chapters[0].content = "The wind rose.\n\nIris burned the original orchard deed in the stove.\n\nShe left."
+    run.chapters[0].summary = "Iris left the house."
+    run.chapters[0].outline_summary = "Iris left the house."
+    run.chapters[0].continuity_update = {}
+    run.chapters[7].content = "The meeting ended."
+    packet = compile_chapter_recall(run, 9, focus={"goal": "Find the original orchard deed"},
+                                    recent_chapters=1, relevant_chapters=1)
+    old = next(row for row in packet.payload["chapters"] if row["chapter_number"] == 1)
+    assert old["actual_source_excerpts"] == [{
+        "paragraph_number": 2, "excerpt": "Iris burned the original orchard deed in the stove.", "truncated": False}]
+    assert "burned" not in old["summary"]
+    assert all(row["chapter_number"] < 9 for row in packet.payload["chapters"])
+
+
+def test_recall_excerpts_are_bounded_exact_and_do_not_evict_base_rows():
+    run = _run()
+    source = "Iris found the cipher key. " + "The lantern glowed. " * 80
+    for chapter in run.chapters:
+        chapter.content = source
+    packet = compile_chapter_recall(run, 9, focus="Iris cipher key", max_chars=3000,
+                                    recent_chapters=2, relevant_chapters=1)
+    assert packet.output_chars <= 3000
+    assert {7, 8} <= {row["chapter_number"] for row in packet.payload["chapters"]}
+    for row in packet.payload["chapters"]:
+        for excerpt in row.get("actual_source_excerpts", []):
+            assert excerpt["excerpt"] == source[:600]
+            assert excerpt["truncated"] is True
