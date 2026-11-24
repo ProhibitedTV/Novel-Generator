@@ -137,3 +137,49 @@ def test_persisted_unresolved_structural_rewrite_skips_copying_source_again(conf
         assert len(attempts) == 2 and attempts[-1]['attempt'] == 2
         assert chapter.content == SOURCE.replace('Erroneous premature scene.', 'A correctly deferred event.')
         assert not editor._events(run, 'autonomous_quality_passed')
+
+
+@pytest.mark.parametrize("unsafe", ["truncation", "cycle"])
+def test_range_fallback_retries_unsafe_candidate_before_saving(configured_environment, monkeypatch, unsafe):
+    from novel_generator.dependencies import get_session_factory
+    from novel_generator.settings import get_settings
+    from novel_generator.services import autonomous_editorial as editor, pipeline
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    from test_autonomous_editorial import make_run, issue
+    source = "The deed was burned.\n\n" + "She walked across the silent orchard. " * 100
+    source = source.strip()
+    earlier = source.replace("burned", "lost", 1)
+    corrected = source.replace("burned", "sealed", 1)
+    range_prompts = []
+    def chat(*args, **kwargs):
+        assert chapter.content == source
+        if kwargs["metadata"]["repair_mode"] != "paragraph_ranges":
+            return source
+        range_prompts.append(args[5])
+        if len(range_prompts) == 1:
+            edit = (dict(start_paragraph=1, end_paragraph=2, replacement_text="The deed was sealed.")
+                    if unsafe == "truncation" else
+                    dict(start_paragraph=1, end_paragraph=1, replacement_text="The deed was lost."))
+        else:
+            edit = dict(start_paragraph=1, end_paragraph=1, replacement_text="The deed was sealed.")
+        return json.dumps({"edits": [edit]})
+    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *a, **kw: None)
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        chapter.content = source
+        session.commit()
+        diagnosis = EditorialIssue.model_validate(issue(evidence="The deed was burned."))
+        if unsafe == "cycle":
+            editor._record(session, run, "autonomous_repair_started", {
+                "chapter_number": 1, "phase": "final", "repair_kind": "chapter",
+                "before_hash": editor._hash(earlier), "issues": [diagnosis.model_dump()],
+            })
+        ledger = pipeline._build_initial_ledger(pipeline._story_bible_from_run(run))
+        editor._repair(session, run, chapter, ledger, [diagnosis], get_settings(), object(), "final")
+        assert chapter.content == corrected
+        assert len(range_prompts) == 2
+        assert ("Localized repair changed chapter length" if unsafe == "truncation" else
+                "earlier rejected version") in range_prompts[1][-1]["content"]
+        assert len(editor._events(run, "autonomous_repair_completed")) == 1

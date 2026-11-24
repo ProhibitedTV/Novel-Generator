@@ -1006,8 +1006,15 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
                     "repair_attempt": len(attempts) + 1, "repair_mode": "paragraph_ranges",
                     "candidate_attempt": range_attempt, "controls": controls},
             )
+        def validate_range_candidate(candidate):
+            if _hash(candidate) in previous_versions:
+                raise ValueError("The proposal returned to an earlier rejected version. Correct the current source instead.")
+            size_regression = _repair_size_regression(before, candidate, issues)
+            if size_regression:
+                raise ValueError(size_regression)
+
         try:
-            return repair_ranges(before, issues, context, generate_ranges)
+            return repair_ranges(before, issues, context, generate_ranges, validate_candidate=validate_range_candidate)
         except ValueError as exc:
             raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change ({reason}): {exc}") from exc
     def retry_as_chapter(reason):
