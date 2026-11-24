@@ -86,3 +86,18 @@ restarts it, and exclusive startup recovery restores interrupted work from
 committed checkpoints. Both standard services now have a restart policy.
 Persistent model/quality failures and exhausted recovery budgets require
 intervention; this does not guarantee infinite retry.
+
+
+### Retry exhaustion and interrupted repairs
+
+Provider outages consume a bounded consecutive retry window. A manual resume
+after a terminal failure starts a new transport retry window; it does not erase
+historical failures or increase editorial repair budgets. Exhaustion and invalid
+persisted cooldowns are recorded in the copyable diagnostics. Invalid cooldowns
+fail only the affected run rather than leaving it queued indefinitely or crashing
+the worker.
+
+An interrupted autonomous revision is excluded from the repair budget when
+worker recovery closes its matching unfinished inference attempt. Completed
+repairs and ordinary quality rejections remain charged. Provider transport
+interruption is recorded even when its automatic retry budget is exhausted.
