@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "library_actions.html" import project_actions %}
 
 {% block title %}Projects - Novel Generator{% endblock %}
 
@@ -59,10 +60,12 @@
             </dl>
           </a>
           <div class="row-side">
-            <p class="field-note">Project defaults, run history, and cleanup tools live inside the project view.</p>
-            <div class="row-actions">
-              <a class="button secondary" href="/projects/{{ project.id }}">Manage project</a>
-            </div>
+            {% set summary = library_summaries[project.id] %}
+            {% if summary.focus %}
+              {{ project_actions(summary) }}
+            {% else %}
+              <div class="row-actions"><a class="button secondary" href="/projects/{{ project.id }}#queue-run">Start a draft</a></div>
+            {% endif %}
           </div>
         </article>
       {% endfor %}

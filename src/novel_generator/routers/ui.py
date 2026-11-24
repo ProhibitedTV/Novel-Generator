@@ -2610,11 +2610,52 @@ def _artifact_context(run: GenerationRun) -> dict[str, Any]:
     }
 
 
+def _library_run_summary(run: GenerationRun) -> dict[str, Any]:
+    """Saved prose availability is separate from editorial acceptance."""
+    saved = [c for c in run.chapters if (c.content or "").strip()]
+    status = run.status
+    labels = {
+        RunStatus.RUNNING: "View live run",
+        RunStatus.QUEUED: "View queued run",
+        RunStatus.AWAITING_APPROVAL: "Review outline",
+        RunStatus.FAILED: "Review failure and resume",
+        RunStatus.COMPLETED: "View finished run",
+        RunStatus.CANCELED: "View stopped run",
+    }
+    return {
+        "id": run.id, "status": status.value, "step": run.current_step.replace("_", " "),
+        "saved_chapters": len(saved), "requested_chapters": run.requested_chapters,
+        "saved_words": sum(c.word_count or 0 for c in saved),
+        "target_words": run.target_word_count,
+        "word_percent": min(100, round(100 * sum(c.word_count or 0 for c in saved) / max(1, run.target_word_count))),
+        "action": labels[status], "created_at": run.created_at,
+    }
+
+
+def _library_project_summary(project: Project) -> dict[str, Any]:
+    runs = sorted(project.runs, key=lambda r: (r.created_at, r.id), reverse=True)
+    priorities = {RunStatus.AWAITING_APPROVAL: 0, RunStatus.RUNNING: 1, RunStatus.QUEUED: 2}
+    active = sorted((r for r in runs if r.status in priorities), key=lambda r: priorities[r.status])
+    # Old failures do not crowd the dashboard when a newer run supersedes them.
+    focus = active[0] if active else runs[0] if runs else None
+    readable = next((r for r in runs if any((c.content or "").strip() for c in r.chapters)), None)
+    return {
+        "project_id": project.id, "title": project.title,
+        "focus": _library_run_summary(focus) if focus else None,
+        "readable": _library_run_summary(readable) if readable else None,
+        "active_count": len(active),
+    }
+
+
 def _home_context(request: Request, db: Session, settings: Settings) -> dict[str, Any]:
     provider_config, provider_status, _ = _provider_status(settings, db)
     provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     projects = list_projects(db)
     recent_runs = list_recent_runs(db, limit=6)
+    summaries = [_library_project_summary(project) for project in projects]
+    priority = {"awaiting_approval": 0, "running": 1, "queued": 2, "failed": 3}
+    attention = sorted((row for row in summaries if row["focus"] and row["focus"]["status"] in priority),
+                       key=lambda row: priority[row["focus"]["status"]])
     ready_for_projects = provider_status.reachable and bool(provider_status.available_models)
     primary_action = (
         {"href": "/projects/new", "label": "Create a project"}
@@ -2634,6 +2675,8 @@ def _home_context(request: Request, db: Session, settings: Settings) -> dict[str
         "onboarding_steps": _onboarding_steps(provider_config, provider_status, projects),
         "projects": projects,
         "recent_projects": projects[:3],
+        "attention_projects": attention[:6],
+        "attention_count": len(attention),
         "recent_runs": recent_runs,
         "recent_run_rows": [_run_row_context(run) for run in recent_runs],
         "has_projects": bool(projects),
@@ -2650,6 +2693,7 @@ def _projects_context(request: Request, db: Session, settings: Settings) -> dict
     return {
         "active_nav": "projects",
         "projects": projects,
+        "library_summaries": {project.id: _library_project_summary(project) for project in projects},
         "provider_status": provider_status,
         "provider_config": provider_config,
         "provider_guidance": _provider_guidance(
@@ -2722,6 +2766,7 @@ def _project_detail_context(
         "active_nav": "projects",
         "project": project,
         "project_genre_profile": project_profile,
+        "library_summary": _library_project_summary(project),
         "canon_entries": _project_canon_rows(project),
         "canon_entity_types": CANON_ENTITY_TYPES,
         **run_stats,

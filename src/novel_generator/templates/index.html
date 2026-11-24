@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "library_actions.html" import project_actions %}
 
 {% block title %}Dashboard - Novel Generator{% endblock %}
 
@@ -117,6 +118,21 @@
     </article>
   </section>
 {% else %}
+  {% if attention_projects %}
+  <section class="panel" aria-labelledby="continue-projects-heading">
+    <div class="section-header">
+      <div class="section-header-copy">
+        <h2 id="continue-projects-heading">Pick up where you left off</h2>
+        <p>Active books, outline decisions and the latest interrupted drafts.</p>
+      </div>
+      <a class="button secondary" href="/projects">All projects</a>
+    </div>
+    <div class="grid two-up">
+      {% for summary in attention_projects %}{{ project_actions(summary, true) }}{% endfor %}
+    </div>
+    {% if attention_count > attention_projects|length %}<p class="field-note">{{ attention_count - attention_projects|length }} more projects need attention in your library.</p>{% endif %}
+  </section>
+  {% endif %}
   <section class="grid two-up">
     <article class="panel">
       <div class="section-header">

@@ -1,0 +1,22 @@
+{% macro project_actions(summary, show_title=false) %}
+  {% if summary.focus %}
+    {% set focus = summary.focus %}
+    <div class="support-block">
+      {% if show_title %}<h3><a href="/projects/{{ summary.project_id }}">{{ summary.title }}</a></h3>{% endif %}
+      <div class="meta-chip-row">
+        <span class="badge status-{{ focus.status }}">{{ focus.status.replace("_", " ") }}</span>
+        <span class="field-note">{{ focus.step }}</span>
+        {% if summary.active_count > 1 %}<span class="meta-chip">{{ summary.active_count }} active runs</span>{% endif %}
+      </div>
+      <p class="field-note">{{ focus.saved_chapters }} / {{ focus.requested_chapters }} chapters with saved prose · {{ "{:,}".format(focus.saved_words) }} / {{ "{:,}".format(focus.target_words) }} words</p>
+      <div class="progress-track" role="progressbar" aria-label="Saved draft word target" aria-valuenow="{{ focus.word_percent }}" aria-valuemin="0" aria-valuemax="100"><span style="width: {{ focus.word_percent }}%"></span></div>
+      <div class="hero-actions">
+        <a class="button" href="/runs/{{ focus.id }}{% if focus.status == 'awaiting_approval' %}#book-plan{% endif %}">{{ focus.action }}</a>
+        {% if summary.readable %}
+          <a class="button secondary" href="/runs/{{ summary.readable.id }}/read">{{ "Read saved draft" if summary.readable.id == focus.id else "Read previous saved draft" }}</a>
+        {% endif %}
+      </div>
+      <p class="field-note">Saved prose does not establish editorial acceptance.</p>
+    </div>
+  {% endif %}
+{% endmacro %}
