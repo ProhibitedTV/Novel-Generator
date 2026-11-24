@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from ..schemas import ProviderCapabilities
+from .author_model_profile import GEMMA26_SAMPLING, PROFILE_VERSION, is_gemma26
 from .provider_controls import extract_output_budget_marker, extract_ollama_controls_marker
 from .provider_errors import ProviderError, ProviderTransportError
 from .structured_schema_runtime import extract_schema_marker
@@ -208,7 +209,8 @@ class OllamaClient:
         return {"provider": "ollama", "model": model.get("name"), "digest": digest if verified else None,
                 "runtime_version": version, "verified": verified,
                 "defaults": {"context_tokens": self.num_ctx, "output_tokens": self.num_predict,
-                             "structured_temperature": self.structured_temperature, "think": self.think}}
+                             "structured_temperature": self.structured_temperature, "think": self.think,
+                             **({"author_profile": PROFILE_VERSION} if is_gemma26(model_name) else {})}}
 
     def health(self, default_model: str) -> ProviderCapabilities:
         try:
@@ -265,6 +267,10 @@ class OllamaClient:
         elif structured:
             payload["format"] = "json"
             options["temperature"] = self.structured_temperature
+        if is_gemma26(model_name):
+            options.update(GEMMA26_SAMPLING)
+            if not structured:
+                options["temperature"] = 1.0
         if "temperature" in controls:
             options["temperature"] = controls["temperature"]
         if options:
