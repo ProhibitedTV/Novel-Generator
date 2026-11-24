@@ -7,10 +7,11 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import ValidationError
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, joinedload
 
 from ..dependencies import get_app_settings, get_db, get_session_factory
-from ..models import RunStatus
+from ..models import GenerationRun, RunStatus
 from ..repositories import (
     create_project,
     create_run,
@@ -394,6 +395,62 @@ def api_get_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunRead
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return GenerationRunRead.model_validate(run)
+
+
+@router.get("/runs/{run_id}/recovery-draft")
+def api_download_recovery_draft(run_id: str, db: Session = Depends(get_db)) -> Response:
+    """Download committed prose without altering editorial state or writing artifacts."""
+    # One SELECT captures the run, project title and chapters together; avoid
+    # loading potentially enormous review-event histories or calling a model.
+    statement = (
+        select(GenerationRun)
+        .where(GenerationRun.id == run_id)
+        .options(joinedload(GenerationRun.project), joinedload(GenerationRun.chapters))
+    )
+    run = db.execute(statement).unique().scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+
+    chapters = sorted(
+        (chapter for chapter in run.chapters if (chapter.content or "").strip()),
+        key=lambda chapter: chapter.chapter_number,
+    )
+    if not chapters:
+        raise HTTPException(status_code=409, detail="No saved chapter prose is available yet.")
+
+    present = {chapter.chapter_number for chapter in chapters}
+    missing = sorted(set(range(1, run.requested_chapters + 1)) - present)
+    lines = [
+        f"# {run.project.title}",
+        "",
+        "**RECOVERY DRAFT — NOT A PUBLICATION EXPORT**",
+        "",
+        "Saved prose only. This snapshot may contain unfinished or unreviewed material.",
+        "It does not establish editorial acceptance or publication readiness.",
+        "",
+        f"- Run: {run.id}",
+        f"- Run status: {run.status.value}",
+        f"- Chapters with saved prose: {len(present)} / {run.requested_chapters}",
+        f"- Missing chapter numbers: {', '.join(map(str, missing)) or 'none'}",
+        "",
+    ]
+    for chapter in chapters:
+        lines.extend([
+            f"## Chapter {chapter.chapter_number}: {chapter.title}",
+            "",
+            f"*Saved chapter status: {chapter.status.value}*",
+            "",
+            chapter.content,
+            "",
+        ])
+    return Response(
+        content="\n".join(lines),
+        media_type="text/markdown",
+        headers={
+            "Content-Disposition": f'attachment; filename="recovery-draft-{run.id}.md"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/runs/{run_id}/attempts", response_model=list[RunStageAttemptRead])

@@ -1535,3 +1535,53 @@ def test_run_delete_ui_removes_terminal_run(client, monkeypatch) -> None:
     assert response.headers["location"].startswith(f"/projects/{project_id}")
     with session_factory() as session:
         assert get_run(session, run_id) is None
+
+
+def test_recovery_draft_download_preserves_saved_prose_without_acceptance(client, monkeypatch):
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run(quality_profile="autonomous")
+    url = f"/api/runs/{run_id}/recovery-draft"
+    assert client.get("/api/runs/no-such-run/recovery-draft").status_code == 404
+    assert client.get(url).status_code == 409
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        run.outline = [outline_entry(n) for n in range(1, 5)]
+        create_chapters_from_outline(session, run)
+        session.flush()
+        session.refresh(run, attribute_names=["chapters"])
+        run.chapters[0].content = "First saved chapter.\n\nThe events in Chapter 2 will follow."
+        run.chapters[0].status = ChapterStatus.COMPLETED
+        run.chapters[1].content = "   "
+        run.chapters[2].content = "Third chapter, unfinished."
+        run.chapters[2].status = ChapterStatus.FAILED
+        run.status = RunStatus.FAILED
+        session.commit()
+        original_events = len(run.events)
+        original_artifacts = len(run.artifacts)
+        original_content = run.chapters[0].content
+
+    response = client.get(url)
+    assert response.status_code == 200
+    assert "text/markdown" in response.headers["content-type"]
+    assert response.headers["cache-control"] == "no-store"
+    assert "attachment;" in response.headers["content-disposition"]
+    assert "RECOVERY DRAFT" in response.text
+    assert "NOT A PUBLICATION EXPORT" in response.text
+    assert "Run status: failed" in response.text
+    assert "Chapters with saved prose: 2 / 4" in response.text
+    assert "Missing chapter numbers: 2, 4" in response.text
+    assert original_content in response.text
+    assert "Third chapter, unfinished." in response.text
+    assert response.text.index("## Chapter 1:") < response.text.index("## Chapter 3:")
+    assert "## Chapter 2:" not in response.text
+    assert url in client.get(f"/runs/{run_id}").text
+
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        assert run.status == RunStatus.FAILED
+        assert len(run.events) == original_events
+        assert len(run.artifacts) == original_artifacts
+        assert run.chapters[0].content == original_content
+        run.status = RunStatus.RUNNING
+        session.commit()
+    assert "Run status: running" in client.get(url).text
