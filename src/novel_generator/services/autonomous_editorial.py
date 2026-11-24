@@ -1,6 +1,7 @@
 """Bounded, checkpointed editorial repair with a fail-closed manuscript acceptance gate."""
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 import hashlib
 import json
 import math
@@ -27,7 +28,8 @@ ACCEPTANCE_CONTRACT = 2
 OUTPUT_ARTIFACT_PATTERN = re.compile(
     r"\b(?:the chapter (?:ends?|ended|concludes?|concluded)(?:\s+(?:on|with|by))?|"
     r"this (?:scene|chapter) (?:shows|reveals|establishes|foreshadows|sets up)|"
-    r"as an ai(?: language model)?|insert (?:scene|chapter|dialogue) here)\b", re.IGNORECASE,
+    r"as an ai(?: language model)?|insert (?:scene|chapter|dialogue) here|"
+    r"chapter\s+[0-9]+)\b", re.IGNORECASE,
 )
 OUTPUT_ARTIFACT_RULES = (
     "Audit only unintended production notes, chapter synopsis, placeholders, or assistant commentary embedded in finished prose. "
@@ -131,6 +133,52 @@ def _book_repeated_passages(chapters):
     matches.sort(key=lambda row: len(row[0].split()) * (len(row[1]) - 1), reverse=True)
     return [{"source_locations": locations, "actual_excerpt": passage[:500]}
             for passage, locations in matches[:16]]
+
+
+def _near_repeated_passages(chapters):
+    """Locate lightly rewritten long passages without treating similarity as a verdict.
+
+    Four-word shingles preserve word order and avoid matching shared topic words
+    alone. An inverted index limits comparisons to paragraphs sharing shingles.
+    Only source paragraph references and bounded verbatim excerpts leave this
+    function. Exact copies remain the responsibility of the existing audit.
+    """
+    records = []
+    index = defaultdict(list)
+    matches = []
+    for chapter in chapters:
+        for number, paragraph in enumerate(_paragraphs(chapter.content or ""), 1):
+            body = re.sub(r"^#{1,6}\s+.*\n", "", paragraph).strip()
+            words = re.findall(r"\w+", body.casefold())
+            if len(words) < 30:
+                continue
+            shingles = {tuple(words[i:i + 4]) for i in range(len(words) - 3)}
+            if len(shingles) < 20:
+                continue
+            counts = Counter(previous for shingle in shingles for previous in index[shingle])
+            for previous, overlap in counts.items():
+                old_chapter, old_number, old_body, old_words, old_shingles = records[previous]
+                if words == old_words:
+                    continue
+                score = overlap / (len(shingles) + len(old_shingles) - overlap)
+                if score >= 0.65:
+                    matches.append({
+                        "similarity": round(score, 3),
+                        "source_locations": [
+                            {"chapter_number": old_chapter, "paragraph": old_number},
+                            {"chapter_number": chapter.chapter_number, "paragraph": number},
+                        ],
+                        "actual_excerpts": [old_body[:400], body[:400]],
+                    })
+            current = len(records)
+            records.append((chapter.chapter_number, number, body, words, shingles))
+            for shingle in shingles:
+                index[shingle].append(current)
+    matches.sort(key=lambda row: (
+        -row["similarity"],
+        tuple((loc["chapter_number"], loc["paragraph"]) for loc in row["source_locations"]),
+    ))
+    return matches[:12]
 
 
 def _coverage_marker(chapter_numbers, scope=None, *, paragraph_count=None, paragraph_counts=None):
@@ -409,6 +457,7 @@ def _context(run, chapter, ledger) -> dict:
         "following_chapter_opening": (following[0].content or "")[:3000] if following else "",
         "actual_prose": chapter.content or "",
         "repeated_passages_to_verify": _repeated_passages(chapter.content or ""),
+        **({"near_repeated_passages_to_verify": near} if (near := _near_repeated_passages([chapter])) else {}),
     }
 
 
@@ -588,6 +637,10 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
             + " Perform one comparison pass. If no demonstrated contradiction remains, return the clean review immediately. "
             "Do not revisit a settled calculation or invent another requirement."
         ) + "\n" + VIEWPOINT_RULES
+    if context.get("near_repeated_passages_to_verify"):
+        instruction += ("\nNear-repeated passage hints are similarity measurements, not proof. Check the cited actual prose "
+                        "for redundant narration, distinguish deliberate motifs, callbacks and refrains, and report only "
+                        "material duplication with a specific source-grounded repair. Do not count the hint itself as prose.")
     review_context = dict(context)
     if "actual_prose" in context:
         review_context["actual_prose"] = _numbered_prose(context["actual_prose"], context["chapter_number"])
@@ -1132,6 +1185,7 @@ def _book_context(run, chapters, qa_report) -> dict:
         "ending_debt_to_verify_against_actual_prose": compile_ending_debt_audit(run, chapters).payload,
         "chapter_map": chapter_map,
         "repeated_passages_to_verify": _book_repeated_passages(chapters),
+        **({"near_repeated_passages_to_verify": near} if (near := _near_repeated_passages(chapters)) else {}),
         "final_chapter_actual_prose": chapters[-1].content,
         "legacy_qa_concerns_to_verify_against_evidence": {
             key: [str(item)[:350] for item in qa_report.model_dump().get(key, [])[:16]]
