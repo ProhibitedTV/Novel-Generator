@@ -1356,3 +1356,43 @@ def test_draft_continuity_recovers_from_invalid_canon_without_rewriting(configur
             assert len(editor._events(run, "continuity_checkpoint_invalidated")) == 1
         else:
             assert len(editor._events(run, "continuity_output_rejected")) == 1
+
+
+@pytest.mark.parametrize("mode", ["targeted", "coordinated"])
+def test_destructive_local_candidate_escalates_without_overwriting_source(configured_environment, monkeypatch, mode):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    from novel_generator.services import local_prose_repair, coordinated_repair
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        original = ("The deed was burned. " + "She walked across the silent orchard. " * 100).strip()
+        corrected = original.replace("The deed was burned.", "The deed was sealed.", 1)
+        chapter.content = original
+        chapter.word_count = len(original.split())
+        session.commit()
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category="continuity", evidence="The deed was burned."))
+        plan = [((0, 20), [diagnosis])]
+        if mode == "coordinated":
+            plan.append(((21, 50), [diagnosis]))
+        monkeypatch.setattr(local_prose_repair, "repair_plan", lambda *a, **kw: plan)
+        def destructive(*a, **kw):
+            assert chapter.content == original
+            return "The deed was sealed."
+        monkeypatch.setattr(local_prose_repair, "repair_passages", destructive)
+        monkeypatch.setattr(coordinated_repair, "repair", destructive)
+        calls = []
+        def chat(*args, **kwargs):
+            assert chapter.content == original
+            calls.append(kwargs["metadata"]["repair_mode"])
+            return corrected
+        monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+        editor._repair(session, run, chapter, ledger, [diagnosis], get_settings(), object(), "final")
+        assert chapter.content == corrected
+        assert chapter.word_count == len(corrected.split())
+        assert calls == ["chapter"]
+        assert len(editor._events(run, "autonomous_repair_completed")) == 1
+        rejected = editor._events(run, "autonomous_repair_rejected")[-1]
+        assert rejected["repair_kind"] == mode
+        assert "Localized repair changed chapter length" in rejected["reason"]
+        assert editor._events(run, "autonomous_repair_escalated")[-1]["from_strategy"] == mode
