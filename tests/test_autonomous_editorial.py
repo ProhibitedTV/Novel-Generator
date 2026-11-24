@@ -1172,3 +1172,67 @@ def test_escalated_rewrite_still_requires_successful_review(configured_environme
             editor.ensure_chapter(session, run, run.chapters[0], ledger, settings, object())
         assert run.chapters[0].content == REPAIRED
         assert not editor._events(run, 'autonomous_quality_passed')
+
+
+@pytest.mark.parametrize("category,scope,ratio,rejected", [
+    ("continuity", "passage", 0.40, True),
+    ("prose", "passage", 1.60, True),
+    ("character", "passage", 0.95, False),
+    ("continuity", "chapter", 0.40, False),
+    ("length", "passage", 1.60, False),
+])
+def test_localized_repair_size_guard(category, scope, ratio, rejected):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    diagnosis = EditorialIssue.model_validate(dict(issue(), category=category, repair_scope=scope))
+    source = "word " * 1000
+    candidate = "word " * int(1000 * ratio)
+    assert bool(editor._repair_size_regression(source, candidate, [diagnosis])) is rejected
+
+
+def test_destructive_rewrite_is_retried_without_losing_source(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *a, **kw: None)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        source = ("The deed was burned. " + "She walked across the silent orchard. " * 100).strip()
+        expected = source.replace("The deed was burned.", "The deed was sealed.", 1)
+        chapter.content = source
+        chapter.word_count = len(source.split())
+        session.commit()
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category="continuity", evidence="The deed was burned."))
+        responses = iter(["The deed was sealed.", expected])
+        prompts = []
+        def chat(*args, **kwargs):
+            assert chapter.content == source
+            prompts.append(args[5])
+            return next(responses)
+        monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+        editor._repair(session, run, chapter, ledger, [diagnosis], get_settings(), object(), "final")
+        assert chapter.content == expected
+        assert len(prompts) == 2
+        assert "Localized repair changed chapter length" in prompts[1][-1]["content"]
+        assert len(editor._events(run, "autonomous_repair_candidate_rejected")) == 1
+
+
+def test_destructive_range_fallback_leaves_saved_chapter_unchanged(configured_environment, monkeypatch):
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    monkeypatch.setattr("novel_generator.services.local_prose_repair.repair_plan", lambda *a, **kw: None)
+    monkeypatch.setattr("novel_generator.services.chapter_range_repair.repair", lambda *a, **kw: "The deed was sealed.")
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", lambda *a, **kw: "The deed was sealed.")
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        source = ("The deed was burned. " + "She walked across the silent orchard. " * 100).strip()
+        chapter.content = source
+        chapter.word_count = len(source.split())
+        session.commit()
+        ledger = pipeline._build_initial_ledger(parse_story_bible(_story_bible_json()))
+        diagnosis = EditorialIssue.model_validate(dict(issue(), category="continuity", evidence="The deed was burned."))
+        with pytest.raises(editor.AutonomousQualityError, match="Localized repair changed chapter length"):
+            editor._repair(session, run, chapter, ledger, [diagnosis], get_settings(), object(), "final")
+        session.refresh(chapter)
+        assert chapter.content == source
+        assert chapter.word_count == len(source.split())
+        assert not editor._events(run, "autonomous_repair_completed")

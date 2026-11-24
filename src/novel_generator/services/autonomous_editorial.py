@@ -787,6 +787,26 @@ def _repair_kind(payload):
     return "prose" if issues and all(issue["category"] in {"prose", "repetition"} for issue in issues) else "chapter"
 
 
+def _repair_size_regression(before, candidate, issues):
+    """A localized correction must not discard or inflate a substantial chapter.
+
+    Explicit structural and length repairs can legitimately change the size.
+    Their existing length and full-source editorial gates remain mandatory.
+    """
+    if any(issue.category == "length" or issue.repair_scope == "chapter" for issue in issues):
+        return ""
+    original_words = len(before.split())
+    if original_words < 300:
+        return ""
+    ratio = len(candidate.split()) / original_words
+    if ratio < 0.72 or ratio > 1.35:
+        return (
+            f"Localized repair changed chapter length to {ratio:.0%} of its original size. "
+            "Preserve unaffected scenes and correct only the cited passages."
+        )
+    return ""
+
+
 def _repair(session, run, chapter, ledger, issues, settings, client, phase: str, *, escalate_from=None) -> None:
     pipeline = _pipeline()
     pipeline._ensure_not_canceled(session, run)
@@ -948,7 +968,8 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
             if not whole_chapter:
                 return candidate
             reason = ("no usable change was made" if not candidate.strip() or _text(candidate) == _text(before) else
-                      "the proposal returned to an earlier rejected version" if _hash(candidate) in previous_versions else "")
+                      "the proposal returned to an earlier rejected version" if _hash(candidate) in previous_versions else
+                      _repair_size_regression(before, candidate, issues))
             if not reason:
                 return candidate
             _record(session, run, "autonomous_repair_candidate_rejected", {
@@ -1031,6 +1052,14 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
             retry_as_chapter("The local edit returned to an earlier rejected version.")
             return
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair returned to an earlier rejected version. Saved prose is preserved; change the repair model before resuming.")
+    size_regression = _repair_size_regression(before, candidate, issues)
+    if size_regression:
+        _record(session, run, "autonomous_repair_rejected", {
+            "message": "Rejected a destructive repair candidate; saved prose remains unchanged.",
+            "chapter_number": chapter.chapter_number, "phase": phase,
+            "repair_kind": repair_kind, "reason": size_regression, "before_hash": _hash(before),
+        })
+        raise AutonomousQualityError(f"Chapter {chapter.chapter_number}: {size_regression}")
     chapter.content = candidate
     chapter.word_count = len(candidate.split())
     chapter.summary = None
