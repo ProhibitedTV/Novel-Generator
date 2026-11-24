@@ -195,3 +195,92 @@ def test_live_status_distinguishes_provider_cooldown_and_redacts_common_credenti
         assert status["retry_at_utc"] == (now + timedelta(seconds=30)).isoformat()
         assert "private-token" not in safe_message("Authorization: Bearer private-token")
         assert "my-password" not in safe_message("https://user:my-password@localhost")
+
+
+def test_manual_resume_reopens_exhausted_provider_window_without_resetting_quality_history(configured_environment):
+    from novel_generator.services.state import resume_failed_run
+    from novel_generator.repositories import record_event
+    settings = get_settings().model_copy(update={"provider_recovery_attempts": 1})
+    with get_session_factory()() as session:
+        run = make_run(session)
+        record_event(session, run, "autonomous_repair_started", {"chapter_number": 1, "phase": "draft"})
+        assert schedule_provider_retry(session, run, settings, ProviderTransportError("offline"))
+        release_provider_retries(session, now=datetime.utcnow() + timedelta(hours=1))
+        claim_next_queued_run(session)
+        session.commit()
+        assert not schedule_provider_retry(session, run, settings, ProviderTransportError("still offline"))
+        run.status = RunStatus.FAILED
+        run.current_step = "failed"
+        session.commit()
+        resume_failed_run(session, run)
+        session.commit()
+        claim_next_queued_run(session)
+        session.commit()
+        assert schedule_provider_retry(session, run, settings, ProviderTransportError("offline again"))
+        session.refresh(run, ["events"])
+        schedules = [e.payload for e in run.events if e.event_type == "provider_retry_scheduled"]
+        assert [e["attempt"] for e in schedules] == [1, 1]
+        assert any(e.event_type == "provider_retry_exhausted" for e in run.events)
+        assert len([e for e in run.events if e.event_type == "autonomous_repair_started"]) == 1
+        assert not any(e.event_type == "autonomous_repair_interrupted" for e in run.events)
+        assert run.chapters[0].content == PROSE
+
+
+@pytest.mark.parametrize("broken", ["missing", "invalid", "missing_attempt"])
+def test_invalid_provider_cooldown_does_not_strand_run_or_crash_worker(configured_environment, broken):
+    from novel_generator.repositories import record_event
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.status = RunStatus.QUEUED
+        run.current_step = "provider_wait"
+        if broken == "invalid":
+            record_event(session, run, "provider_retry_scheduled", {"retry_at": "invalid", "attempt": 1})
+        elif broken == "missing_attempt":
+            record_event(session, run, "provider_retry_scheduled", {"retry_at": datetime.utcnow().isoformat()})
+        session.commit()
+        assert release_provider_retries(session) == 0
+        session.commit()
+        session.refresh(run, ["events"])
+        assert run.status == RunStatus.FAILED
+        assert "Provider retry schedule is invalid" in run.error_message
+        assert any(e.event_type == "provider_retry_invalid" for e in run.events)
+        assert run.chapters[0].content == PROSE
+
+
+def test_worker_restart_does_not_charge_unfinished_editorial_inference(configured_environment):
+    from novel_generator.repositories import record_event, recover_running_runs
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.current_step = "autonomous_revision"
+        run.current_chapter = 1
+        started = record_event(session, run, "autonomous_repair_started", {"chapter_number": 1, "phase": "draft"})
+        session.flush()
+        pending = begin_stage_attempt(session, run, stage="autonomous_revision", chapter_number=1,
+                                      provider_name="ollama", model_name="test-model")
+        session.commit()
+        assert recover_running_runs(session, reason="exclusive_worker_startup") == 1
+        session.commit()
+        session.refresh(run, ["events"])
+        marker = [e.payload for e in run.events if e.event_type == "autonomous_repair_interrupted"]
+        assert len(marker) == 1
+        assert marker[0]["started_event_id"] == started.id
+        assert pending.status == "interrupted"
+        assert run.chapters[0].content == PROSE
+        assert recover_running_runs(session, reason="exclusive_worker_startup") == 0
+
+
+def test_completed_repair_is_not_refunded_on_unrelated_interruption(configured_environment):
+    from novel_generator.repositories import record_event, recover_running_runs
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.current_step = "autonomous_revision"
+        run.current_chapter = 1
+        record_event(session, run, "autonomous_repair_started", {"chapter_number": 1, "phase": "draft"})
+        record_event(session, run, "autonomous_repair_completed", {"chapter_number": 1, "phase": "draft"})
+        begin_stage_attempt(session, run, stage="autonomous_revision", chapter_number=1,
+                            provider_name="ollama", model_name="test-model")
+        session.commit()
+        recover_running_runs(session, reason="exclusive_worker_startup")
+        session.commit()
+        session.refresh(run, ["events"])
+        assert not any(e.event_type == "autonomous_repair_interrupted" for e in run.events)
