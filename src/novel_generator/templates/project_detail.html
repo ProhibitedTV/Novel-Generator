@@ -574,6 +574,14 @@
             </div>
           </div>
 
+          <details class="compact-details">
+            <summary>Local workstation production presets</summary>
+            <p class="field-note">Fewer chapters reduce full-book pair audits. These presets change length only; choose your own model and quality profile.</p>
+            <div class="length-preset-row">
+              <button class="secondary" type="button" data-run-local-budget-preset data-chapters="12" data-words="36000" data-min-words="2700" data-max-words="3300">Compact book · 36,000 words</button>
+              <button class="secondary" type="button" data-run-local-budget-preset data-chapters="14" data-words="42000" data-min-words="2700" data-max-words="3300">Short novel · 42,000 words</button>
+            </div>
+          </details>
           <div class="grid compact">
             <label>
               Min words per chapter
@@ -593,14 +601,24 @@
               <strong data-run-estimate-outline>{{ run_preflight.outline_chunks }}</strong>
             </div>
             <div>
-              <span class="detail-label">Minimum calls</span>
-              <strong data-run-estimate-calls>{{ run_preflight.estimated_model_calls }} minimum</strong>
+              <span class="detail-label">Planned calls</span>
+              <strong data-run-estimate-calls>{{ run_preflight.estimated_model_calls }} planned</strong>
+            </div>
+            <div>
+              <span class="detail-label">Full pair audits</span>
+              <strong data-run-estimate-pairs>{{ run_preflight.pair_reviews }}</strong>
             </div>
             <div>
               <span class="detail-label">Avg chapter target</span>
               <strong data-run-estimate-average>--</strong>
             </div>
           </div>
+          <details class="compact-details">
+            <summary>Plan around available compute time</summary>
+            <label>Available hours <input type="number" min="1" max="10000" value="120" data-run-budget-hours></label>
+            <p>Average call-time allowance: <strong data-run-budget-call-time>--</strong></p>
+            <p class="field-note">Arithmetic planning threshold with 25% reserved for repairs, retries and downtime. Calls vary in cost and cached audits may be reused. This is not an ETA or a guarantee.</p>
+          </details>
         </div>
       </div>
 
