@@ -2625,6 +2625,10 @@ code {
 
 /* Focused author workspaces: keep all diagnostics available, one view at a time. */
 .workspace-nav {
+  position: sticky;
+  top: .5rem;
+  z-index: 20;
+  box-shadow: var(--shadow);
   display: flex;
   flex-wrap: wrap;
   gap: .35rem;
@@ -2649,7 +2653,7 @@ code {
   display: grid;
   gap: 1rem;
   min-width: 0;
-  scroll-margin-top: 1rem;
+  scroll-margin-top: 5rem;
 }
 .workspace-view[hidden] { display: none !important; }
 .workspace-view:empty { display: none; }
@@ -2659,6 +2663,8 @@ code {
   gap: .5rem;
 }
 @media (max-width: 640px) {
+  .workspace-nav { position: static; }
+  .workspace-view { scroll-margin-top: 1rem; }
   .workspace-nav a { flex: 1 1 40%; text-align: center; }
   .workspace-shortcuts > a { flex: 1 1 100%; text-align: center; }
 }
