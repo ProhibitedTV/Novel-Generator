@@ -4,7 +4,7 @@ import asyncio
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -397,6 +397,27 @@ def api_get_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunRead
     return GenerationRunRead.model_validate(run)
 
 
+@router.get("/runs/{run_id}/live-status")
+def api_live_status(run_id: str, response: Response, db: Session = Depends(get_db),
+                    settings: Settings = Depends(get_app_settings)) -> dict:
+    from ..services.run_diagnostics import read_status
+    snapshot = read_status(db, run_id, stale_after_seconds=settings.run_stale_after_seconds)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    response.headers["Cache-Control"] = "no-store"
+    return snapshot
+
+
+@router.get("/runs/{run_id}/diagnostics")
+def api_run_diagnostics(run_id: str, db: Session = Depends(get_db),
+                        settings: Settings = Depends(get_app_settings)) -> Response:
+    from ..services.run_diagnostics import diagnostics_text
+    report = diagnostics_text(db, run_id, stale_after_seconds=settings.run_stale_after_seconds)
+    if report is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return Response(report, media_type="text/plain", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/runs/{run_id}/recovery-draft")
 def api_download_recovery_draft(run_id: str, db: Session = Depends(get_db)) -> Response:
     """Download committed prose without altering editorial state or writing artifacts."""
@@ -552,11 +573,17 @@ def api_resume_run(run_id: str, db: Session = Depends(get_db)) -> GenerationRunR
 
 
 @router.get("/runs/{run_id}/events")
-async def api_run_events(run_id: str) -> StreamingResponse:
+async def api_run_events(run_id: str, after: int = 0,
+                         last_event_id: str | None = Header(default=None, alias="Last-Event-ID")) -> StreamingResponse:
     session_factory = get_session_factory()
+    try:
+        resume_after = max(0, after, int(last_event_id or 0))
+    except ValueError:
+        resume_after = max(0, after)
 
     async def event_stream():
-        last_sequence = 0
+        last_sequence = resume_after
+        idle_ticks = 0
         while True:
             with session_factory() as session:
                 run = get_run_minimal(session, run_id)
@@ -586,9 +613,14 @@ async def api_run_events(run_id: str) -> StreamingResponse:
                     }
                     yield f"event: terminal\ndata: {json.dumps(final_payload)}\n\n"
                     return
+            idle_ticks = 0 if events else idle_ticks + 1
+            if idle_ticks >= 15:
+                yield ": keepalive\n\n"
+                idle_ticks = 0
             await asyncio.sleep(1)
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(event_stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.get("/artifacts/{artifact_id}/download")

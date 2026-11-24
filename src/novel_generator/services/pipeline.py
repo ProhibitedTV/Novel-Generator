@@ -3218,12 +3218,14 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
             if chapter is not None and not (run.current_step == "autonomous_reconciliation" and chapter.status == ChapterStatus.COMPLETED):
                 chapter.status = ChapterStatus.FAILED
                 chapter.error_message = str(exc)
+        from .run_diagnostics import failure_context
+        failure = failure_context(run, exc)
         run.status = RunStatus.FAILED
         run.current_step = "failed"
         run.worker_id = None
         run.error_message = str(exc)
         run.completed_at = datetime.utcnow()
-        record_event(session, run, "run_failed", {"message": str(exc)})
+        record_event(session, run, "run_failed", failure)
         session.commit()
         if autonomous_editorial.enabled(run):
             autonomous_editorial.save_report(session, run, settings, "not_passed", error=str(exc))
@@ -3236,12 +3238,14 @@ def process_run_safe(session: Session, run: GenerationRun, settings: Settings, c
             if chapter is not None and not (run.current_step == "autonomous_reconciliation" and chapter.status == ChapterStatus.COMPLETED):
                 chapter.status = ChapterStatus.FAILED
                 chapter.error_message = str(exc)
+        from .run_diagnostics import failure_context
+        failure = failure_context(run, exc)
         run.status = RunStatus.FAILED
         run.current_step = "failed"
         run.worker_id = None
         run.error_message = str(exc)
         run.completed_at = datetime.utcnow()
-        record_event(session, run, "run_failed", {"message": str(exc)})
+        record_event(session, run, "run_failed", failure)
         session.commit()
         if autonomous_editorial.enabled(run):
             autonomous_editorial.save_report(session, run, settings, "not_passed", error=str(exc))

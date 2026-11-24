@@ -6,6 +6,7 @@ x-bounded-logging: &bounded-logging
 
 services:
   web:
+    restart: unless-stopped
     logging: *bounded-logging
     build:
       context: .
@@ -34,6 +35,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   worker:
+    restart: unless-stopped
     logging: *bounded-logging
     build:
       context: .

@@ -100,4 +100,9 @@ def run_worker_loop(settings: Settings) -> None:
             try:
                 process_run_safe(session, run, settings, client)
             except Exception:
-                logger.exception("Worker failed while processing run %s", run_id)
+                # Ordinary provider and quality failures are handled in the
+                # pipeline. If persistence itself fails, let the supervisor
+                # restart and recover committed checkpoints instead of
+                # leaving a fresh RUNNING orphan in this process.
+                logger.exception("Worker failed while processing run %s; restart required", run_id)
+                raise

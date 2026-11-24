@@ -2688,3 +2688,17 @@ code {
   .reader-toc { position: static; max-height: 13rem; border-bottom: 1px solid var(--line); padding-bottom: .75rem; }
   .reader-prose { font-size: 1.08rem; }
 }
+
+
+/* Operational feedback stays visible in every book workspace tab. */
+.run-operations { display: grid; gap: .75rem; min-width: 0; }
+.run-connection { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; }
+.run-failure-panel { display: grid; gap: .75rem; min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel-strong); }
+.run-failure-panel[hidden], .run-diagnostic-text[hidden], [data-copy-diagnostics][hidden] { display: none !important; }
+.run-failure-panel h2 { font-size: 1.1rem; margin: 0; }
+.run-error-detail { max-height: 15rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: .88rem; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: .75rem; }
+.run-diagnostic-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.run-diagnostic-text { width: 100%; min-height: 12rem; resize: vertical; font-family: monospace; font-size: .82rem; }
+@media (max-width: 640px) {
+  .run-diagnostic-actions > .button, .run-diagnostic-actions > button { flex: 1 1 100%; text-align: center; }
+}
