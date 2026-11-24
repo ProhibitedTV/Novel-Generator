@@ -226,9 +226,50 @@ def prepare_qualification_directory(output: Path, configuration: dict, *, resume
         marker.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
 
 
+def inspect_qualification(output: Path) -> dict:
+    """Read a consistent saved snapshot without migrations, recovery or inference."""
+    import sqlite3
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    output = output.resolve()
+    marker, database = output / "qualification.json", output / "verification.db"
+    if not marker.is_file() or not database.is_file():
+        raise ValueError("Inspection requires an existing qualification manifest and verification.db.")
+    configuration = json.loads(marker.read_text(encoding="utf-8"))
+    if not isinstance(configuration, dict) or configuration.get("version") != 1:
+        raise ValueError("Unsupported qualification manifest.")
+    # The SQLite URI enforces read-only access even if future report code
+    # accidentally attempts to persist something. No worker lock is acquired.
+    engine = create_engine("sqlite://", creator=lambda: sqlite3.connect(
+        database.as_uri() + "?mode=ro", uri=True))
+    try:
+        with Session(engine, autoflush=False) as session:
+            session.connection().exec_driver_sql("BEGIN")
+            ids = list(session.scalars(select(GenerationRun.id).limit(2)))
+            if len(ids) != 1:
+                raise ValueError("Inspection requires exactly one saved qualification run.")
+            run = get_run_for_processing(session, ids[0])
+            report = (outline_verification_report(run) if configuration.get("outline_only")
+                      else verification_report(run, output / "manuscript"))
+            report["inspection_only"] = True
+            report["observed_at_utc"] = datetime.now(timezone.utc).isoformat()
+            report["progress"] = {
+                "current_step": run.current_step,
+                "current_chapter": run.current_chapter,
+                "requested_chapters": run.requested_chapters,
+                "chapters_with_saved_prose": sum(bool((c.content or "").strip()) for c in run.chapters),
+                "completed_chapters": sum(c.status == ChapterStatus.COMPLETED for c in run.chapters),
+            }
+            return report
+    finally:
+        engine.dispose()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", required=True)
+    parser.add_argument("--model", help="Installed Ollama model (required for generation).")
+    parser.add_argument("--inspect", type=Path, metavar="DIRECTORY", help="Print a read-only snapshot of an existing isolated qualification; no model or worker is started.")
     parser.add_argument("--project-file", type=Path, help="ProjectCreate JSON with your own premise, genre, brief, and word targets; overrides the sample story and size flags.")
     parser.add_argument("--review-model", help="Installed Ollama model for independent editorial review.")
     parser.add_argument("--revision-model", help="Installed Ollama model for automatic revision.")
@@ -242,6 +283,16 @@ def main() -> int:
     parser.add_argument("--outline-only", action="store_true", help="Qualify the autonomous story bible and outline without drafting.")
     parser.add_argument("--resume", action="store_true", help="Resume the same isolated qualification directory with identical options.")
     args = parser.parse_args()
+    if args.inspect is not None:
+        if args.resume:
+            parser.error("--inspect and --resume cannot be combined.")
+        try:
+            print(json.dumps(inspect_qualification(args.inspect), indent=2), flush=True)
+        except (OSError, ValueError) as exc:
+            parser.error(str(exc))
+        return 0  # Snapshot read succeeded, not necessarily manuscript acceptance.
+    if not args.model:
+        parser.error("--model is required for generation.")
     if args.chapters < 1 or args.words_per_chapter < 100:
         parser.error("Use at least one chapter and 100 words per chapter.")
     try:
