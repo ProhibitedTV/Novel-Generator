@@ -101,7 +101,7 @@ def checked_download_size(model, storage, maximum_gib, reserve_gib):
     return size
 
 
-def pull_candidate(client, model, max_bytes):
+def pull_candidate(client, model, max_bytes, *, can_continue=lambda: True):
     """Bound the request and check server-reported totals; never overwrite tags."""
     if model in inventory(client):
         raise ValueError("Candidate already installed; do not replace its digest in place.")
@@ -112,6 +112,8 @@ def pull_candidate(client, model, max_bytes):
             success = False
             deadline = time.monotonic() + 7200
             for line in response.iter_lines():
+                if not can_continue():
+                    raise RuntimeError("Candidate download deferred because a book is waiting.")
                 if time.monotonic() > deadline:
                     raise TimeoutError("Candidate download exceeded maintenance deadline.")
                 item = json.loads(line)
@@ -244,7 +246,7 @@ def maintain(session_factory, settings):
         return
     report = {"version": POLICY_VERSION, "checked_at_epoch": now,
               "checked_at": datetime.now(timezone.utc).isoformat(), "mode": settings.ollama_model_maintenance,
-              "status": "checking", "retired": previous.get("retired", {}), "tested": previous.get("tested", {})}
+              "status": "checking", "retired": {}, "tested": {}, "download_attempted": {}}
     with session_factory() as session:
         if not idle(session):
             return
@@ -252,6 +254,14 @@ def maintain(session_factory, settings):
         if not config or not config.is_enabled:
             return
         base_url, original_default = config.base_url, config.default_model
+    # Bind retirement records to the specific server; never carry deletions
+    # over to a changed endpoint or an unknown prior policy.
+    report["endpoint"] = base_url
+    if previous.get("endpoint") == base_url and previous.get("version") == POLICY_VERSION:
+        report["retired"] = previous.get("retired", {})
+        report["download_attempted"] = previous.get("download_attempted", {})
+        if previous.get("mode") == report["mode"]:
+            report["tested"] = previous.get("tested", {})
     write_report(report_path, report)
     try:
         manage = settings.ollama_model_maintenance == "manage"
@@ -279,7 +289,7 @@ def maintain(session_factory, settings):
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 if idle(session):
-                    for model, expected in list(report["retired"].items()):
+                    for model, expected in list(report["retired"].items())[:1]:
                         outcome = retire(session, client, model, expected, judge)
                         report.setdefault("cleanup", {})[model] = outcome
                         if outcome in {"deleted", "absent", "digest changed"}:
@@ -291,16 +301,24 @@ def maintain(session_factory, settings):
             if candidate not in installed:
                 if not manage or candidate not in approved:
                     continue
+                if candidate in report["download_attempted"]:
+                    report.setdefault("skipped", {})[candidate] = "Previously attempted exact tag; use a new versioned tag."
+                    continue
                 with session_factory() as session:
                     if not idle(session):
                         break
                 size = checked_download_size(candidate, settings.ollama_model_store_path,
                                              settings.ollama_model_max_download_gib, settings.ollama_model_disk_reserve_gib)
-                pull_candidate(client, candidate, size)
+                report["download_attempted"][candidate] = {"estimated_bytes": size, "attempted_at": report["checked_at"]}
+                write_report(report_path, report)
+                pull_candidate(client, candidate, size, can_continue=can_continue)
                 installed = inventory(client)
                 was_downloaded = True
             if candidate not in installed:
                 raise ValueError("Candidate installation was not confirmed.")
+            if was_downloaded:
+                report["download_attempted"][candidate]["digest"] = digest(installed[candidate])
+                write_report(report_path, report)
             key = ":".join(str(digest(installed[m])) for m in (incumbent, candidate, judge))
             if "None" in key or key in report["tested"]:
                 continue
@@ -309,7 +327,10 @@ def maintain(session_factory, settings):
                     report["status"] = "deferred; book queued"
                     break
             details = client._optional_metadata("POST", "/api/show", json={"model": candidate})
-            if "completion" not in (details.get("capabilities") or []):
+            if ("completion" not in (details.get("capabilities") or [])
+                    or details.get("remote_model") or details.get("remote_host")
+                    or type(installed[candidate].get("size")) is not int
+                    or installed[candidate]["size"] < 100 * 1024 ** 2):
                 report.setdefault("skipped", {})[candidate] = "Local text completion capability not confirmed."
                 continue
             result = audition(client, incumbent, candidate, judge, can_continue=can_continue)
@@ -331,8 +352,10 @@ def maintain(session_factory, settings):
                     if not report.get("promoted"):
                         report["status"] = "deferred; configuration, identity or queue changed"
                         report["tested"].pop(key, None)
-            elif manage and was_downloaded and result["verdict"] == "retain":
-                report["retired"][candidate] = digest(installed[candidate])
+            elif manage and result["verdict"] == "retain":
+                staged = report["download_attempted"].get(candidate) or {}
+                if staged.get("digest") == digest(installed[candidate]):
+                    report["retired"][candidate] = digest(installed[candidate])
             break  # One audition per maintenance window.
         if report["status"] == "checking":
             report["status"] = "finished"
