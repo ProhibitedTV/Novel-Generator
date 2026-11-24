@@ -3061,6 +3061,12 @@ def _run_final_editing_pass(
             )
             if not edited_content.strip():
                 raise RuntimeError(f"Chapter {chapter.chapter_number} final edit was empty.")
+            if autonomous_editorial.enabled(run):
+                regression = autonomous_editorial._repair_size_regression(chapter.content or "", edited_content, [])
+                if regression:
+                    # This is a polish pass, not an authorized structural or
+                    # length repair. Keep the source for final editorial review.
+                    raise ValueError(regression)
             chapter.content = edited_content
             chapter.word_count = len((chapter.content or "").split())
             record_event(
