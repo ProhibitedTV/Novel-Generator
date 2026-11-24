@@ -573,9 +573,19 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         # Such a change must still invalidate the complete-book verdict.
         fingerprint_inputs["manuscript_hash"] = _hash([(chapter.chapter_number, chapter.content) for chapter in chapters])
     fingerprint = _hash(fingerprint_inputs)
+
+    def bind_context_sources(review):
+        # A distant-pair or developmental verdict also depends on the
+        # intervening/whole-book context, not just the cited chapter text.
+        # Private bindings are reconstructed for both cached and fresh reviews.
+        context_hashes = {int(number): digest for number, digest in context.get("context_source_hashes", {}).items()}
+        for issue in review.issues:
+            issue._reviewed_source_hashes = {**context_hashes, **issue._reviewed_source_hashes}
+        return review
+
     for saved in reversed(_events(run, "autonomous_review_completed")):
         if saved.get("fingerprint") == fingerprint and review_cache_allowed(reviewer_identity, adjudicator_identity):
-            return validate_review(json.dumps(saved["review"]), chapters)
+            return bind_context_sources(validate_review(json.dumps(saved["review"]), chapters))
     instruction = (
         "You are an independent fiction editor. Return valid JSON only, matching this contract: "
         + json.dumps(EditorialReview.model_json_schema())
@@ -751,7 +761,7 @@ def _review(session, run, chapters, context: dict, client, scope: str) -> Editor
         "provider_name": provider, "model_name": model,
         "controls": controls,
     })
-    return review
+    return bind_context_sources(review)
 
 
 def _length_issues(run, chapter) -> list[EditorialIssue]:
