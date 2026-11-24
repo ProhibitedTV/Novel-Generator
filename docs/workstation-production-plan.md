@@ -71,3 +71,35 @@ reports the queued state rather than bypassing the cooldown. An isolated
 exclusive lock prevents two qualification processes from opening the same
 database concurrently. Earlier probes without a manifest cannot be resumed by
 this command. Keep the production worker stopped while benchmarking.
+
+
+## Adaptive Ollama runtime
+
+Production provider managers enable adaptive request sizing by default. Set
+`OLLAMA_ADAPTIVE_RUNTIME=false` to restore fixed context behavior. The
+configured `OLLAMA_NUM_CTX` (default 32768) is an administrator ceiling, not
+a demand to allocate that context for every call. The controller consults
+Ollama's model metadata, estimates prompt requirements conservatively, reserves
+the existing stage output budget, and chooses a suitable context tier. It
+keeps successful allocations per model during the provider client's lifetime
+to avoid unnecessary model reloads. Explicit memory errors trigger bounded
+context or processing-batch reductions, only when the estimated source and
+output still fit. No automatic model switch, deletion, download, GPU clock
+change, or modification to the Ollama server configuration is performed.
+
+The configured ceiling is not a hardware benchmark, and the estimate is not
+an exact tokenizer. Large prompts may be rejected conservatively. If the
+necessary context cannot fit, the run surfaces an error rather than deliberately
+truncating manuscript evidence. The diagnostics include the last successful
+adaptive request's context, memory retries, throughput and (when available)
+Ollama's reported resident allocation. These are historical model measurements,
+not current free system RAM, free GPU memory, or temperature. Ollama owns the
+hardware scheduler. Direct low-level clients remain fixed unless explicitly
+enabled; the production ProviderManager enables adaptation automatically.
+Older servers lacking metadata endpoints fall back to the configured ceiling
+and request sizing. Actual GPU/CPU performance and memory pressure must be
+qualified on the target machine.
+
+References: https://docs.ollama.com/context-length ,
+https://docs.ollama.com/api/ps ,
+https://docs.ollama.com/api-reference/show-model-details .

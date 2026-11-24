@@ -1630,10 +1630,12 @@ function setupRunDetail() {
         const inferenceAge = Number.isFinite(started) ? ` (${formatDuration(Date.now() - started)} elapsed)` : "";
         const activity = attempt?.status === "running" && snapshot.status === "running"
           ? ` · Inference: ${attempt.stage.replaceAll("_", " ")}${inferenceAge}` : "";
+        const tuning = snapshot.last_adaptive_inference;
+        const contextInfo = tuning ? ` · Last request context: ${tuning.effective_context_tokens.toLocaleString()} tokens (${tuning.model})` : "";
         // Liveness is not a token-progress counter; elapsed inference time is shown separately.
         heartbeatNode.textContent = snapshot.step === "provider_wait"
           ? `Automatic retry: ${snapshot.retry_at_utc || "scheduled"} UTC`
-          : (snapshot.heartbeat_stale ? "Heartbeat overdue; verify worker. " : "") + elapsed + activity;
+          : (snapshot.heartbeat_stale ? "Heartbeat overdue; verify worker. " : "") + elapsed + activity + contextInfo;
       }
       renderFailure(snapshot.error, snapshot.step);
       reloadOnTransition(snapshot.status);

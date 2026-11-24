@@ -403,7 +403,7 @@ def _provider_metrics(client: Any, provider_name: str | None) -> dict[str, Any]:
     if not isinstance(raw, dict) or not raw:
         return {}
     metrics = dict(raw)
-    context_tokens = _configured_context_tokens(client, provider_name)
+    context_tokens = metrics.get("effective_context_tokens") or _configured_context_tokens(client, provider_name)
     prompt_tokens = metrics.get("prompt_eval_count", metrics.get("prompt_tokens"))
     if (
         context_tokens
