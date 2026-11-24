@@ -2809,6 +2809,7 @@ def _provider_settings_context(
         ),
         "setup_steps": _onboarding_steps(provider_config, provider_status or saved_status, projects),
         "model_calibration": _model_calibration_context(db),
+        "model_maintenance": __import__("novel_generator.services.model_maintenance", fromlist=["maintenance_context"]).maintenance_context(settings),
         "page_error": page_error,
     }
 
