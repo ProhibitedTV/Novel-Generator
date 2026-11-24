@@ -375,7 +375,7 @@ def _supervised_provider_chat(
     try:
         messages = author_messages(
             messages, provider_name=provider_name, model_name=model_name, stage=stage,
-            content_kind=(run.project.story_brief or {}).get("content_kind", "fiction"),
+            content_kind=(getattr(getattr(run, "project", None), "story_brief", None) or {}).get("content_kind", "fiction"),
         )
         output = _provider_chat(client, provider_name, model_name, messages, stream=stream)
     except Exception as exc:
