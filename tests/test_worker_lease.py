@@ -155,3 +155,61 @@ def test_recovery_closes_only_abandoned_attempts_and_keeps_saved_results(configu
         with get_session_factory()() as session:
             run = get_run(session, run_id)
             assert next(a for a in run.stage_attempts if a.id == pending_id).completed_at == finished_at
+
+
+def test_worker_heartbeat_is_scoped_to_live_owner_and_preserves_run_content(configured_environment):
+    from novel_generator.services.worker_heartbeat import publish_heartbeat
+    factory = get_session_factory()
+    now = datetime.utcnow()
+    with factory() as session:
+        run = make_run(session)
+        run.status = RunStatus.RUNNING
+        run.worker_id = "worker-a"
+        run.last_heartbeat_at = now - timedelta(hours=2)
+        run_id = run.id
+        prose = run.chapters[0].content
+        session.commit()
+        updated_at = run.updated_at
+    assert not publish_heartbeat(factory, run_id, "worker-b", now=now)
+    assert publish_heartbeat(factory, run_id, "worker-a", now=now)
+    with factory() as session:
+        run = get_run(session, run_id)
+        assert run.last_heartbeat_at == now
+        assert run.updated_at == updated_at
+        assert run.chapters[0].content == prose
+        run.status = RunStatus.COMPLETED
+        session.commit()
+    assert not publish_heartbeat(factory, run_id, "worker-a", now=now + timedelta(seconds=30))
+    with factory() as session:
+        assert get_run(session, run_id).last_heartbeat_at == now
+
+
+def test_worker_heartbeat_continues_while_processing_and_stops_on_exit(configured_environment, monkeypatch):
+    from threading import Event
+    from novel_generator.services import worker_heartbeat
+    factory = get_session_factory()
+    with factory() as session:
+        run = make_run(session)
+        run.status = RunStatus.RUNNING
+        run.worker_id = "worker-a"
+        run.last_heartbeat_at = datetime.utcnow() - timedelta(hours=2)
+        run_id = run.id
+        session.commit()
+    pulsed = Event()
+    real_publish = worker_heartbeat.publish_heartbeat
+    def observe(*args, **kwargs):
+        result = real_publish(*args, **kwargs)
+        if result:
+            pulsed.set()
+        return result
+    monkeypatch.setattr(worker_heartbeat, "publish_heartbeat", observe)
+    with worker_heartbeat.maintain_worker_heartbeat(factory, run_id, "worker-a", interval_seconds=0.01):
+        assert pulsed.wait(5)
+        # A slow inference with no new model output still has a fresh owner.
+        with factory() as session:
+            assert get_run(session, run_id).last_heartbeat_at > datetime.utcnow() - timedelta(seconds=10)
+    with factory() as session:
+        saved = get_run(session, run_id).last_heartbeat_at
+    time.sleep(0.05)
+    with factory() as session:
+        assert get_run(session, run_id).last_heartbeat_at == saved

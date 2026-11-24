@@ -1626,7 +1626,11 @@ function setupRunDetail() {
         const age = snapshot.heartbeat_age_seconds;
         const elapsed = age == null ? "no heartbeat recorded" : `${Math.floor(age / 60)}m ${age % 60}s since last heartbeat`;
         const attempt = snapshot.latest_attempt;
-        const activity = attempt?.status === "running" && snapshot.status === "running" ? ` · Inference: ${attempt.stage.replaceAll("_", " ")}` : "";
+        const started = attempt?.started_at ? Date.parse(attempt.started_at) : NaN;
+        const inferenceAge = Number.isFinite(started) ? ` (${formatDuration(Date.now() - started)} elapsed)` : "";
+        const activity = attempt?.status === "running" && snapshot.status === "running"
+          ? ` · Inference: ${attempt.stage.replaceAll("_", " ")}${inferenceAge}` : "";
+        // Liveness is not a token-progress counter; elapsed inference time is shown separately.
         heartbeatNode.textContent = snapshot.step === "provider_wait"
           ? `Automatic retry: ${snapshot.retry_at_utc || "scheduled"} UTC`
           : (snapshot.heartbeat_stale ? "Heartbeat overdue; verify worker. " : "") + elapsed + activity;
