@@ -1091,6 +1091,7 @@ def test_developmental_rewrite_pass_exports_report_and_revised_outline(configure
         assert "revised-outline" in artifact_kinds
         assert "developmental-qa-report" in artifact_kinds
         assert any(event.event_type == "developmental_rewrite_completed" for event in refreshed.events)
+        assert sum(event.event_type == "editorial_agenda_saved" for event in refreshed.events) == 1
 
 
 def test_final_editing_pass_polishes_saved_chapter_before_export(configured_environment) -> None:

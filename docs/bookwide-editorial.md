@@ -84,9 +84,17 @@ The actual source audits remain mandatory for autonomous acceptance.
 Line editing should preserve voice and deliberate craft choices rather than
 performing another structural rewrite.
 
-Next architectural milestones: source-bound developmental plan checkpoints,
-a separate editorial letter and prioritized dependency-aware revision agenda,
-a persisted fiction style sheet, and comparison of line-edited versus
-structurally revised text for unintended changes. These remain future work;
-the new draft editions supply comparison evidence without additional model
-calls.
+The original developmental QA, revision plan and rendered editorial reports
+are saved as a single checksummed agenda, with hashes identifying its source
+chapter prose. On resume, the same assignment is used rather than making
+the model re-diagnose partially edited prose and change its instructions.
+The editorial tab shows the original chapter assignments and recorded
+revision outcomes. The saved agenda is a historical editorial decision,
+not proof that later edits resolved its findings. Fresh final QA and all
+existing acceptance checks still run against current prose. Legacy runs
+without a saved agenda establish one on their next developmental pass;
+it describes the source at that time, not an invented original draft.
+
+Next architectural milestones: a separate editorial letter, dependency-aware
+revision ordering, a persisted fiction style sheet, and comparison of
+line-edited versus structurally revised text for unintended changes.

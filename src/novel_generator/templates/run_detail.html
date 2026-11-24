@@ -589,6 +589,30 @@
 
   </div>
   <div class="workspace-view" data-workspace-view="editorial" id="book-editorial">
+  {% if editorial_agenda %}
+  <article class="panel dashboard-panel">
+    <div class="section-header"><div class="section-header-copy">
+      <h2>Developmental revision agenda</h2>
+      <p>Original editorial assignment for this run, preserved across restarts. This is not a final acceptance report.</p>
+    </div></div>
+    {% if editorial_agenda.invalid %}
+      <p class="error-text">The saved agenda failed validation. Manuscript prose remains available.</p>
+    {% else %}
+      <p>{{ editorial_agenda.diagnosis }}</p>
+      <details class="chapter-preview-shell" open>
+        <summary>Chapter assignments and saved outcomes</summary>
+        {% for row in editorial_agenda.rows %}
+          <div class="support-block">
+            <strong>Chapter {{ row.chapter }} · {{ row.action }}</strong>
+            <span class="meta-chip">{{ row.status }}</span>
+            {% if row.reason %}<p>{{ row.reason }}</p>{% endif %}
+          </div>
+        {% endfor %}
+      </details>
+      <p class="field-note">Refresh this page to see the latest saved revision outcomes.</p>
+    {% endif %}
+  </article>
+  {% endif %}
   <div class="grid two-up run-dashboard-grid">
     <article class="panel dashboard-panel">
       {% if manuscript_edition.final_qa_coverage %}

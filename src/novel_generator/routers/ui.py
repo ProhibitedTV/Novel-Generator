@@ -3708,6 +3708,7 @@ def run_detail(
     run_profile = genre_profile((run.story_bible or {}).get("genre_profile") or (run.project.story_brief or {}).get("genre_profile"))
     outline_review = _outline_review_context(run)
     chapter_review_cards = _chapter_review_cards(run)
+    from ..services.editorial_agenda import agenda_summary
     return _render(
         request,
         "run_detail.html",
@@ -3732,6 +3733,7 @@ def run_detail(
             "book_completion": _book_completion_context(run),
             "manuscript_edition": _manuscript_edition_context(run, chapter_review_cards),
             "editorial_next_step": _run_editorial_next_step_context(run, chapter_review_cards),
+            "editorial_agenda": agenda_summary(run),
             "story_bible": run.story_bible or {},
             "continuity_ledger": run.continuity_ledger or {},
             **_artifact_context(run),
