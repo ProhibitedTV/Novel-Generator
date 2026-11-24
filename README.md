@@ -27,7 +27,10 @@ The product is built around one practical goal: get to a complete book draft, th
 - Bounded whole-manuscript developmental and QA context
 - Deterministic whole-book quality trends, ending-debt audits, and publication-readiness guards
 - Schema-constrained structured output when the provider supports it, with compatibility fallbacks
-- Context-headroom protection and stage-aligned completion budgets for local models
+- Context-headroom protection, adaptive Ollama memory-pressure recovery, and stage-aligned completion budgets
+- Optional idle author-model maintenance with blind auditions and guarded retirement ([configuration](docs/workstation-production-plan.md#optional-author-model-maintenance))
+- Copyable run diagnostics, independent worker heartbeats, and bounded dashboard activity
+- Preserved first-draft and structural working editions with restart-safe editorial assignments
 - Automatic continuation recovery for prose that stops because of provider output limits
 - Safe prompt telemetry plus actual provider token, throughput, context, and stop metrics when available
 - Deterministic 32-chapter long-form architecture benchmark

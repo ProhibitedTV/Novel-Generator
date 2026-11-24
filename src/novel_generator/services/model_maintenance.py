@@ -68,6 +68,22 @@ def digest(row):
     return value if re.fullmatch(r"[a-f0-9]{64}", value) else None
 
 
+def local_completion(client, model, row):
+    """All participants, including the judge, must be verified local models."""
+    if not approved_tag(model) and model.endswith(":latest"):
+        # An existing default or judge may have an implicit latest tag; never
+        # download or replace that tag automatically.
+        if not approved_tag(model.removesuffix(":latest") + ":local"):
+            return False
+    elif not approved_tag(model):
+        return False
+    details = client._optional_metadata("POST", "/api/show", json={"model": model})
+    return bool("completion" in (details.get("capabilities") or [])
+                and not details.get("remote_model") and not details.get("remote_host")
+                and type(row.get("size")) is int and row["size"] >= 100 * 1024 ** 2
+                and digest(row))
+
+
 def registry_size(model):
     """Fail closed on unknown manifests, cloud tags or registry changes."""
     if not approved_tag(model):
@@ -176,8 +192,10 @@ def audition(client, incumbent, candidate, judge, *, can_continue=lambda: True):
             audits[model].append(result.get("contradiction") is expected and
                                   (not expected or isinstance(quote, str) and bool(quote.strip()) and quote in source))
     wins = []
+    comparisons = []
     for name, _, prompt in TASKS:
         votes = []
+        reasons = []
         for order in ((incumbent, candidate), (candidate, incumbent)):
             packet = json.dumps({"task": prompt, "A": prose[order[0]][name], "B": prose[order[1]][name]})
             result = json.loads(compare_chat(client, judge,
@@ -189,14 +207,17 @@ def audition(client, incumbent, candidate, judge, *, can_continue=lambda: True):
             if choice not in ("A", "B", "tie") or not str(result.get("reason", "")).strip():
                 raise ValueError("Invalid blind editorial verdict.")
             votes.append(order[0] if choice == "A" else order[1] if choice == "B" else "tie")
-        wins.append(candidate if votes == [candidate, candidate] else incumbent if votes == [incumbent, incumbent] else "tie")
+            reasons.append(str(result["reason"])[:600])
+        winner = candidate if votes == [candidate, candidate] else incumbent if votes == [incumbent, incumbent] else "tie"
+        wins.append(winner)
+        comparisons.append({"task": name, "winner": winner, "votes": votes, "reasons": reasons})
     if any(client.model_identity(m) != identities[m] for m in identities):
         raise ValueError("Model identity changed during audition.")
     passed = (all(audits[candidate]) and wins.count(candidate) >= 2 and incumbent not in wins
               and seconds[candidate] <= max(1, seconds[incumbent]) * 2)
     return {"verdict": "promote" if passed else "retain", "wins": wins,
             "audit_passes": {m: sum(audits[m]) for m in audits}, "seconds": seconds,
-            "identities": identities}
+            "identities": identities, "comparisons": comparisons}
 
 
 def write_report(path, report):
@@ -231,7 +252,23 @@ def maintenance_context(settings):
         report = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
     except (OSError, ValueError):
         report = {"status": "error", "error": "Saved maintenance report could not be read."}
-    return {"mode": settings.ollama_model_maintenance, "report": report}
+    storage = settings.ollama_model_store_path
+    free_gib = None
+    if storage:
+        try:
+            if (Path(storage) / "blobs").is_dir() and (Path(storage) / "manifests").is_dir():
+                free_gib = round(shutil.disk_usage(storage).free / GIB, 1)
+        except OSError:
+            pass
+    return {"mode": settings.ollama_model_maintenance, "report": report,
+            "exclusive_worker": settings.worker_exclusive,
+            "single_run": settings.max_concurrent_runs == 1,
+            "judge": settings.ollama_model_judge or None,
+            "candidates": [x.strip() for x in settings.ollama_model_candidates.split(",") if x.strip()],
+            "storage_free_gib": free_gib,
+            "reserve_gib": settings.ollama_model_disk_reserve_gib,
+            "max_download_gib": settings.ollama_model_max_download_gib,
+            "interval_hours": settings.ollama_model_maintenance_hours}
 
 
 def maintain(session_factory, settings):
@@ -239,7 +276,15 @@ def maintain(session_factory, settings):
     if settings.ollama_model_maintenance == "off" or not settings.worker_exclusive or settings.max_concurrent_runs != 1:
         return
     report_path = settings.artifacts_dir / "model-maintenance.json"
-    previous = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+    try:
+        previous = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+        if not isinstance(previous, dict):
+            raise ValueError("Expected a maintenance report object.")
+    except (OSError, ValueError) as exc:
+        # Do not discard uncertain retirement records or repeatedly crash the
+        # idle loop. Leave the old file available for inspection.
+        logger.warning("Model maintenance paused: unreadable report: %s", exc)
+        return
     # Persist the cadence before expensive work, including failed auditions.
     now = time.time()
     if now - previous.get("checked_at_epoch", 0) < settings.ollama_model_maintenance_hours * 3600:
@@ -275,6 +320,8 @@ def maintain(session_factory, settings):
         installed = inventory(client)
         if incumbent not in installed or not judge or judge not in installed or judge == incumbent:
             raise ValueError("An installed incumbent and a separate installed judge are required.")
+        if not all(local_completion(client, name, installed[name]) for name in (incumbent, judge)):
+            raise ValueError("The incumbent and independent judge must be verified local completion models.")
         approved = list(dict.fromkeys(x.strip() for x in settings.ollama_model_candidates.split(",") if x.strip()))
         # Recommend already installed local tagged candidates automatically;
         # remote downloads remain restricted to the approved list.
@@ -289,11 +336,13 @@ def maintain(session_factory, settings):
             with session_factory() as session:
                 session.execute(text("BEGIN IMMEDIATE"))
                 if idle(session):
-                    for model, expected in list(report["retired"].items())[:1]:
+                    for model, expected in list(report["retired"].items()):
                         outcome = retire(session, client, model, expected, judge)
                         report.setdefault("cleanup", {})[model] = outcome
                         if outcome in {"deleted", "absent", "digest changed"}:
                             report["retired"].pop(model, None)
+                        if outcome == "deleted":
+                            break  # At most one deletion; protected entries do not starve later entries.
                 session.commit()
         for candidate in candidates:
             installed = inventory(client)
@@ -307,8 +356,12 @@ def maintain(session_factory, settings):
                 with session_factory() as session:
                     if not idle(session):
                         break
-                size = checked_download_size(candidate, settings.ollama_model_store_path,
-                                             settings.ollama_model_max_download_gib, settings.ollama_model_disk_reserve_gib)
+                try:
+                    size = checked_download_size(candidate, settings.ollama_model_store_path,
+                                                 settings.ollama_model_max_download_gib, settings.ollama_model_disk_reserve_gib)
+                except (ValueError, OSError, httpx.HTTPError) as exc:
+                    report.setdefault("skipped", {})[candidate] = str(exc)[:500]
+                    continue  # A blocked download must not prevent installed candidates from competing.
                 report["download_attempted"][candidate] = {"estimated_bytes": size, "attempted_at": report["checked_at"]}
                 write_report(report_path, report)
                 pull_candidate(client, candidate, size, can_continue=can_continue)
@@ -326,15 +379,14 @@ def maintain(session_factory, settings):
                 if not idle(session):
                     report["status"] = "deferred; book queued"
                     break
-            details = client._optional_metadata("POST", "/api/show", json={"model": candidate})
-            if ("completion" not in (details.get("capabilities") or [])
-                    or details.get("remote_model") or details.get("remote_host")
-                    or type(installed[candidate].get("size")) is not int
-                    or installed[candidate]["size"] < 100 * 1024 ** 2):
+            if not local_completion(client, candidate, installed[candidate]):
                 report.setdefault("skipped", {})[candidate] = "Local text completion capability not confirmed."
                 continue
-            result = audition(client, incumbent, candidate, judge, can_continue=can_continue)
             report["candidate"] = candidate
+            report["status"] = "auditioning"
+            write_report(report_path, report)
+            result = audition(client, incumbent, candidate, judge, can_continue=can_continue)
+            report["status"] = "checking"
             report["result"] = result
             report["tested"][key] = result["verdict"]
             if manage and result["verdict"] == "promote":

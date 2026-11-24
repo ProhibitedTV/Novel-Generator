@@ -81,3 +81,58 @@ def test_blind_audition_requires_consistent_wins_and_controls(monkeypatch):
         return fake_chat(*args, **kwargs)
     monkeypatch.setattr(mm, "chat", biased)
     assert mm.audition(Client(), *models)["verdict"] == "retain"
+
+
+@pytest.mark.parametrize("mode", ["recommend", "manage"])
+def test_complete_idle_maintenance_cycle(configured_environment, monkeypatch, mode):
+    from novel_generator.settings import get_settings
+    from novel_generator.repositories import ensure_provider_config
+    from novel_generator.models import ProviderConfig
+    from sqlalchemy import select
+
+    factory = get_session_factory()
+    settings = get_settings().model_copy(update={
+        "worker_exclusive": True, "ollama_model_maintenance": mode,
+        "ollama_model_judge": "judge:9b", "ollama_model_candidates": "too-big:70b",
+        "ollama_model_maintenance_hours": 1,
+    })
+    with factory() as session:
+        config = ensure_provider_config(session, settings)
+        config.base_url = "http://localhost:11434"
+        config.default_model = "old:12b"
+        session.commit()
+    inventory = {m: {"digest": d * 64, "size": 8 * mm.GIB}
+                 for m, d in [("old:12b", "a"), ("judge:9b", "b"), ("new:12b", "c")]}
+    fake = SimpleNamespace(_optional_metadata=lambda *a, **kw: {"capabilities": ["completion"]})
+    monkeypatch.setattr(mm, "OllamaClient", lambda *a, **kw: fake)
+    monkeypatch.setattr(mm, "inventory", lambda _: inventory)
+    def reject_download(*args):
+        raise ValueError("Insufficient storage")
+    monkeypatch.setattr(mm, "checked_download_size", reject_download)
+    calls = []
+    def audition(client, old, new, judge, **kwargs):
+        calls.append(new)
+        return {"verdict": "promote", "identities": {m: {"digest": mm.digest(inventory[m])} for m in (old, new, judge)}}
+    monkeypatch.setattr(mm, "audition", audition)
+    mm.maintain(factory, settings)
+    report = mm.maintenance_context(settings)["report"]
+    assert report["status"] == "finished"
+    assert report["candidate"] == "new:12b" and calls == ["new:12b"]
+    with factory() as session:
+        config = session.scalar(select(ProviderConfig).where(ProviderConfig.provider_name == "ollama"))
+        assert config.default_model == ("new:12b" if mode == "manage" else "old:12b")
+    if mode == "manage":
+        assert report["retired"]["old:12b"] == "a" * 64
+        assert "Insufficient storage" in report["skipped"]["too-big:70b"]
+    mm.maintain(factory, settings)
+    assert len(calls) == 1  # Persisted cadence, no duplicate audition.
+
+
+def test_local_completion_rejects_cloud_or_unknown_participants():
+    row = {"digest": "a" * 64, "size": mm.GIB}
+    local = SimpleNamespace(_optional_metadata=lambda *a, **kw: {"capabilities": ["completion"]})
+    remote = SimpleNamespace(_optional_metadata=lambda *a, **kw: {"capabilities": ["completion"], "remote_host": "example.com"})
+    assert mm.local_completion(local, "author:latest", row)
+    assert not mm.local_completion(remote, "author:12b", row)
+    assert not mm.local_completion(local, "author:cloud", row)
+    assert not mm.local_completion(local, "author:12b", {"size": mm.GIB})

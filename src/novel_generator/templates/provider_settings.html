@@ -38,11 +38,30 @@
     <h2>Automatic author model maintenance</h2>
     <p>Compare local author models on blind fiction auditions. Never replace a model in a saved book.</p>
   </div><span class="meta-chip">{{ model_maintenance.mode }}</span></div>
-  <p class="field-note">Requires an exclusive worker and a separate installed judge. Manage mode can install approved candidates and retire unreferenced models. Configuration is controlled by the administrator.</p>
+  <p class="field-note">Configuration is controlled by the administrator. Manage mode installs approved candidates and retires unreferenced models only while the generation queue is idle.</p>
+  <div class="support-block">
+    <strong>Maintenance readiness</strong>
+    <p>Worker: {{ "Exclusive" if model_maintenance.exclusive_worker and model_maintenance.single_run else "Exclusive single-run worker required" }} · Judge: {{ model_maintenance.judge or "Not configured" }}</p>
+    <p>Interval: {{ model_maintenance.interval_hours }} hours · Download limit: {{ model_maintenance.max_download_gib }} GiB · Disk reserve: {{ model_maintenance.reserve_gib }} GiB</p>
+    <p>Model store: {% if model_maintenance.storage_free_gib is not none %}{{ model_maintenance.storage_free_gib }} GiB free on visible store{% else %}Not visible; new downloads blocked{% endif %}</p>
+    {% if model_maintenance.candidates %}<p>Approved downloads: {{ model_maintenance.candidates|join(", ") }}</p>{% endif %}
+  </div>
   {% if model_maintenance.report %}
     <p>Last check: {{ model_maintenance.report.checked_at or "Unknown" }} · {{ model_maintenance.report.status }}</p>
     {% if model_maintenance.report.candidate %}<p>Candidate: {{ model_maintenance.report.candidate }} · {{ model_maintenance.report.result.verdict if model_maintenance.report.result else "Pending" }}</p>{% endif %}
     {% if model_maintenance.report.promoted %}<p>New default author: {{ model_maintenance.report.promoted }}</p>{% endif %}
+    {% if model_maintenance.report.result and model_maintenance.report.result.comparisons %}
+    <details class="chapter-preview-shell">
+      <summary>Blind audition evidence</summary>
+      {% for comparison in model_maintenance.report.result.comparisons %}
+        <div class="support-block">
+          <strong>{{ comparison.task|capitalize }} · {{ comparison.winner }}</strong>
+          {% for reason in comparison.reasons %}<p>{{ reason }}</p>{% endfor %}
+        </div>
+      {% endfor %}
+    </details>
+    {% endif %}
+    {% if model_maintenance.report.skipped %}<details><summary>Skipped candidates</summary><ul class="bullet-list">{% for model, reason in model_maintenance.report.skipped.items() %}<li>{{ model }}: {{ reason }}</li>{% endfor %}</ul></details>{% endif %}
     {% if model_maintenance.report.error %}<pre class="run-error-detail">{{ model_maintenance.report.error }}</pre>{% endif %}
     {% if model_maintenance.report.cleanup %}<ul class="bullet-list">{% for model, outcome in model_maintenance.report.cleanup.items() %}<li>{{ model }}: {{ outcome }}</li>{% endfor %}</ul>{% endif %}
   {% else %}<p class="empty-state">No maintenance report has been saved yet.</p>{% endif %}

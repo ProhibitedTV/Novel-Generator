@@ -156,3 +156,10 @@ logical size. No maintenance operation is required for book generation.
 
 References: https://docs.ollama.com/api/tags ,
 https://docs.ollama.com/api/pull , https://docs.ollama.com/api/delete .
+
+
+The provider settings page also shows readiness (exclusive worker, configured
+judge, visible model-store capacity), skipped candidates, and the independent
+editor's recorded reasons for each comparison. Incumbent, candidate, and judge
+must all be verified local completion models. A blocked download does not stop
+the worker from comparing already installed authors.
