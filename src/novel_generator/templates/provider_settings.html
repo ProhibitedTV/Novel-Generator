@@ -41,10 +41,15 @@
   <p class="field-note">Configuration is controlled by the administrator. Manage mode installs approved candidates and retires unreferenced models only while the generation queue is idle.</p>
   <div class="support-block">
     <strong>Maintenance readiness</strong>
-    <p>Worker: {{ "Exclusive" if model_maintenance.exclusive_worker and model_maintenance.single_run else "Exclusive single-run worker required" }} · Judge: {{ model_maintenance.judge or "Not configured" }}</p>
-    <p>Interval: {{ model_maintenance.interval_hours }} hours · Download limit: {{ model_maintenance.max_download_gib }} GiB · Disk reserve: {{ model_maintenance.reserve_gib }} GiB</p>
-    <p>Model store: {% if model_maintenance.storage_free_gib is not none %}{{ model_maintenance.storage_free_gib }} GiB free on visible store{% else %}Not visible; new downloads blocked{% endif %}</p>
-    {% if model_maintenance.candidates %}<p>Approved downloads: {{ model_maintenance.candidates|join(", ") }}</p>{% endif %}
+    {% set readiness = model_maintenance.report.worker_readiness if model_maintenance.report and model_maintenance.report.worker_readiness else model_maintenance %}
+    {% if model_maintenance.report and model_maintenance.report.worker_readiness %}
+      <p>Last maintenance worker: {{ "Exclusive single-run" if readiness.exclusive_worker and readiness.single_run else "Not eligible" }} · Judge: {{ readiness.judge or "Not configured" }}</p>
+      <p>Model store at last check: {% if readiness.storage_free_gib is not none %}{{ readiness.storage_free_gib }} GiB free{% else %}Not visible; new downloads blocked{% endif %}</p>
+    {% else %}
+      <p>Worker readiness has not yet been verified by a maintenance check. Configured judge: {{ readiness.judge or "Not configured" }}</p>
+    {% endif %}
+    <p>Interval: {{ readiness.interval_hours }} hours · Download limit: {{ readiness.max_download_gib }} GiB · Disk reserve: {{ readiness.reserve_gib }} GiB</p>
+    {% if readiness.candidates %}<p>Approved downloads: {{ readiness.candidates|join(", ") }}</p>{% endif %}
   </div>
   {% if model_maintenance.report %}
     <p>Last check: {{ model_maintenance.report.checked_at or "Unknown" }} · {{ model_maintenance.report.status }}</p>
