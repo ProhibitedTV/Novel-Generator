@@ -504,3 +504,63 @@ def test_event_stream_reconnect_does_not_replay_previous_events(client, monkeypa
         with client.stream("GET", url, headers=headers) as response:
             payload = "".join(response.iter_text())
         assert "OLD_EVENT" not in payload and "NEW_EVENT" in payload and "event: terminal" in payload
+
+
+def test_dashboard_snapshot_omits_prose_and_large_event_evidence(client, monkeypatch):
+    from novel_generator.models import ChapterDraft, ChapterStatus
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+    _, run_id = create_project_and_run(client)
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        run.status = RunStatus.RUNNING
+        run.current_step = "draft_chapter"
+        run.current_chapter = 2
+        session.add(ChapterDraft(run_id=run_id, chapter_number=1, title="First", outline_summary="First outline",
+            content="PRIVATE_PROSE " * 5000, summary="PRIVATE_SUMMARY",
+            continuity_update={"chapter_outcome": "Progress"}, status=ChapterStatus.COMPLETED, word_count=5000))
+        session.add(ChapterDraft(run_id=run_id, chapter_number=2, title="Second", outline_summary="Second outline",
+            status=ChapterStatus.PENDING, word_count=100))
+        record_event(session, run, "outline_fallback", {"message": "Fallback used", "model_name": "route-model",
+            "provider_name": "ollama", "raw_output": "LARGE_EVIDENCE " * 5000})
+        record_event(session, run, "chapter_progress", {"message": "Drafting second chapter"})
+        session.commit()
+    response = client.get(f"/api/runs/{run_id}/dashboard")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["current_chapter"] == 2
+    assert data["chapters"][0]["has_content"] and data["chapters"][0]["has_summary"]
+    assert not data["chapters"][1]["has_content"]
+    assert data["chapters"][0]["word_count"] == 5000
+    assert data["active_route"]["model_name"] == "route-model"
+    assert data["latest_event"]["event_type"] == "chapter_progress"
+    assert data["fallback_events"][0]["event_type"] == "outline_fallback"
+    assert data["event_count"] >= 2 and data["artifact_count"] == 0
+    assert "PRIVATE_PROSE" not in response.text and "PRIVATE_SUMMARY" not in response.text
+    assert "LARGE_EVIDENCE" not in response.text and len(response.content) < 20000
+    assert response.headers["cache-control"] == "no-store"
+    assert client.get("/api/runs/nonexistent/dashboard").status_code == 404
+
+
+def test_event_history_pagination_and_compact_stream_preserve_legacy_api(client, monkeypatch):
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+    _, run_id = create_project_and_run(client)
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        for i in range(5):
+            record_event(session, run, "test_action", {"message": f"Action {i}", "raw_output": "PRIVATE_EVIDENCE"})
+        run.status = RunStatus.CANCELED
+        run.current_step = "canceled"
+        session.commit()
+    first = client.get(f"/api/runs/{run_id}/event-history?limit=2")
+    assert first.status_code == 200
+    page = first.json()
+    assert len(page["events"]) == 2 and page["next_before"] is not None
+    assert "PRIVATE_EVIDENCE" not in first.text
+    second = client.get(f"/api/runs/{run_id}/event-history?limit=2&before={page['next_before']}").json()
+    assert max(e["sequence"] for e in second["events"]) < min(e["sequence"] for e in page["events"])
+    assert client.get(f"/api/runs/{run_id}/event-history?limit=201").status_code == 422
+    for compact in ("true", "false"):
+        with client.stream("GET", f"/api/runs/{run_id}/events?compact={compact}") as response:
+            payload = "".join(response.iter_text())
+        assert "Action 4" in payload and "event: terminal" in payload
+        assert ("PRIVATE_EVIDENCE" in payload) == (compact == "false")

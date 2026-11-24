@@ -1378,12 +1378,13 @@
     <div class="section-header">
       <div class="section-header-copy">
         <h2>Recent pipeline actions</h2>
-        <p>Live worker updates appear here without changing the SSE payload shape.</p>
+        <p>Showing the latest 200 actions. The full history remains saved.</p>
+        <a href="/api/runs/{{ run.id }}/event-history" target="_blank" rel="noopener">Browse event history (JSON)</a>
       </div>
-      <p><span data-event-log-count>{{ run.events|length }}</span> logged</p>
+      <p><span data-event-log-count>{{ [run.events|length, 200]|min }}</span> shown</p>
     </div>
     <ul class="event-log" data-event-log>
-      {% for event in run.events|sort(attribute='sequence') %}
+      {% for event in (run.events|sort(attribute='sequence'))[-200:] %}
         <li class="event-item" data-sequence="{{ event.sequence }}">
           <div class="event-topline">
             <span class="event-kind">{{ event.event_type.replace("_", " ") }}</span>
