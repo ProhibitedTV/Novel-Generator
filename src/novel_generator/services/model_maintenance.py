@@ -252,6 +252,11 @@ def maintenance_context(settings):
         report = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
     except (OSError, ValueError):
         report = {"status": "error", "error": "Saved maintenance report could not be read."}
+    return {"mode": settings.ollama_model_maintenance, "report": report,
+            **maintenance_readiness(settings)}
+
+
+def maintenance_readiness(settings):
     storage = settings.ollama_model_store_path
     free_gib = None
     if storage:
@@ -260,8 +265,7 @@ def maintenance_context(settings):
                 free_gib = round(shutil.disk_usage(storage).free / GIB, 1)
         except OSError:
             pass
-    return {"mode": settings.ollama_model_maintenance, "report": report,
-            "exclusive_worker": settings.worker_exclusive,
+    return {"exclusive_worker": settings.worker_exclusive,
             "single_run": settings.max_concurrent_runs == 1,
             "judge": settings.ollama_model_judge or None,
             "candidates": [x.strip() for x in settings.ollama_model_candidates.split(",") if x.strip()],
@@ -291,7 +295,8 @@ def maintain(session_factory, settings):
         return
     report = {"version": POLICY_VERSION, "checked_at_epoch": now,
               "checked_at": datetime.now(timezone.utc).isoformat(), "mode": settings.ollama_model_maintenance,
-              "status": "checking", "retired": {}, "tested": {}, "download_attempted": {}}
+              "status": "checking", "retired": {}, "tested": {}, "download_attempted": {},
+              "worker_readiness": maintenance_readiness(settings)}
     with session_factory() as session:
         if not idle(session):
             return
