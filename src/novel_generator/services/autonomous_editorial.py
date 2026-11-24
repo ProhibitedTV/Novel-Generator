@@ -1061,6 +1061,9 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair returned to an earlier rejected version. Saved prose is preserved; change the repair model before resuming.")
     size_regression = _repair_size_regression(before, candidate, issues)
     if size_regression:
+        if repair_kind != "chapter":
+            retry_as_chapter(size_regression)
+            return
         _record(session, run, "autonomous_repair_rejected", {
             "message": "Rejected a destructive repair candidate; saved prose remains unchanged.",
             "chapter_number": chapter.chapter_number, "phase": phase,
