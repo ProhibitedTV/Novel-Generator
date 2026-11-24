@@ -8,19 +8,20 @@
   <script defer src="{{ url_for('static', path='ui.js') }}"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
   <header class="shell-header">
     <div class="brand-block">
       <a class="brand" href="/">Novel Generator</a>
       <p class="brand-copy">Self-hosted long-form fiction generation for Ollama.</p>
     </div>
-    <nav class="shell-nav">
+    <nav class="shell-nav" aria-label="Main navigation">
       <a class="{{ 'is-active' if active_nav == 'dashboard' else '' }}" href="/">Dashboard</a>
       <a class="{{ 'is-active' if active_nav == 'projects' else '' }}" href="/projects">Projects</a>
       <a class="{{ 'is-active' if active_nav == 'provider' else '' }}" href="/settings/provider">Provider</a>
       <a class="{{ 'is-active' if active_nav == 'images' else '' }}" href="/settings/images">Images</a>
     </nav>
   </header>
-  <main class="shell-main">
+  <main class="shell-main" id="main-content" tabindex="-1">
     {% if message %}
       <div class="notice notice-{{ message_tone|default('success') }}" role="status">{{ message }}</div>
     {% endif %}

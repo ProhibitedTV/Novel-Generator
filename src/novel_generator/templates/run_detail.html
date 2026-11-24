@@ -32,6 +32,7 @@
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
+      <a class="button secondary" data-open-reader href="/runs/{{ run.id }}/read"{% if not run.chapters|selectattr("content")|list %} hidden{% endif %}>Read saved chapters</a>
       {% if awaiting_outline_approval %}
         <form method="post" action="/runs/{{ run.id }}/approve-outline">
           <button type="submit">Approve and continue</button>
@@ -40,19 +41,23 @@
           <button class="secondary" type="submit">Cancel and edit project</button>
         </form>
       {% elif run.status.value in ["queued", "running"] %}
-        <form method="post" action="/runs/{{ run.id }}/cancel" data-confirm="Stop this run? Saved chapter checkpoints will be retained.">
-          <button class="danger" type="submit">Cancel run</button>
-        </form>
+        <details class="run-management-actions compact-details"><summary>Run actions</summary>
+          <form method="post" action="/runs/{{ run.id }}/cancel" data-confirm="Stop this run? Saved chapter checkpoints will be retained.">
+            <button class="danger" type="submit">Cancel run</button>
+          </form>
+        </details>
       {% elif show_rerun %}
         {% if editorial_next_step.resume_available %}
           <form method="post" action="/runs/{{ run.id }}/resume"><button type="submit">Resume saved run</button></form>
         {% endif %}
-        <form method="post" action="/runs/{{ run.id }}/rerun">
-          <button type="submit">Run again with same settings</button>
-        </form>
-        <form method="post" action="/runs/{{ run.id }}/delete" data-confirm="Delete this run, including its saved chapters, event log, and exported files?">
-          <button class="danger" type="submit">Delete run</button>
-        </form>
+        <details class="run-management-actions compact-details"><summary>More run actions</summary>
+          <form method="post" action="/runs/{{ run.id }}/rerun">
+            <button class="secondary" type="submit">Run again with same settings</button>
+          </form>
+          <form method="post" action="/runs/{{ run.id }}/delete" data-confirm="Delete this run, including its saved chapters, event log, and exported files?">
+            <button class="danger" type="submit">Delete run</button>
+          </form>
+        </details>
       {% endif %}
     </div>
   </div>
@@ -246,7 +251,7 @@
     </details>
   </section>
   <div class="workspace-shortcuts">
-    <a class="button" href="/runs/{{ run.id }}/read">Read saved chapters</a>
+    <a class="button" data-open-reader href="/runs/{{ run.id }}/read"{% if not run.chapters|selectattr("content")|list %} hidden{% endif %}>Read saved chapters</a>
     <a class="button secondary" href="#book-editorial">Check editorial readiness</a>
     <a class="button secondary" href="#book-exports">Download files</a>
   </div>

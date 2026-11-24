@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Read {{ run.book_title }} — Novel Generator{% endblock %}
 {% block content %}
-<section class="panel reader-shell">
+<section class="panel reader-shell" data-reader data-reader-run="{{ run.id }}" data-reader-chapter="{{ selected.chapter_number if selected else '' }}">
   <header class="section-header">
     <div class="section-header-copy">
       <p class="eyebrow">Manuscript reader</p>
@@ -15,24 +15,32 @@
   </header>
   <p class="reader-note">You are reading saved draft prose, not a certified publication export. Refresh to see newer saved revisions.</p>
   {% if selected %}
+    <div class="reader-controls" data-reader-controls hidden>
+      <div class="reader-control-group"><label for="reader-font">Text size</label><select id="reader-font" data-reader-font><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option><option value="extra">Extra large</option></select></div>
+      <div class="reader-control-group"><label for="reader-theme">Page color</label><select id="reader-theme" data-reader-theme><option value="light">Light</option><option value="paper">Warm paper</option><option value="dark">Dark</option></select></div>
+      <button type="button" class="secondary reader-focus" data-reader-focus aria-pressed="false">Focus mode</button>
+    </div>
     <div class="reader-layout">
       <aside class="reader-toc">
-        <h2>Contents</h2>
+        <details data-reader-contents open>
+        <summary>Contents · {{ chapters|length }} saved</summary>
         <ol>
           {% for item in chapters %}
             <li><a href="/runs/{{ run.id }}/read?chapter={{ item.chapter_number }}"{% if item.chapter_number == selected.chapter_number %} aria-current="page"{% endif %}><span>{{ item.chapter_number }}.</span> {{ item.title }}</a></li>
           {% endfor %}
         </ol>
+        </details>
       </aside>
-      <article class="reader-page">
+      <article class="reader-page" id="chapter-start" aria-labelledby="reader-chapter-title">
         <nav class="reader-pagination" aria-label="Chapter navigation">
           {% if previous %}<a class="button secondary" href="/runs/{{ run.id }}/read?chapter={{ previous.chapter_number }}">Previous</a>{% else %}<span></span>{% endif %}
-          <span class="field-note">Chapter {{ selected.chapter_number }}</span>
+          <span class="field-note">Chapter {{ selected.chapter_number }} of {{ run.requested_chapters }}</span>
           {% if following %}<a class="button secondary" href="/runs/{{ run.id }}/read?chapter={{ following.chapter_number }}">Next</a>{% else %}<span></span>{% endif %}
         </nav>
-        <h2>{{ selected.title }}</h2>
+        <h2 id="reader-chapter-title">{{ selected.title }}</h2>
         <p class="field-note">{{ selected.status.value }} · {{ prose.split()|length }} words</p>
         <div class="reader-prose">{{ prose }}</div>
+        <p class="reader-end-note">{% if following %}Continue to the next saved chapter.{% elif chapters|length < run.requested_chapters %}You have reached the last currently saved chapter. More may become available as the run progresses.{% else %}You have reached the end of the saved manuscript.{% endif %}</p>
         <nav class="reader-pagination" aria-label="Continue reading">
           {% if previous %}<a class="button secondary" href="/runs/{{ run.id }}/read?chapter={{ previous.chapter_number }}">Previous chapter</a>{% else %}<span></span>{% endif %}
           <a href="/runs/{{ run.id }}#chapter-{{ selected.chapter_number }}">Editorial details</a>
