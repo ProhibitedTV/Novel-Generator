@@ -1267,3 +1267,58 @@ def test_bookwide_sweep_budget_scales_with_chapters_without_waiving_limit(monkey
     assert editor._final_sweep_budget(settings, chapters[:1]) == 2
     with pytest.raises(editor.AutonomousQualityError, match="bounded automatic editorial rounds"):
         editor._apply_final_repairs(None, None, chapters, {}, [], settings, None, 48)
+
+
+def test_final_reconciliation_retries_canon_collision_before_checkpoint(configured_environment, monkeypatch):
+    calls = []
+    def chat(session, run, client, provider, model, messages, *, stage, **kwargs):
+        if stage == "chapter_summary":
+            return "The ledger is safe."
+        assert stage == "continuity_update"
+        calls.append(messages)
+        update = ChapterContinuityUpdate(
+            chapter_outcome="Ledger secured", current_patch_status="Safe", world_state="Safe",
+            timeline_entry="Ledger secured", open_threads=[], open_promises_by_name={},
+            memory_damage={}, trust_fractures={}, civilian_pressure_points=[], emotional_open_loops={},
+        ).model_dump()
+        if len(calls) == 1:
+            update["new_entities_introduced"] = [{"name": "Conflicting claimant", "kind": "person", "aliases": ["Iris"]}]
+        return json.dumps(update)
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.story_bible = {**run.story_bible, "canon_registry": [
+            {"name": "Iris", "kind": "person"}]}
+        session.commit()
+        editor._refresh_metadata(session, run, run.chapters, object())
+        assert len(calls) == 2
+        assert "Canonical entity collision" in calls[1][-1]["content"]
+        assert run.chapters[0].continuity_update["new_entities_introduced"] == []
+        assert len(editor._events(run, "autonomous_metadata_refreshed")) == 1
+        assert len(editor._events(run, "continuity_output_rejected")) == 1
+
+
+def test_legacy_invalid_metadata_checkpoint_is_reextracted(configured_environment, monkeypatch):
+    calls = install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.story_bible = {**run.story_bible, "canon_registry": [
+            {"name": "Iris", "kind": "person"}]}
+        session.commit()
+        chapter = run.chapters[0]
+        ledger = pipeline._build_initial_ledger(pipeline._story_bible_from_run(run))
+        chapter.continuity_update = ChapterContinuityUpdate(
+            chapter_outcome="Ledger secured", current_patch_status="Safe", world_state="Safe",
+            timeline_entry="Ledger secured", open_threads=[], open_promises_by_name={},
+            memory_damage={}, trust_fractures={}, civilian_pressure_points=[], emotional_open_loops={},
+            new_entities_introduced=[{"name": "Conflicting claimant", "kind": "person", "aliases": ["Iris"]}],
+        ).model_dump(exclude_unset=True)
+        editor._record(session, run, "autonomous_metadata_refreshed", {
+            "chapter_number": 1,
+            "fingerprint": editor._hash({"contract": 2, "prose": chapter.content, "prior_state": ledger.model_dump()}),
+            "metadata_hash": editor._hash([chapter.summary, chapter.continuity_update]),
+        })
+        editor._refresh_metadata(session, run, run.chapters, object())
+        assert calls.count(("continuity_update", 1)) == 1
+        assert len(editor._events(run, "autonomous_metadata_invalidated")) == 1
+        assert chapter.continuity_update["new_entities_introduced"] == []

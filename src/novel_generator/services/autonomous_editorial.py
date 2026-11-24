@@ -1147,6 +1147,25 @@ def _refresh_metadata(session, run, chapters, client):
         cached = any(item.get("fingerprint") == fingerprint and item.get("chapter_number") == chapter.chapter_number
                      and item.get("metadata_hash") == metadata_hash
                      for item in _events(run, "autonomous_metadata_refreshed"))
+        def parse_snapshot(raw):
+            update = parse_continuity_update(raw)
+            if not set(LIVE_SNAPSHOT_FIELDS) <= update.model_fields_set:
+                raise ValueError("Automatic reconciliation requires explicit values for all live continuity fields.")
+            # Validate the actual merge before the extraction is checkpointed.
+            # This keeps schema-valid but conflicting canon inside the bounded
+            # structured-output retry loop instead of poisoning future resumes.
+            pipeline._ledger_from_update(ledger, update)
+            return update
+
+        if cached and chapter.summary and chapter.continuity_update:
+            try:
+                update = parse_snapshot(json.dumps(chapter.continuity_update))
+            except (ValueError, RuntimeError):
+                cached = False
+                _record(session, run, "autonomous_metadata_invalidated", {
+                    "message": "Saved continuity checkpoint cannot be merged; extracting fresh metadata from unchanged prose.",
+                    "chapter_number": chapter.chapter_number,
+                })
         if not cached or not chapter.summary or not chapter.continuity_update:
             provider, model = pipeline._resolve_stage_route(client, run, "chapter_summary")
             refreshed_summary = pipeline._supervised_provider_chat(
@@ -1159,12 +1178,6 @@ def _refresh_metadata(session, run, chapters, client):
             if not refreshed_summary:
                 raise AutonomousQualityError("Automatic reconciliation returned an empty summary.")
             provider, model = pipeline._resolve_stage_route(client, run, "continuity_update")
-
-            def parse_snapshot(raw):
-                update = parse_continuity_update(raw)
-                if not set(LIVE_SNAPSHOT_FIELDS) <= update.model_fields_set:
-                    raise ValueError("Automatic reconciliation requires explicit values for all live continuity fields.")
-                return update
 
             update = pipeline._generate_structured_output(
                 session, run, client, provider, model,
@@ -1183,8 +1196,6 @@ def _refresh_metadata(session, run, chapters, client):
                 "chapter_number": chapter.chapter_number, "fingerprint": fingerprint,
                 "metadata_hash": _hash([chapter.summary, chapter.continuity_update]),
             })
-        else:
-            update = parse_continuity_update(json.dumps(chapter.continuity_update))
         ledger = apply_continuity_lifecycle(pipeline._ledger_from_update(ledger, update), update)
         ledger = pipeline._ledger_with_chapter_mode(ledger, chapter.chapter_number, pipeline._outline_entry(run, chapter.chapter_number).chapter_mode)
     run.continuity_ledger = ledger.model_dump()
