@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import pytest
 
 from novel_generator.dependencies import get_session_factory
 from novel_generator.models import Artifact, ChapterStatus, RunStatus
@@ -929,7 +930,8 @@ def test_completed_run_next_step_links_compare_when_available(client, monkeypatc
     assert "2 completed drafts" in response.text
 
 
-def test_completed_run_can_create_publication_export(client, monkeypatch) -> None:
+@pytest.mark.parametrize("complete", [True, False])
+def test_completed_run_can_create_publication_export(client, monkeypatch, complete) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
     _, run_id = seed_project_and_run()
 
@@ -939,6 +941,8 @@ def test_completed_run_can_create_publication_export(client, monkeypatch) -> Non
         assert run is not None
         run.status = RunStatus.COMPLETED
         run.current_step = "completed"
+        if complete:
+            run.requested_chapters = 1
         run.outline = [
             {
                 "chapter_number": 1,
@@ -984,6 +988,10 @@ def test_completed_run_can_create_publication_export(client, monkeypatch) -> Non
     with session_factory() as session:
         run = get_run(session, run_id)
         assert run is not None
+        if not complete:
+            assert not any(artifact.kind == "publication-docx" for artifact in run.artifacts)
+            assert not any(event.event_type == "publication_export_created" for event in run.events)
+            return
         publication_artifact = next(
             artifact for artifact in run.artifacts if artifact.kind == "publication-docx"
         )

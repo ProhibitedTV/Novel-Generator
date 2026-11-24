@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from docx import Document
 
 from novel_generator.models import ChapterDraft, GenerationRun, Project
@@ -285,3 +286,25 @@ def test_publication_export_rejects_placeholder_front_matter(tmp_path) -> None:
         assert "bracketed placeholders" in str(exc)
     else:
         raise AssertionError("placeholder front matter should be rejected")
+
+
+@pytest.mark.parametrize("profile", ["ebook_markdown", "print_6x9"])
+@pytest.mark.parametrize("numbers,contents", [
+    ([1], ["First chapter."]),
+    ([1, 3], ["First chapter.", "Third chapter."]),
+    ([1, 1], ["First chapter.", "Duplicate chapter."]),
+    ([2, 1], ["Second chapter.", "First chapter."]),
+    ([1, 2], ["First chapter.", "   "]),
+])
+def test_publication_export_rejects_incomplete_manuscript(tmp_path, profile, numbers, contents):
+    project = Project(title="Test book", premise="Private plan")
+    run = GenerationRun(id="test-run", requested_chapters=2)
+    chapters = [
+        ChapterDraft(chapter_number=number, title=f"Part {number}", content=content)
+        for number, content in zip(numbers, contents)
+    ]
+    with pytest.raises(ValueError, match="Manuscript"):
+        export_publication_artifact(
+            tmp_path, project, run, chapters, profile, front_matter=_front_matter()
+        )
+    assert not (tmp_path / run.id).exists()
