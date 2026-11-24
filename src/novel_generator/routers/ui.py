@@ -551,6 +551,24 @@ def _autonomous_current_acceptance(run: GenerationRun, coverage=None) -> bool:
         and 0.9 * run.target_word_count <= sum(counts) <= 1.1 * run.target_word_count)
 
 
+def _finished_manuscript_download(run: GenerationRun, settings: Settings):
+    """Offer a single primary download only for verified current exports."""
+    if run.status != RunStatus.COMPLETED or run.quality_profile != "autonomous":
+        return None
+    if not _autonomous_current_acceptance(run):
+        return None
+    artifacts = {artifact.kind: artifact for artifact in run.artifacts if artifact.kind in {"markdown", "docx"}}
+    if set(artifacts) != {"markdown", "docx"}:
+        return None
+    from ..services.export_integrity import verify_manuscript_exports
+    integrity = verify_manuscript_exports(run, _sorted_run_chapters(run), {
+        kind: str(settings.artifacts_dir / artifact.relative_path) for kind, artifact in artifacts.items()
+    })
+    if not all(integrity.get(kind, {}).get("matches_current_source") is True for kind in artifacts):
+        return None
+    return artifacts["docx"]
+
+
 def _run_health_context(run: GenerationRun) -> dict[str, Any]:
     current_stage, next_stage = _stage_context(run)
     latest_event = _latest_event_summary(run)
@@ -3757,6 +3775,7 @@ def run_detail(
             "outline_review": outline_review,
             "chapter_review_cards": chapter_review_cards,
             "book_completion": _book_completion_context(run),
+            "finished_manuscript_download": _finished_manuscript_download(run, settings),
             "manuscript_edition": _manuscript_edition_context(run, chapter_review_cards),
             "editorial_next_step": _run_editorial_next_step_context(run, chapter_review_cards),
             "editorial_agenda": agenda_summary(run),

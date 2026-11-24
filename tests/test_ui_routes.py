@@ -724,7 +724,7 @@ def test_run_detail_shows_quality_profile(client, monkeypatch) -> None:
     assert "Strict - Most editorial scrutiny" in response.text
 
 
-def test_completed_autonomous_run_shows_automatic_acceptance(client, monkeypatch) -> None:
+def test_completed_autonomous_run_without_evidence_requires_verification(client, monkeypatch) -> None:
     monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
     _, run_id = seed_project_and_run(quality_profile="autonomous")
     with get_session_factory()() as session:
@@ -733,7 +733,8 @@ def test_completed_autonomous_run_shows_automatic_acceptance(client, monkeypatch
         session.commit()
     response = client.get(f"/runs/{run_id}")
     assert response.status_code == 200
-    assert "Automatic editorial checks passed" in response.text
+    assert "Automatic editorial checks passed" not in response.text
+    assert "Editorial verification required" in response.text
     assert "Automatic editing" in response.text
 
 
