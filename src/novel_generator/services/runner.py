@@ -17,6 +17,7 @@ from .longform_runtime import install_longform_runtime
 from .pipeline import process_run_safe
 from .providers import ProviderManager
 from .run_recovery import release_provider_retries
+from .worker_heartbeat import maintain_worker_heartbeat
 from .publication_guard_runtime import install_publication_guard_runtime
 from .recall_runtime import install_recall_runtime
 from .structured_schema_runtime import install_structured_schema_runtime
@@ -98,7 +99,11 @@ def run_worker_loop(settings: Settings) -> None:
             session.commit()
             client = ProviderManager(settings, provider_configs)
             try:
-                process_run_safe(session, run, settings, client)
+                with maintain_worker_heartbeat(
+                    session_factory, run_id, worker_id,
+                    interval_seconds=min(30.0, settings.run_stale_after_seconds / 3),
+                ):
+                    process_run_safe(session, run, settings, client)
             except Exception:
                 # Ordinary provider and quality failures are handled in the
                 # pipeline. If persistence itself fails, let the supervisor
