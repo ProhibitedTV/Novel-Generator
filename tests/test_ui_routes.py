@@ -667,7 +667,7 @@ def test_run_detail_surfaces_fallback_recovery_guidance(client, monkeypatch) -> 
     response = client.get(f"/runs/{run_id}")
 
     assert response.status_code == 200
-    assert "Run confidence" in response.text
+    assert "What needs your attention" in response.text
     assert "Running: Outline" in response.text
     assert "Outline chunk 1-8 was unusable after repair" in response.text
     assert "outline chunk fallback" in response.text
