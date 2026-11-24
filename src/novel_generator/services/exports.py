@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 import re
+import tempfile
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -201,6 +203,24 @@ def _normalize_front_matter(front_matter: PublicationFrontMatter | dict[str, str
     return payload
 
 
+def _atomic_write(destination: Path, writer) -> None:
+    """Render next to the destination, then replace only after a complete write."""
+    fd, name = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
+    os.close(fd)
+    temporary = Path(name)
+    try:
+        writer(temporary)
+        with temporary.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_text(destination: Path, text: str) -> None:
+    _atomic_write(destination, lambda temporary: temporary.write_text(text, encoding="utf-8"))
+
+
 def export_run_artifacts(
     artifacts_dir: Path,
     project: Project,
@@ -216,11 +236,11 @@ def export_run_artifacts(
 
     markdown_name = "manuscript.md"
     markdown_path = run_dir / markdown_name
-    markdown_path.write_text(render_markdown(project, chapters), encoding="utf-8")
+    _atomic_text(markdown_path, render_markdown(project, chapters))
 
     docx_name = "manuscript.docx"
     docx_path = run_dir / docx_name
-    render_docx(project, chapters, docx_path)
+    _atomic_write(docx_path, lambda temporary: render_docx(project, chapters, temporary))
 
     artifacts = [
         Artifact(
@@ -239,7 +259,7 @@ def export_run_artifacts(
     if qa_report_markdown is not None:
         qa_name = "qa-report.md"
         qa_path = run_dir / qa_name
-        qa_path.write_text(qa_report_markdown, encoding="utf-8")
+        _atomic_text(qa_path, qa_report_markdown)
         artifacts.append(
             Artifact(
                 kind="qa-report",
@@ -251,7 +271,7 @@ def export_run_artifacts(
     if developmental_rewrite_markdown is not None:
         rewrite_name = "developmental-rewrite-report.md"
         rewrite_path = run_dir / rewrite_name
-        rewrite_path.write_text(developmental_rewrite_markdown, encoding="utf-8")
+        _atomic_text(rewrite_path, developmental_rewrite_markdown)
         artifacts.append(
             Artifact(
                 kind="developmental-rewrite-report",
@@ -263,7 +283,7 @@ def export_run_artifacts(
     if revised_outline_markdown is not None:
         outline_name = "revised-outline.md"
         outline_path = run_dir / outline_name
-        outline_path.write_text(revised_outline_markdown, encoding="utf-8")
+        _atomic_text(outline_path, revised_outline_markdown)
         artifacts.append(
             Artifact(
                 kind="revised-outline",
@@ -275,7 +295,7 @@ def export_run_artifacts(
     if developmental_qa_markdown is not None:
         qa_comparison_name = "developmental-qa-comparison.md"
         qa_comparison_path = run_dir / qa_comparison_name
-        qa_comparison_path.write_text(developmental_qa_markdown, encoding="utf-8")
+        _atomic_text(qa_comparison_path, developmental_qa_markdown)
         artifacts.append(
             Artifact(
                 kind="developmental-qa-report",
@@ -328,7 +348,8 @@ def export_publication_artifact(
     destination = run_dir / profile.filename
 
     if profile.output_format == "markdown":
-        destination.write_text(
+        _atomic_text(
+            destination,
             render_publication_markdown(
                 project,
                 chapters,
@@ -336,18 +357,17 @@ def export_publication_artifact(
                 include_ai_disclosure=include_ai_disclosure,
                 front_matter=publication_front_matter,
             ),
-            encoding="utf-8",
         )
         content_type = "text/markdown"
     elif profile.output_format == "docx":
-        render_publication_docx(
+        _atomic_write(destination, lambda temporary: render_publication_docx(
             project,
             chapters,
-            destination,
+            temporary,
             profile,
             include_ai_disclosure=include_ai_disclosure,
             front_matter=publication_front_matter,
-        )
+        ))
         content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     else:
         raise ValueError("Unsupported export profile format.")

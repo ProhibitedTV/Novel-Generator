@@ -87,3 +87,46 @@ def test_completion_rejects_incomplete_source_before_export(configured_environme
         assert run.status != RunStatus.COMPLETED
         assert not any(event.event_type == "run_completed" for event in run.events)
         assert [chapter.content for chapter in chapters] == source
+
+
+@pytest.mark.parametrize("persistent", [False, True])
+def test_export_write_failure_retries_and_preserves_prose(configured_environment, monkeypatch, persistent):
+    original = pipeline.export_run_artifacts
+    calls = []
+    def export(*args, **kwargs):
+        calls.append(1)
+        if persistent or len(calls) == 1:
+            raise OSError("Temporary filesystem error")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(pipeline, "export_run_artifacts", export)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        run.quality_profile = "balanced"
+        source = [c.content for c in run.chapters]
+        session.commit()
+        monkeypatch.setattr(pipeline, "process_run", lambda *args: pipeline._export_completed_run(
+            session, run, run.chapters, get_settings(), ManuscriptQaReport()))
+        pipeline.process_run_safe(session, run, get_settings(), object())
+        assert run.status == (RunStatus.FAILED if persistent else RunStatus.COMPLETED)
+        assert len(calls) == 2
+        assert len([ev for ev in run.events if ev.event_type == "artifact_export_write_failed"]) == (2 if persistent else 1)
+        assert [c.content for c in run.chapters] == source
+        assert any(ev.event_type == "run_completed" for ev in run.events) is (not persistent)
+
+
+def test_cancellation_during_write_failure_prevents_retry(configured_environment, monkeypatch):
+    with get_session_factory()() as session:
+        run = make_run(session)
+        calls = []
+        def export(*args, **kwargs):
+            calls.append(1)
+            run.cancel_requested = True
+            session.commit()
+            raise OSError("Temporary filesystem error")
+        monkeypatch.setattr(pipeline, "export_run_artifacts", export)
+        monkeypatch.setattr(pipeline, "process_run", lambda *args: pipeline._export_completed_run(
+            session, run, run.chapters, get_settings(), ManuscriptQaReport()))
+        pipeline.process_run_safe(session, run, get_settings(), object())
+        assert run.status == RunStatus.CANCELED
+        assert len(calls) == 1
+        assert not any(ev.event_type == "run_completed" for ev in run.events)

@@ -3183,10 +3183,22 @@ def _export_completed_run(session, run, completed_chapters, settings, qa_report,
     from .export_integrity import verify_manuscript_exports
     for export_attempt in range(1, 3):
         _ensure_not_canceled(session, run)
-        artifacts = export_run_artifacts(
-            settings.artifacts_dir, run.project, run, completed_chapters,
-            qa_markdown, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown,
-        )
+        try:
+            artifacts = export_run_artifacts(
+                settings.artifacts_dir, run.project, run, completed_chapters,
+                qa_markdown, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown,
+            )
+        except OSError as exc:
+            record_event(session, run, "artifact_export_write_failed", {
+                "message": "Manuscript file write failed; retrying once." if export_attempt == 1 else
+                           "Manuscript file write failed again; saved prose is preserved.",
+                "attempt": export_attempt, "error": str(exc),
+            })
+            session.commit()
+            _ensure_not_canceled(session, run)
+            if export_attempt == 2:
+                raise RuntimeError("Manuscript export write failed after automatic retry; saved prose is preserved.") from exc
+            continue
         integrity = verify_manuscript_exports(run, completed_chapters, {
             artifact.kind: str(settings.artifacts_dir / artifact.relative_path) for artifact in artifacts
         })
