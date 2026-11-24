@@ -382,7 +382,7 @@ def test_project_detail_renders_quality_profile_controls_and_preflight(client, m
     assert 'id="edit-project"' in response.text
     assert "Full project brief" in response.text
     assert "Estimated model calls" in response.text
-    assert "46 minimum" in response.text
+    assert "52 planned" in response.text
     assert "Stage attempt ledger" in response.text
     assert "Checkpoint resume" in response.text
     assert 'data-run-queue-form' in response.text
@@ -392,6 +392,9 @@ def test_project_detail_renders_quality_profile_controls_and_preflight(client, m
     assert 'data-run-length-preset="64"' in response.text
     assert 'data-run-estimate' in response.text
     assert 'data-run-estimate-calls' in response.text
+    assert 'data-run-estimate-pairs>6<' in response.text
+    assert 'data-run-local-budget-preset' in response.text
+    assert 'data-run-budget-call-time' in response.text
 
 
 def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch) -> None:
@@ -403,7 +406,8 @@ def test_project_detail_preflight_warns_for_64_chapter_runs(client, monkeypatch)
     assert response.status_code == 200
     assert "64 chapters will use 16 outline chunks" in response.text
     assert "High chapter counts make checkpoint resume" in response.text
-    assert "661 minimum" in response.text
+    assert "2677 planned" in response.text
+    assert "2,016 full chapter-pair comparisons" in response.text
 
 
 def test_project_detail_preflight_chunks_32_chapter_runs(client, monkeypatch) -> None:
@@ -414,7 +418,7 @@ def test_project_detail_preflight_chunks_32_chapter_runs(client, monkeypatch) ->
 
     assert response.status_code == 200
     assert "32 chapters will use 8 outline chunks" in response.text
-    assert "333 minimum" in response.text
+    assert "829 planned" in response.text
 
 
 def test_notice_tone_renders_warning_notice_class(client, monkeypatch) -> None:

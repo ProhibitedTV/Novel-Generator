@@ -1533,7 +1533,7 @@ def _run_preflight_context(
     profile = _quality_profile_context(values.get("quality_profile"))
     if profile["value"] == "autonomous":
         pause_after_outline = False
-    developmental_rewrite_enabled = bool(values.get("developmental_rewrite_enabled")) or profile["value"] in {"strict", "publication"}
+    developmental_rewrite_enabled = bool(values.get("developmental_rewrite_enabled")) or profile["value"] in {"strict", "publication", "autonomous"}
     task_routing = _task_routing_payload(values)
     route_disclosure = _route_privacy_summary(provider_name, model_name, task_routing)
     config = configs_by_name.get(provider_name)
@@ -1552,8 +1552,10 @@ def _run_preflight_context(
         estimated_model_calls += 1
     if profile["value"] == "publication":
         estimated_model_calls += requested_chapters * 2
+    pair_reviews = 0
     if profile["value"] == "autonomous":
-        estimated_model_calls += requested_chapters * 4 + 1
+        pair_reviews = requested_chapters * (requested_chapters - 1) // 2
+        estimated_model_calls += requested_chapters * 4 + 1 + pair_reviews
 
     warnings: list[dict[str, str]] = []
     if profile["value"] == "autonomous":
@@ -1585,6 +1587,8 @@ def _run_preflight_context(
                 "message": f"{requested_chapters} chapters will use {outline_chunks} outline chunks to reduce long-outline failures.",
             }
         )
+    if pair_reviews >= 120:
+        warnings.append({"tone": "warning", "message": f"Autonomous review schedules {pair_reviews:,} full chapter-pair comparisons per clean audit sweep. Fewer chapters reduce this quadratic workload; retries and repairs can add substantial time."})
     if requested_chapters >= 64:
         warnings.append(
             {
@@ -1625,12 +1629,14 @@ def _run_preflight_context(
         "warnings": warnings,
         "outline_chunks": outline_chunks,
         "estimated_model_calls": estimated_model_calls,
+        "pair_reviews": pair_reviews,
         "rows": [
             {"label": "Provider route", "value": f"{provider_label} / {model_name or '-'}"},
             {"label": "Model reachability", "value": "Reachable" if provider_status and provider_status.reachable else "Unavailable"},
             {"label": "Model status", "value": model_status},
             {"label": "Outline chunks", "value": str(outline_chunks)},
-            {"label": "Estimated model calls", "value": f"{estimated_model_calls} minimum"},
+            {"label": "Estimated model calls", "value": f"{estimated_model_calls} planned (before retries)"},
+            {"label": "Full chapter-pair reviews", "value": str(pair_reviews) if profile["value"] == "autonomous" else "Not required"},
             {"label": "Quality profile", "value": profile["label"]},
             {"label": "Target length", "value": f"{requested_chapters} chapters / {target_word_count} words"},
         ],

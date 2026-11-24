@@ -92,6 +92,9 @@ function setupRunLengthControls(root) {
     const outlineNode = form.querySelector("[data-run-estimate-outline]");
     const callsNode = form.querySelector("[data-run-estimate-calls]");
     const averageNode = form.querySelector("[data-run-estimate-average]");
+    const pairNode = form.querySelector("[data-run-estimate-pairs]");
+    const budgetInput = form.querySelector("[data-run-budget-hours]");
+    const budgetNode = form.querySelector("[data-run-budget-call-time]");
     const presetButtons = Array.from(form.querySelectorAll("[data-run-length-preset]"));
     const outlineThreshold = 32;
     const outlineChunkSize = 8;
@@ -115,17 +118,26 @@ function setupRunLengthControls(root) {
       const maxWords = readInt(maxInput, minWords || 0);
       const profile = form.querySelector('[name="quality_profile"]:checked')?.value;
       const outlineChunks = profile === "autonomous" ? Math.ceil(chapters / 4) : outlineChunksFor(chapters);
-      const developmentalRewrite = form.querySelector("[data-developmental-rewrite-toggle]")?.checked ? 1 : 0;
+      const developmentalRewrite = (["strict", "publication", "autonomous"].includes(profile) || form.querySelector("[data-developmental-rewrite-toggle]")?.checked) ? 1 : 0;
+      const pairReviews = profile === "autonomous" ? chapters * (chapters - 1) / 2 : 0;
       const finalEditCalls = chapters + 1;
       const additionalCalls = profile === "autonomous" ? chapters * 4 + 1 : profile === "publication" ? chapters * 2 : 0;
-      const minimumCalls = 1 + outlineChunks + chapters * 5 + 1 + developmentalRewrite + finalEditCalls + additionalCalls;
+      const minimumCalls = 1 + outlineChunks + chapters * 5 + 1 + developmentalRewrite + finalEditCalls + additionalCalls + pairReviews;
       const average = chapters > 0 && targetWords > 0 ? Math.round(targetWords / chapters) : 0;
 
       if (outlineNode) {
         outlineNode.textContent = String(outlineChunks);
       }
       if (callsNode) {
-        callsNode.textContent = `${minimumCalls} minimum`;
+        callsNode.textContent = `${minimumCalls} planned`;
+      }
+      if (pairNode) pairNode.textContent = String(pairReviews);
+      if (budgetNode) {
+        const hours = readInt(budgetInput, 120);
+        // Reserve 25% for retries, repairs and interruptions; this is an arithmetic
+        // planning threshold, not a prediction of model latency or completion.
+        const minutes = hours * 60 * 0.75 / minimumCalls;
+        budgetNode.textContent = `${minutes.toFixed(1)} min/call`;
       }
       if (averageNode) {
         const rangeNote = minWords && maxWords ? ` (${minWords}-${maxWords})` : "";
@@ -151,7 +163,17 @@ function setupRunLengthControls(root) {
       });
     });
 
-    [chapterInput, targetInput, minInput, maxInput, form.querySelector("[data-developmental-rewrite-toggle]"), ...form.querySelectorAll('[name="quality_profile"]')].forEach((node) => {
+    form.querySelectorAll("[data-run-local-budget-preset]").forEach(button => {
+      button.addEventListener("click", () => {
+        if (!chapterInput || !targetInput || !minInput || !maxInput) return;
+        chapterInput.value = button.dataset.chapters;
+        targetInput.value = button.dataset.words;
+        minInput.value = button.dataset.minWords;
+        maxInput.value = button.dataset.maxWords;
+        sync();
+      });
+    });
+    [chapterInput, targetInput, minInput, maxInput, budgetInput, form.querySelector("[data-developmental-rewrite-toggle]"), ...form.querySelectorAll('[name="quality_profile"]')].forEach((node) => {
       node?.addEventListener("input", sync);
       node?.addEventListener("change", sync);
     });
