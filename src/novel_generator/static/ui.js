@@ -1,4 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
+  setupWorkspaceNavigation(document);
   setupConfirmActions(document);
   setupModelPickers(document);
   setupRunLengthControls(document);
@@ -1569,4 +1570,59 @@ function setupRunDetail() {
       source.close();
     }
   };
+}
+
+
+// Progressive enhancement: without JavaScript, every section remains readable.
+function setupWorkspaceNavigation(root) {
+  const nav = root.querySelector("[data-workspace-nav]");
+  if (!nav) return;
+  const links = Array.from(nav.querySelectorAll("[data-workspace-link]"));
+  const views = Array.from(root.querySelectorAll("[data-workspace-view]"));
+  if (!links.length || !views.length) return;
+
+  function targetFor(hash) {
+    if (!hash || hash === "#") return null;
+    try {
+      return document.getElementById(decodeURIComponent(hash.slice(1)));
+    } catch {
+      return null;
+    }
+  }
+
+  function viewFor(target) {
+    return target?.closest("[data-workspace-view]")?.dataset.workspaceView;
+  }
+
+  function select(view) {
+    if (!links.some(link => link.dataset.workspaceLink === view)) return;
+    views.forEach(panel => { panel.hidden = panel.dataset.workspaceView !== view; });
+    links.forEach(link => {
+      if (link.dataset.workspaceLink === view) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+  }
+
+  function syncFromHash(scroll = false) {
+    const target = targetFor(window.location.hash);
+    select(viewFor(target) || nav.dataset.defaultView || links[0].dataset.workspaceLink);
+    if (scroll && target && viewFor(target)) {
+      // Open any collapsed ancestors of a specific chapter or evidence anchor.
+      for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+        if (parent.tagName === "DETAILS") parent.open = true;
+      }
+      target.scrollIntoView({ block: "start" });
+    }
+  }
+
+  root.addEventListener("click", event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest('a[href^="#"]');
+    if (!link) return;
+    const target = targetFor(link.hash);
+    const view = viewFor(target);
+    if (view) select(view);
+  });
+  window.addEventListener("hashchange", () => syncFromHash(true));
+  syncFromHash(Boolean(window.location.hash));
 }
