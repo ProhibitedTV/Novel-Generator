@@ -101,3 +101,15 @@ An interrupted autonomous revision is excluded from the repair budget when
 worker recovery closes its matching unfinished inference attempt. Completed
 repairs and ordinary quality rejections remain charged. Provider transport
 interruption is recorded even when its automatic retry budget is exhausted.
+
+
+### Liveness during slow inference
+
+The worker now writes an owner-scoped heartbeat in a separate short database
+transaction while processing a run. It does not touch prose, editorial evidence,
+or the run's general modification timestamp. Pulses stop when processing exits
+or the owner/status changes. A database write failure is logged and retried.
+The dashboard displays elapsed inference time separately: a fresh heartbeat
+does not prove that the provider is generating tokens or that a quality gate
+will pass. Provider timeouts and bounded retry policies remain in effect.
+This does not implement a distributed lease or qualify mixed workers.
