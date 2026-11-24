@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,15 @@ class Settings(BaseSettings):
     ollama_max_retries: int = Field(default=2, ge=0, le=5)
     ollama_num_ctx: int = Field(default=32768, ge=2048, le=262144)
     ollama_adaptive_runtime: bool = True
+    # Opt in only on a dedicated Ollama server. An explicit tag allowlist
+    # limits downloads; no automatic mutation of mutable incumbent tags.
+    ollama_model_maintenance: Literal["off", "recommend", "manage"] = "off"
+    ollama_model_maintenance_hours: int = Field(default=168, ge=1, le=720)
+    ollama_model_candidates: str = ""
+    ollama_model_judge: str = ""
+    ollama_model_store_path: str = ""
+    ollama_model_max_download_gib: int = Field(default=24, ge=1, le=256)
+    ollama_model_disk_reserve_gib: int = Field(default=20, ge=5, le=256)
     ollama_num_predict: int = Field(default=8192, ge=256, le=65536)
     ollama_structured_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     # Reserve bounded generation budgets for manuscript/JSON output. Reasoning

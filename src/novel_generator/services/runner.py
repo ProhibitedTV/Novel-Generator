@@ -86,10 +86,18 @@ def run_worker_loop(settings: Settings) -> None:
                 logger.warning("Recovered %s stale running runs.", stale_count)
             run = claim_next_queued_run(session, worker_id=worker_id)
             session.commit()
-            if run is None:
-                time.sleep(settings.worker_poll_interval_seconds)
-                continue
-            run_id = run.id
+            run_id = run.id if run is not None else None
+
+        if run_id is None:
+            if settings.ollama_model_maintenance != "off":
+                from .model_maintenance import maintain
+                try:
+                    maintain(session_factory, settings)
+                except Exception:
+                    # Maintenance is opportunistic, never a prerequisite for writing.
+                    logger.exception("Optional model maintenance could not run")
+            time.sleep(settings.worker_poll_interval_seconds)
+            continue
 
         with session_factory() as session:
             run = get_run_for_processing(session, run_id)

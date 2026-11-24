@@ -2770,6 +2770,7 @@ def _provider_settings_context(
     page_error: str | None = None,
     provider_status: ProviderCapabilities | None = None,
 ) -> dict[str, Any]:
+    from ..services.model_maintenance import maintenance_context
     provider_config, saved_status, _ = _provider_status(settings, db)
     provider_configs_by_name, provider_statuses_by_name, _ = _provider_catalog(settings, db)
     projects = list_projects(db)
@@ -2809,6 +2810,7 @@ def _provider_settings_context(
         ),
         "setup_steps": _onboarding_steps(provider_config, provider_status or saved_status, projects),
         "model_calibration": _model_calibration_context(db),
+        "model_maintenance": maintenance_context(settings),
         "page_error": page_error,
     }
 

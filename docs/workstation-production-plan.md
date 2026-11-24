@@ -103,3 +103,56 @@ qualified on the target machine.
 References: https://docs.ollama.com/context-length ,
 https://docs.ollama.com/api/ps ,
 https://docs.ollama.com/api-reference/show-model-details .
+
+
+## Optional author model maintenance
+
+Set `OLLAMA_MODEL_MAINTENANCE=recommend` in .env to automatically compare
+installed local models during idle periods. Set `OLLAMA_MODEL_JUDGE` to a
+separate, already installed local model. The worker must use the exclusive
+SQLite lease with a single concurrent run. The default mode is off.
+
+For a dedicated local Ollama server, `OLLAMA_MODEL_MAINTENANCE=manage`
+allows promotion of a better author to the provider default for new projects,
+approved candidate downloads, and deferred digest-checked retirement.
+Use `OLLAMA_MODEL_CANDIDATES` as a comma-separated list of exact official
+library tags; no latest, cloud, custom registry or unreviewed remote tags.
+New remote candidates must be explicitly added to this list. Installed
+local completion models are automatically considered. The controller
+does not scrape the registry or equate a newer release with better fiction.
+
+For downloads, mount the actual host model store read-only into the worker
+(for example, the Windows .ollama/models directory as /ollama-models in
+a local Compose override) and set `OLLAMA_MODEL_STORE_PATH=/ollama-models`.
+The path must contain blobs and manifests. Never map the whole home
+directory or enable direct writes. Set the maximum candidate size and
+free disk reserve using `OLLAMA_MODEL_MAX_DOWNLOAD_GIB` (24 by default)
+and `OLLAMA_MODEL_DISK_RESERVE_GIB` (20 by default). Unknown manifest
+sizes, unsupported registry responses, missing storage visibility and
+insufficient space prevent downloads. Manifest size is a preflight estimate,
+not a disk quota; the server may continue a download after client interruption.
+Do not run downloads alongside other large disk writes. Previously attempted
+exact tags are not automatically downloaded again, to avoid repeated disk use.
+
+Every audition uses synthetic prose tasks and consistency controls, with
+an independent judge and reversed candidate ordering. Candidates must pass
+both continuity controls, win at least two of three tasks in both orderings,
+lose none, and take no more than twice the incumbent's measured writing time.
+These are deliberately conservative screening rules, not proof of superiority
+on an entire novel. Each idle maintenance window tests at most one candidate
+and attempts at most one retired model deletion. Default cadence: weekly.
+A newly queued book is checked before each audition request; a blocking
+inference or download may delay the next worker claim until it returns.
+
+The provider settings page displays the last report, saved in
+artifacts/model-maintenance.json. Promote only the provider's default;
+existing projects, task overrides and all historical run routes remain
+unchanged. Every referenced model, including models used by completed books,
+is protected from deletion. A loaded, digest-changed or unknown model is not
+deleted. Retire only previously replaced defaults and verified downloads
+that lost their audition. Deletion uses Ollama's API, not filesystem blob
+removal. Shared blobs may mean less space is reclaimed than a model's
+logical size. No maintenance operation is required for book generation.
+
+References: https://docs.ollama.com/api/tags ,
+https://docs.ollama.com/api/pull , https://docs.ollama.com/api/delete .
