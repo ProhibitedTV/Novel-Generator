@@ -55,7 +55,7 @@ def apply_edits(text, payload, *, maximum_words):
     return candidate
 
 
-def repair(text, issues, context, generate):
+def repair(text, issues, context, generate, *, validate_candidate=None):
     spans = paragraph_spans(text)
     schema = ChapterRangeEdits.model_json_schema()
     for field in ("start_paragraph", "end_paragraph"):
@@ -91,7 +91,10 @@ def repair(text, issues, context, generate):
     for attempt in range(3):
         raw = generate(messages, attempt + 1)
         try:
-            return apply_edits(text, extract_json_payload(raw), maximum_words=maximum)
+            candidate = apply_edits(text, extract_json_payload(raw), maximum_words=maximum)
+            if validate_candidate is not None:
+                validate_candidate(candidate)
+            return candidate
         except (ValueError, TypeError, KeyError) as exc:
             if attempt == 2:
                 raise ValueError(f"Structural range repair could not produce usable edits: {exc}") from exc
