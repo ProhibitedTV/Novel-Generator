@@ -78,3 +78,44 @@ Both `pipeline_complete` and `autonomous_checks_passed` were true. The final cha
 Two earlier fresh qualifications were interrupted after exposing unsupported ending verdicts and a false continuity repair that treated a character's mistaken belief as established canon. Their databases and editorial backups were retained. The final runtime rejudges invalid reviews without replaying their answers, distinguishes attributed beliefs from facts, includes the author's premise in continuity and whole-book audits, and verifies cross-chapter allegations before their first repair. Live controls accepted the saved coherent setup and mistaken-belief case while retaining deliberately missing endings and an objective signing-date contradiction.
 
 This is evidence of unattended execution through export for a small literary-western sample. The completed source-aware handbook qualification used checkpoint resumes during development. Neither sample proves universal genre quality, publication readiness, or completion of the separate 24-chapter, 60,000-word novel. The production worker resumed after isolated qualification and continues that novel from its preserved chapters.
+
+
+## Gemma 4 26B-A4B author audition (unqualified)
+
+The new model-specific profile activates only for `gemma4:26b-a4b` and
+`gemma4:26b` on Ollama, not floating latest tags or other providers. See the
+[official model card](https://gemma.ai/models/gemma-4/model-card/) and
+[Ollama tag](https://ollama.com/library/gemma4:26b-a4b). The MoE activates about
+4B parameters per token but the full weights still require storage and memory.
+Its nominal 256K context is not a safe workstation allocation or evidence of
+reliable novel-length recall. The official long-context retrieval evaluation
+does not establish perfect recall.
+
+Prose uses temperature 1.0, top-p .95, top-k 64 and neutral repetition penalty;
+structured tasks preserve the existing JSON temperature and stage overrides.
+Fiction draft/revision prompts add concise scene, voice, and continuity guidance
+rather than allowing plot-plan language or repeated climaxes. No other book form
+receives that guidance. Keep thinking disabled by default for drafting; explicit
+review-stage thinking overrides remain available. Existing context headroom,
+source-grounded review, repair and acceptance gates are unchanged.
+
+First run the short audition while the production worker is idle, using a fresh
+output directory. It records three writing/revision samples, two source-based
+editorial controls, inference metrics and model identities. Read the anonymous
+writer files before opening model-key.json. Judge voice, dialogue, sensory
+specificity, narrative momentum, continuity and restraint; do not use the
+binary control verdicts as a literary-quality score.
+
+```cmd
+docker compose -f docker-compose.yml -f docker-compose.local.yml exec -T worker python -m novel_generator.services.author_benchmark --models gemma4:12b gemma4:26b-a4b --base-url http://host.docker.internal:11434 --context-tokens 8192 --output-dir /app/artifacts/gemma26-audition-01
+```
+
+Then qualify the winning writer with local_verification at a realistic context
+size (start with the existing 32768-token budget only if memory permits; lower
+context and use existing prompt chunking if needed). Do not run two local
+generation jobs concurrently on a 12 GB GPU. Inspect Ollama's actual offload
+with `ollama ps`. A candidate configuration is Gemma 26B for drafting,
+planning and developmental revision and an independently qualified smaller
+model for adjudication. No routes, persisted provider settings or active
+manuscript checkpoints are silently changed by this patch. Select installed
+models through Provider Settings and per-task routing for a fresh run.

@@ -81,6 +81,7 @@ from .prompts import (
     sanitize_chapter_content,
 )
 from .providers import ProviderManager
+from .author_model_profile import author_messages
 from . import autonomous_editorial
 
 
@@ -372,6 +373,10 @@ def _supervised_provider_chat(
     touch_run_heartbeat(session, run)
     session.commit()
     try:
+        messages = author_messages(
+            messages, provider_name=provider_name, model_name=model_name, stage=stage,
+            content_kind=(getattr(getattr(run, "project", None), "story_brief", None) or {}).get("content_kind", "fiction"),
+        )
         output = _provider_chat(client, provider_name, model_name, messages, stream=stream)
     except Exception as exc:
         fail_stage_attempt(session, attempt, exc)
