@@ -58,6 +58,26 @@
   </div>
 
 
+  <section class="run-operations" aria-label="Run connection and diagnostics">
+    <div class="run-connection">
+      <span class="meta-chip" data-run-connection role="status">Last saved status</span>
+      <span class="field-note" data-run-heartbeat>Worker heartbeat is checked during active runs.</span>
+    </div>
+    <section class="run-failure-panel" data-run-failure{% if not run.error_message %} hidden{% endif %}>
+      <div>
+        <h2 data-run-failure-title>{{ "Automatic retry scheduled" if run.current_step == "provider_wait" else "Run needs attention" }}</h2>
+        <p class="field-note">Saved checkpoints are retained. Review diagnostic text for private details before sharing.</p>
+      </div>
+      <pre class="run-error-detail" data-run-error>{{ run.error_message or "" }}</pre>
+      <div class="run-diagnostic-actions">
+        <button type="button" class="secondary" data-copy-diagnostics hidden>Copy diagnostics</button>
+        <a class="button secondary" href="/api/runs/{{ run.id }}/diagnostics" download="run-diagnostics-{{ run.id }}.txt">Download diagnostics</a>
+        <a href="/api/runs/{{ run.id }}/diagnostics" target="_blank" rel="noopener">View text</a>
+      </div>
+      <p class="field-note" data-copy-feedback role="status"></p>
+      <textarea class="run-diagnostic-text" data-diagnostic-text readonly aria-label="Copyable run diagnostics" hidden></textarea>
+    </section>
+  </section>
   <div class="workspace-view" data-workspace-view="overview" id="book-overview">
   <div class="run-command-center">
     <div class="run-status-strip">
@@ -733,9 +753,6 @@
     {% endif %}
   {% endif %}
 
-  {% if run.error_message %}
-    <p class="error-text">{{ run.error_message }}</p>
-  {% endif %}
 
   {% if run.source_run_id %}
     <p class="notice long-value">{% if run.resume_from_chapter %}This run continues from a prior run starting at chapter {{ run.resume_from_chapter }}.{% else %}This is a revised edition. <a href="/runs/{{ run.source_run_id }}">The original manuscript is preserved here.</a>{% endif %}</p>

@@ -702,6 +702,52 @@ function setupRunDetail() {
   const runId = runDetail.dataset.runId;
   const eventLog = document.querySelector("[data-event-log]");
   const eventLogCountNode = document.querySelector("[data-event-log-count]");
+  const connectionNode = runDetail.querySelector("[data-run-connection]");
+  const heartbeatNode = runDetail.querySelector("[data-run-heartbeat]");
+  const failurePanel = runDetail.querySelector("[data-run-failure]");
+  const failureTitle = runDetail.querySelector("[data-run-failure-title]");
+  const errorNode = runDetail.querySelector("[data-run-error]");
+  const copyButton = runDetail.querySelector("[data-copy-diagnostics]");
+  const copyFeedback = runDetail.querySelector("[data-copy-feedback]");
+  const diagnosticText = runDetail.querySelector("[data-diagnostic-text]");
+  const initialStatus = runDetail.dataset.runStatus || "";
+  let lastSequence = Array.from(eventLog?.querySelectorAll("[data-sequence]") || []).reduce(
+    (max, node) => Math.max(max, Number(node.dataset.sequence) || 0), 0);
+  let statusPollActive = false;
+  let reloadScheduled = false;
+
+  function renderFailure(error, step) {
+    if (!failurePanel || !errorNode) return;
+    failurePanel.hidden = !error;
+    errorNode.textContent = error || "";
+    if (failureTitle) failureTitle.textContent = step === "provider_wait" ? "Automatic retry scheduled" : "Run needs attention";
+  }
+
+  if (copyButton && diagnosticText && copyFeedback) {
+    copyButton.hidden = false;
+    copyButton.addEventListener("click", async () => {
+      copyButton.disabled = true;
+      try {
+        const response = await fetch(`/api/runs/${runId}/diagnostics`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Diagnostics are temporarily unavailable.");
+        const report = await response.text();
+        diagnosticText.value = report;
+        try {
+          await navigator.clipboard.writeText(report);
+          copyFeedback.textContent = "Diagnostics copied. Review private details before sharing.";
+        } catch {
+          diagnosticText.hidden = false;
+          diagnosticText.focus();
+          diagnosticText.select();
+          copyFeedback.textContent = "Select and copy the text below.";
+        }
+      } catch (error) {
+        copyFeedback.textContent = error.message + " Try View text or Download diagnostics.";
+      } finally {
+        copyButton.disabled = false;
+      }
+    });
+  }
   const statusNode = runDetail.querySelector("[data-run-status-label]");
   const stepNode = runDetail.querySelector("[data-run-step-label]");
   const chapterNode = runDetail.querySelector("[data-run-chapter-label]");
@@ -1036,6 +1082,11 @@ function setupRunDetail() {
     if (run.status === "queued") {
       title = "Queued and waiting for the worker";
       body = "The run settings are saved. The next healthy sign is a story-bible event from the worker.";
+      if (run.current_step === "provider_wait") {
+        title = "Waiting for the model — automatic retry scheduled";
+        body = run.error_message || "Saved work is preserved during the cooldown.";
+        nextLabel = "Resume automatically";
+      }
     } else if (run.status === "running") {
       tone = fallbacks.length ? "warning" : "success";
       title = `Running: ${currentStage.label}`;
@@ -1478,6 +1529,7 @@ function setupRunDetail() {
 
     updateStatus(run.status || "queued", run.current_step || "queued", run.current_chapter || "");
     renderRunHealth(run);
+    renderFailure(run.error_message, run.current_step);
     renderStagePanel(run);
     renderContract(run);
     renderQuality(run);
@@ -1492,9 +1544,10 @@ function setupRunDetail() {
   }
 
   function appendEvent(payload) {
-    if (!eventLog) {
+    if (!eventLog || Number(payload.sequence) <= lastSequence) {
       return;
     }
+    lastSequence = Number(payload.sequence) || lastSequence;
 
     const item = document.createElement("li");
     const topline = document.createElement("div");
@@ -1564,7 +1617,41 @@ function setupRunDetail() {
     return;
   }
 
-  const source = new EventSource(`/api/runs/${runId}/events`);
+  const source = new EventSource(`/api/runs/${runId}/events?after=${lastSequence}`);
+
+  function reloadOnTransition(status) {
+    if (reloadScheduled || status === initialStatus || (!terminalStatuses.has(status) && !reviewStatuses.has(status))) return;
+    reloadScheduled = true;
+    source.close();
+    window.location.reload();
+  }
+
+  async function pollWorker() {
+    if (statusPollActive || reloadScheduled) return;
+    statusPollActive = true;
+    try {
+      const snapshot = await fetchJson(`/api/runs/${runId}/live-status`);
+      if (connectionNode) connectionNode.textContent = "Connected";
+      if (heartbeatNode) {
+        const age = snapshot.heartbeat_age_seconds;
+        const elapsed = age == null ? "no heartbeat recorded" : `${Math.floor(age / 60)}m ${age % 60}s since last heartbeat`;
+        const attempt = snapshot.latest_attempt;
+        const activity = attempt?.status === "running" && snapshot.status === "running" ? ` · Inference: ${attempt.stage.replaceAll("_", " ")}` : "";
+        heartbeatNode.textContent = snapshot.step === "provider_wait"
+          ? `Automatic retry: ${snapshot.retry_at_utc || "scheduled"} UTC`
+          : (snapshot.heartbeat_stale ? "Heartbeat overdue; verify worker. " : "") + elapsed + activity;
+      }
+      renderFailure(snapshot.error, snapshot.step);
+      reloadOnTransition(snapshot.status);
+    } catch {
+      if (connectionNode) connectionNode.textContent = "Disconnected · retrying";
+      if (heartbeatNode) heartbeatNode.textContent = "Showing last saved status; connection will be retried.";
+    } finally {
+      statusPollActive = false;
+    }
+  }
+  pollWorker();
+  window.setInterval(pollWorker, 15000);
 
   source.onmessage = (event) => {
     const payload = JSON.parse(event.data);
@@ -1590,6 +1677,9 @@ function setupRunDetail() {
   source.onerror = () => {
     if (terminalStatuses.has(runDetail.dataset.runStatus || "")) {
       source.close();
+    } else {
+      if (connectionNode) connectionNode.textContent = "Live feed reconnecting";
+      pollWorker();
     }
   };
 }
