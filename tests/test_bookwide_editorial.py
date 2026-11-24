@@ -204,3 +204,34 @@ def test_distant_repair_defers_when_intervening_context_changes(configured_envir
                                     verdict.issues, get_settings(), object(), 0)
         assert run.chapters[2].content == PROSE
         assert editor._events(run, "autonomous_reaudit_required")[-1]["chapter_number"] == 3
+
+
+@pytest.mark.parametrize("state", ["unreviewed", "accepted", "changed", "wrong_length"])
+def test_autonomous_publication_ui_matches_current_acceptance(client, monkeypatch, state):
+    install_fake_provider(monkeypatch)
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        if state != "unreviewed":
+            editor.finish_manuscript(session, run, run.chapters, get_settings(), object(), ManuscriptQaReport())
+        if state == "changed":
+            run.chapters[0].content = REPAIRED
+        if state == "wrong_length":
+            run.target_word_count = 1000
+        run.status = RunStatus.COMPLETED
+        session.commit()
+        run_id = run.id
+    page = client.get(f"/runs/{run_id}")
+    assert page.status_code == 200
+    if state == "accepted":
+        assert "Automatic editorial checks passed" in page.text
+        assert f'action="/runs/{run_id}/publication-export"' in page.text
+    else:
+        assert "Editorial verification required" in page.text
+        assert "Automatic editorial checks passed" not in page.text
+        assert f'action="/runs/{run_id}/publication-export"' not in page.text
+        response = client.post(f"/runs/{run_id}/publication-export",
+                               data={"profile_id": "ebook_docx"}, follow_redirects=False)
+        assert response.status_code == 303
+        assert "editorial+verification" in response.headers["location"]
+        with get_session_factory()() as session:
+            assert not any(a.kind.startswith("publication-") for a in get_run(session, run_id).artifacts)

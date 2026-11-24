@@ -277,7 +277,7 @@
           {% if manuscript_edition.qa_artifact %}
             <a class="button secondary" href="/api/artifacts/{{ manuscript_edition.qa_artifact.id }}/download">Download QA</a>
           {% endif %}
-          {% if run.status.value == "completed" %}
+          {% if editorial_next_step.publication_available %}
             <a class="button secondary" href="#publication-export">Create publication export</a>
           {% endif %}
         </div>
@@ -1489,7 +1489,7 @@
       </div>
       <p>Optional</p>
     </div>
-    {% if run.status.value == "completed" %}
+    {% if editorial_next_step.publication_available %}
       <form class="form-stack" method="post" action="/runs/{{ run.id }}/publication-export">
         <div class="field-grid two-column">
           <label>
@@ -1539,7 +1539,7 @@
         <button type="submit">Create layout export</button>
       </form>
     {% else %}
-      <p class="empty-state">Publication exports become available after the run completes.</p>
+      <p class="empty-state">{{ "Current manuscript requires editorial verification before publication export. Saved drafts remain available." if run.status.value == "completed" else "Publication exports become available after the run completes." }}</p>
     {% endif %}
   </article>
 </section>
