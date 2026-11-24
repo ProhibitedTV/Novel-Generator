@@ -1740,3 +1740,13 @@ def test_invalid_automatic_range_preserves_form_without_creating_book(client, mo
     assert "at least one word per chapter" in response.text
     with get_session_factory()() as session:
         assert not any(p.title == "Invalid size" for p in list_projects(session))
+
+
+def test_book_creation_and_queue_forms_enable_single_submission_guard(client, monkeypatch):
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    project_id = seed_project()
+    for url in ("/projects/new", f"/projects/{project_id}"):
+        page = client.get(url)
+        assert page.status_code == 200
+        assert "data-single-submit" in page.text
+        assert 'role="status" data-submission-status hidden' in page.text

@@ -472,7 +472,7 @@
       <p class="error-text">{{ run_errors.__all__ }}</p>
     {% endif %}
 
-    <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form run-queue-form" data-run-queue-form>
+    <form method="post" action="/projects/{{ project.id }}/runs/new" class="stack-form run-queue-form" data-run-queue-form data-single-submit>
       <div class="run-setup-grid">
         <div class="form-section run-cardlet">
           <div class="section-header-copy">
@@ -684,6 +684,7 @@
       <div class="form-actions">
         <button type="submit">Queue full draft run</button>
       </div>
+      <p class="field-note" role="status" data-submission-status hidden>Queuing your book. No second submission is needed.</p>
     </form>
   </article>
 

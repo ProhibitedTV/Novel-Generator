@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   setupWorkspaceNavigation(document);
   setupConfirmActions(document);
+  setupSingleSubmission(document);
   setupModelPickers(document);
   setupRunLengthControls(document);
   setupRunModeNotes(document);
@@ -75,6 +76,34 @@ function setupConfirmActions(root) {
         event.preventDefault();
       }
     });
+  });
+}
+
+function setupSingleSubmission(root) {
+  const forms = Array.from(root.querySelectorAll("form[data-single-submit]"));
+  forms.forEach((form) => {
+    if (form.dataset.singleSubmitBound === "true") return;
+    form.dataset.singleSubmitBound = "true";
+    const status = form.querySelector("[data-submission-status]");
+    const reset = () => {
+      delete form.dataset.submitting;
+      form.removeAttribute("aria-busy");
+      if (status) status.hidden = true;
+    };
+    form.addEventListener("submit", (event) => {
+      if (event.defaultPrevented) return;
+      if (form.dataset.submitting === "true") {
+        event.preventDefault();
+        return;
+      }
+      form.dataset.submitting = "true";
+      form.setAttribute("aria-busy", "true");
+      if (status) status.hidden = false;
+      // Keep the clicked submit button enabled: its name/value is part of the
+      // native form submission and distinguishes generate from save-only.
+    });
+    // Returning via the browser back/forward cache must allow a new submission.
+    window.addEventListener("pageshow", reset);
   });
 }
 
