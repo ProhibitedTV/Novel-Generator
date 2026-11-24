@@ -111,3 +111,39 @@ def test_explicit_resolution_does_not_clear_other_omitted_snapshot_fields() -> N
     cleaned = apply_continuity_lifecycle(_merged_ledger(), update)
     assert cleaned.emotional_open_loops == {}
     assert cleaned.open_promises_by_name == _merged_ledger().open_promises_by_name
+
+
+def test_known_alias_updates_canonical_object_and_character_state():
+    from novel_generator.services.pipeline import _ledger_from_update
+    ledger = _merged_ledger().model_copy(update={
+        "active_entities": [
+            {"name": "Iris Vale", "kind": "person", "aliases": ["Iris"]},
+            {"name": "Original orchard deed", "kind": "artifact", "aliases": ["Land deed"]},
+        ],
+        "character_states": {"Iris Vale": "At home"},
+        "entity_state_changes": {"Original orchard deed": "In the archive", "Unknown receipt": "Intact"},
+    })
+    update = _update().model_copy(update={
+        "character_states": {"IRIS": "At the hearing"},
+        "entity_state_changes": {"land deed": "Burned in the stove"},
+    })
+    merged = _ledger_from_update(ledger, update)
+    assert merged.character_states == {"Iris Vale": "At the hearing"}
+    assert merged.entity_state_changes == {
+        "Original orchard deed": "Burned in the stove", "Unknown receipt": "Intact"}
+
+
+def test_alias_merge_preserves_conflicting_assertions_and_unknown_names():
+    from novel_generator.services.pipeline import _merge_named_continuity_state
+    entities = [{"name": "Deed", "kind": "artifact", "aliases": ["Document"]}]
+    assert _merge_named_continuity_state({}, {"Deed": "Burned", "Document": "Intact"}, entities) == {
+        "Deed": "Burned", "Document": "Intact"}
+    assert _merge_named_continuity_state({"Document": "Intact"}, {"Unrelated letter": "Lost"}, entities) == {
+        "Deed": "Intact", "Unrelated letter": "Lost"}
+
+
+def test_alias_merge_does_not_guess_ambiguous_owner():
+    from novel_generator.services.pipeline import _merge_named_continuity_state
+    entities = [{"name": name, "kind": "artifact", "aliases": ["Document"]}
+                for name in ("Deed", "Receipt")]
+    assert _merge_named_continuity_state({}, {"Document": "Intact"}, entities) == {"Document": "Intact"}
