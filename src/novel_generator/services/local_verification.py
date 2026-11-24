@@ -48,7 +48,7 @@ def verification_report(run, artifacts_dir: Path) -> dict:
     complete = (
         run.status == RunStatus.COMPLETED
         and [chapter.chapter_number for chapter in chapters] == expected
-        and all(chapter.status == ChapterStatus.COMPLETED and chapter.content
+        and all(chapter.status == ChapterStatus.COMPLETED and (chapter.content or "").strip()
                 and chapter.summary and chapter.continuity_update for chapter in chapters)
     )
     artifact_paths = {artifact.kind: str(artifacts_dir / artifact.relative_path) for artifact in run.artifacts}
@@ -58,6 +58,12 @@ def verification_report(run, artifacts_dir: Path) -> dict:
     export_integrity = verify_manuscript_exports(run, chapters, artifact_paths)
     exported = exported and all(item["matches_current_source"] for item in export_integrity.values())
     coverage = review_coverage(run)
+    counts = [len((chapter.content or "").split()) for chapter in chapters]
+    total = sum(counts)
+    total_ok = run.target_word_count > 0 and 0.9 * run.target_word_count <= total <= 1.1 * run.target_word_count
+    chapters_ok = bool(expected) and len(counts) == len(expected) and all(
+        run.min_words_per_chapter <= count <= run.max_words_per_chapter for count in counts
+    )
     return {
         "run_id": run.id,
         "model": run.model_name,
@@ -67,7 +73,7 @@ def verification_report(run, artifacts_dir: Path) -> dict:
                       ("book_type", "content_kind", "structure", "genre_profile", "genre_description")},
         "task_routing": getattr(run, "task_routing", None) or {},
         "autonomous_checks_passed": bool(complete and exported and coverage["accepted"]
-            and coverage["acceptance_contract"] >= ACCEPTANCE_CONTRACT),
+            and coverage["acceptance_contract"] >= ACCEPTANCE_CONTRACT and total_ok and chapters_ok),
         "editorial_coverage": {key: coverage[key] for key in (
             "accepted", "acceptance_contract", "chapter_passes", "pair_passes", "pair_target",
             "developmental_passes", "identity_passes", "cross_passes", "cross_target", "whole_book_passed",
@@ -77,7 +83,13 @@ def verification_report(run, artifacts_dir: Path) -> dict:
         "pipeline_complete": bool(complete and exported),
         "export_integrity": export_integrity,
         "target_words": run.target_word_count,
-        "actual_words": sum(len((chapter.content or "").split()) for chapter in chapters),
+        "actual_words": total,
+        "length_checks": {
+            "total_within_target": total_ok,
+            "chapters_within_range": chapters_ok,
+            "min_words_per_chapter": run.min_words_per_chapter,
+            "max_words_per_chapter": run.max_words_per_chapter,
+        },
         "chapters": [{"number": chapter.chapter_number, "words": len((chapter.content or "").split()),
                       "qa": chapter.qa_notes} for chapter in chapters],
         "fallback_events": [{"type": event.event_type, "payload": event.payload}
