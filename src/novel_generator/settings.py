@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = Field(default=120.0, ge=10.0, le=1800.0)
     ollama_max_retries: int = Field(default=2, ge=0, le=5)
     ollama_num_ctx: int = Field(default=32768, ge=2048, le=262144)
+    ollama_adaptive_runtime: bool = True
     ollama_num_predict: int = Field(default=8192, ge=256, le=65536)
     ollama_structured_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
     # Reserve bounded generation budgets for manuscript/JSON output. Reasoning

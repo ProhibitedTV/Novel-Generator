@@ -10,6 +10,7 @@ import httpx
 
 from ..schemas import ProviderCapabilities
 from .author_model_profile import GEMMA26_SAMPLING, PROFILE_VERSION, is_gemma26
+from .ollama_adaptive import POLICY_VERSION, RuntimeState, advertised_context, estimated_input, memory_failure
 from .provider_controls import extract_output_budget_marker, extract_ollama_controls_marker
 from .provider_errors import ProviderError, ProviderTransportError
 from .structured_schema_runtime import extract_schema_marker
@@ -142,6 +143,7 @@ class OllamaClient:
         structured_temperature: float = 0.2,
         client_factory: Callable[[], httpx.Client] | None = None,
         think: bool | None = None,
+        adaptive_runtime: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
@@ -154,6 +156,39 @@ class OllamaClient:
         self.last_chat_metrics: dict[str, Any] = {}
         self._client_factory = client_factory
         self.think = think
+        self.adaptive_runtime = adaptive_runtime
+        self._runtime_states: dict[str, RuntimeState] = {}
+
+    def _optional_metadata(self, method, path, **kwargs):
+        # Metadata is optional, especially with older servers/proxies. Do not
+        # multiply long inference timeouts or retry an unsupported endpoint.
+        try:
+            with self._make_client() as client:
+                response = client.request(method, path, timeout=min(3.0, self.timeout_seconds), **kwargs)
+                response.raise_for_status()
+                result = response.json()
+                return result if isinstance(result, dict) else {}
+        except (httpx.HTTPError, ValueError):
+            return {}
+
+    def _observe_resident(self, model_name, state):
+        canonical = model_name if ":" in model_name.rsplit("/", 1)[-1] else model_name + ":latest"
+        data = self._optional_metadata("GET", "/api/ps")
+        models = data.get("models")
+        if not isinstance(models, list):
+            return
+        row = next((m for m in models if isinstance(m, dict)
+                    and (m.get("name") in {model_name, canonical} or m.get("model") in {model_name, canonical})), None)
+        if row is not None:
+            state.observe_resident(row)
+
+    def _runtime_state(self, model_name):
+        state = self._runtime_states.get(model_name)
+        if state is None:
+            details = self._optional_metadata("POST", "/api/show", json={"model": model_name})
+            state = RuntimeState(advertised_limit=advertised_context(details))
+            self._runtime_states[model_name] = state
+        return state
 
     def _default_timeout(self) -> httpx.Timeout:
         return httpx.Timeout(self.timeout_seconds)
@@ -210,7 +245,8 @@ class OllamaClient:
                 "runtime_version": version, "verified": verified,
                 "defaults": {"context_tokens": self.num_ctx, "output_tokens": self.num_predict,
                              "structured_temperature": self.structured_temperature, "think": self.think,
-                             **({"author_profile": PROFILE_VERSION} if is_gemma26(model_name) else {})}}
+                             **({"author_profile": PROFILE_VERSION} if is_gemma26(model_name) else {}),
+                             **({"adaptive_runtime": POLICY_VERSION} if self.adaptive_runtime else {})}}
 
     def health(self, default_model: str) -> ProviderCapabilities:
         try:
@@ -277,6 +313,17 @@ class OllamaClient:
             payload["options"] = options
 
         self.last_chat_metrics = {}
+        runtime = None
+        required_context = None
+        memory_retries = 0
+        if self.adaptive_runtime and self.num_ctx and effective_num_predict:
+            runtime = self._runtime_state(model_name)
+            required_context = estimated_input(clean_messages) + effective_num_predict
+            try:
+                options["num_ctx"] = runtime.choose(self.num_ctx, required_context)
+            except ValueError as exc:
+                raise OllamaError(f"{model_name}: {exc}") from exc
+            payload["options"] = options
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -296,9 +343,10 @@ class OllamaClient:
                             final_budget = min(effective_num_predict or 4096, 4096)
                             notes = str(message["thinking"])
                             note_limit = len(notes)
-                            if self.num_ctx:
-                                source_tokens = sum(len(item.get("content", "")) for item in clean_messages) // 4
-                                note_limit = max(0, (self.num_ctx - source_tokens - final_budget - 1024) * 4)
+                            actual_context = options.get("num_ctx") or self.num_ctx
+                            if actual_context:
+                                source_tokens = estimated_input(clean_messages) if runtime else sum(len(item.get("content", "")) for item in clean_messages) // 4
+                                note_limit = max(0, (actual_context - source_tokens - final_budget - 1024) * (3 if runtime else 4))
                             if len(notes) > note_limit:
                                 half = note_limit // 2
                                 notes = notes[:half] + "\n[Provisional analysis excerpted for context headroom.]\n" + notes[-half:] if half else ""
@@ -319,9 +367,30 @@ class OllamaClient:
                                 "reasoning_notes_excerpted": len(str(message["thinking"])) > note_limit,
                             }
                     output = parse_ollama_chat_payload(raw)
+                    if runtime is not None:
+                        chosen = int(options["num_ctx"])
+                        if runtime.preferred_context != chosen or memory_retries:
+                            self._observe_resident(model_name, runtime)
+                        runtime.preferred_context = chosen
+                        self.last_chat_metrics.update(runtime.metrics(self.num_ctx, chosen, required_context, memory_retries))
                     return output
             except (httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError, json.JSONDecodeError, OllamaError) as exc:
                 last_error = exc
+                if runtime is not None and isinstance(exc, httpx.HTTPStatusError):
+                    body = exc.response.text[:4000]
+                    if memory_failure(exc.response.status_code, body):
+                        current = int(options["num_ctx"])
+                        smaller = runtime.backoff(self.num_ctx, current, required_context)
+                        if smaller is None or attempt >= self.max_retries:
+                            raise OllamaTransportError(
+                                f"Ollama memory pressure for {model_name}: requested context {current}, "
+                                f"estimated required {required_context}, output allowance {effective_num_predict}. "
+                                "No further safe context reduction is available within the retry budget. "
+                                "Free memory, use a smaller installed model, or reduce workload size. "
+                                "The program has not shortened the source or switched models."
+                            ) from exc
+                        options["num_ctx"] = smaller
+                        memory_retries += 1
                 if attempt >= self.max_retries:
                     break
                 self._sleep_before_retry(attempt)

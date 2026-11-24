@@ -16,6 +16,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/novel_generator.db}
       ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/app/artifacts}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_ADAPTIVE_RUNTIME: ${OLLAMA_ADAPTIVE_RUNTIME:-true}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-32768}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-8192}
       DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.1:8b}
       HOST: 0.0.0.0
       PORT: 8000
@@ -45,6 +48,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/novel_generator.db}
       ARTIFACTS_DIR: ${ARTIFACTS_DIR:-/app/artifacts}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_ADAPTIVE_RUNTIME: ${OLLAMA_ADAPTIVE_RUNTIME:-true}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-32768}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-8192}
       DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.1:8b}
       HOST: 0.0.0.0
       PORT: 8000
