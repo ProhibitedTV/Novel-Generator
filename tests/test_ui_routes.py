@@ -1645,3 +1645,18 @@ def test_manuscript_reader_only_loads_selected_saved_chapter(client):
     assert client.get(url + "?chapter=4").status_code == 404
     with get_session_factory()() as session:
         assert get_run(session, run_id).status == RunStatus.RUNNING
+
+
+def test_compact_run_overview_retains_live_metrics_and_diagnostics(client, monkeypatch):
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    _, run_id = seed_project_and_run()
+    response = client.get(f"/runs/{run_id}")
+    assert response.status_code == 200
+    assert 'class="run-status-strip compact-run-status"' in response.text
+    for hook in ("data-run-status-label", "data-run-step-label", "data-run-chapter-label",
+                 "data-run-elapsed", "data-run-word-progress", "data-run-completed-chapters",
+                 "data-run-event-count", "data-run-artifact-count", "data-run-chapter-progress-bar",
+                 "data-run-word-progress-bar", "data-copy-diagnostics"):
+        assert hook in response.text
+    assert "Run details and route" in response.text
+    assert "Saved checkpoints" in response.text
