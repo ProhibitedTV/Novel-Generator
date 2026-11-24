@@ -879,7 +879,8 @@ def test_real_pipeline_withholds_manuscript_exports_until_gate_passes(configured
 
     install_fake_provider(monkeypatch, review_fn=review, revision=PROSE)
     monkeypatch.setattr(pipeline, "_run_manuscript_qa", lambda *args: (ManuscriptQaReport(), "QA"))
-    monkeypatch.setattr(pipeline, "_run_developmental_rewrite", lambda *args: (None, None, None, None))
+    monkeypatch.setattr(pipeline, "_run_developmental_rewrite", lambda *args: (
+        pipeline.DevelopmentalRewritePlan(), "Test memo", "Test outline", "Test comparison"))
     for name in ("_run_developmental_revision_waves", "_run_publication_humanization_pass",
                  "_run_publication_compression_pass", "_run_final_editing_pass"):
         monkeypatch.setattr(pipeline, name, lambda *args: None)

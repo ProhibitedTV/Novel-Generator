@@ -3119,19 +3119,33 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
 
     from .draft_editions import save_draft_edition
     save_draft_edition(session, run, completed_chapters, settings.artifacts_dir, "first-draft")
-    qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
+    from .editorial_agenda import load_agenda, save_agenda
+    needs_developmental = run.developmental_rewrite_enabled or _is_publication_run(run)
+    agenda = load_agenda(session, run, completed_chapters) if needs_developmental else None
     developmental_plan: DevelopmentalRewritePlan | None = None
     rewrite_markdown = None
     revised_outline_markdown = None
     developmental_qa_markdown = None
-    if run.developmental_rewrite_enabled or _is_publication_run(run):
-        developmental_plan, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown = _run_developmental_rewrite(
-            session,
-            run,
-            completed_chapters,
-            qa_report,
-            client,
-        )
+    if agenda is None:
+        qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
+        if needs_developmental:
+            developmental_plan, rewrite_markdown, revised_outline_markdown, developmental_qa_markdown = _run_developmental_rewrite(
+                session, run, completed_chapters, qa_report, client,
+            )
+            agenda = save_agenda(session, run, completed_chapters, qa_report, developmental_plan,
+                                 rewrite_markdown, revised_outline_markdown, developmental_qa_markdown)
+    else:
+        record_event(session, run, "editorial_agenda_reused", {
+            "message": "Resuming the saved developmental agenda, not replanning an already revised draft.",
+            "agenda_id": agenda.agenda_id,
+        })
+        session.commit()
+    if needs_developmental:
+        qa_report = agenda.qa_report
+        developmental_plan = agenda.plan
+        rewrite_markdown = agenda.rewrite_markdown
+        revised_outline_markdown = agenda.revised_outline_markdown
+        developmental_qa_markdown = agenda.developmental_qa_markdown
         _run_developmental_revision_waves(session, run, completed_chapters, qa_report, developmental_plan, client)
         save_draft_edition(session, run, completed_chapters, settings.artifacts_dir, "structural-draft")
         _run_publication_humanization_pass(session, run, completed_chapters, qa_report, client)
