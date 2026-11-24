@@ -1694,3 +1694,49 @@ def test_create_book_and_generate_in_one_transaction(client, monkeypatch, mode):
                 assert not run.pause_after_outline and run.developmental_rewrite_enabled
                 assert run.min_words_per_chapter == 2000 and run.max_words_per_chapter == 3000
                 assert response.headers["location"].startswith(f"/runs/{run.id}")
+
+
+@pytest.mark.parametrize("total,chapters,expected", [(60000,24,(2000,3000)), (20000,10,(1600,2400)), (50001,17,(2352,3530)), (1000,1,(800,1200))])
+def test_automatic_chapter_bounds_remain_feasible(total, chapters, expected):
+    from novel_generator.routers.ui import _automatic_chapter_bounds
+    bounds = _automatic_chapter_bounds(str(total), str(chapters))
+    assert bounds == expected
+    assert bounds[0] * chapters <= total <= bounds[1] * chapters
+
+
+@pytest.mark.parametrize("action", ["save", "generate"])
+def test_new_book_automatic_range_uses_requested_size_not_stale_manual_values(client, monkeypatch, action):
+    from novel_generator.services.providers import ProviderManager
+    from novel_generator.repositories import list_projects
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    monkeypatch.setattr(ProviderManager, "ensure_model", lambda *args: None)
+    response = client.post("/projects/new", data={
+        "title": "Shorter novel", "premise": "An archivist confronts a buried secret.",
+        "preferred_model": "test-model", "action": action, "auto_chapter_range": "1",
+        "desired_word_count": "20000", "requested_chapters": "10",
+        "min_words_per_chapter": "2000", "max_words_per_chapter": "3000",
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    with get_session_factory()() as session:
+        project = next(p for p in list_projects(session) if p.title == "Shorter novel")
+        assert (project.min_words_per_chapter, project.max_words_per_chapter) == (1600,2400)
+        if action == "generate":
+            assert (project.runs[0].min_words_per_chapter, project.runs[0].max_words_per_chapter) == (1600,2400)
+        else:
+            assert not project.runs
+
+
+@pytest.mark.parametrize("words,chapters", [("1000","0"), ("1000","1001"), ("invalid","24")])
+def test_invalid_automatic_range_preserves_form_without_creating_book(client, monkeypatch, words, chapters):
+    from novel_generator.repositories import list_projects
+    monkeypatch.setattr(OllamaClient, "health", lambda self, default_model: reachable_status(default_model))
+    response = client.post("/projects/new", data={
+        "title": "Invalid size", "premise": "Test premise.", "preferred_model": "test-model",
+        "action": "generate", "auto_chapter_range": "1", "desired_word_count": words,
+        "requested_chapters": chapters,
+    }, follow_redirects=False)
+    assert response.status_code == 400
+    assert "Invalid size" in response.text
+    assert "at least one word per chapter" in response.text
+    with get_session_factory()() as session:
+        assert not any(p.title == "Invalid size" for p in list_projects(session))
