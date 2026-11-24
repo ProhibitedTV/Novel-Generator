@@ -171,7 +171,31 @@ def plan_outline(session, run, bible, client, provider, model, settings):
     for round_number in range(settings.autonomous_outline_repair_attempts):
         spine = generate_spine(session, run, bible, client, provider, model, prefix, repairs) if run.requested_chapters > 4 else None
         outline = generate_outline(session, run, bible, client, provider, model, prefix=prefix, spine=spine, repairs=repairs)
-        outline = pipeline._validated_outline_or_fallback(session, run.project, run, bible, outline, locked_chapters=len(prefix))
+        try:
+            outline = pipeline._validated_outline_or_fallback(session, run.project, run, bible, outline, locked_chapters=len(prefix))
+        except pipeline.OutlinePacingValidationError as exc:
+            # Locally valid batches can still violate the assembled book's
+            # pacing contract. Give the existing bounded replanner the actual
+            # validation evidence rather than retrying the same cached batches.
+            pipeline._ensure_not_canceled(session, run)
+            if round_number + 1 >= settings.autonomous_outline_repair_attempts or len(prefix) == run.requested_chapters:
+                raise
+            unlocked = outline[len(prefix):]
+            repairs = [{
+                "chapter_numbers": [row["chapter_number"] for row in unlocked],
+                "problem": str(exc),
+                "repair_instruction": (
+                    "Correct the full-book validation conditions, including batch boundaries and any short final block. "
+                    "Keep established characters, concrete chapter outcomes and ending wherever possible. "
+                    "Preserve locked chapters exactly; do not add filler, repeat a climax, or invent a replacement premise."
+                ),
+                "source_entries": [compact_entry(row) for row in unlocked],
+            }]
+            _record(session, run, "outline_pacing_replan_requested", {
+                "message": "Replanning the unwritten outline after full-book pacing validation failed.",
+                "round": round_number + 1, "repairs": repairs, "outline_hash": _hash(outline),
+            })
+            continue
         if outline[:len(prefix)] != prefix:
             raise AutonomousQualityError("Outline validation changed a preserved chapter. Saved prose is unchanged; rebuild from an earlier chapter.")
         review = review_outline(session, run, outline, client, prefix)

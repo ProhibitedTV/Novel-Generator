@@ -221,3 +221,79 @@ def test_invalid_continuations_are_rejected_before_queueing(configured_environme
         with pytest.raises(ValueError, match="chapter count requires rebuilding"):
             create_run(session, source.project, RunCreate(project_id=source.project_id,
                 source_run_id=source.id, resume_from_chapter=2, requested_chapters=3))
+
+
+@pytest.mark.parametrize("chapters", [5, 6, 9, 10, 13, 14, 17, 18])
+def test_short_final_pacing_block_repairs_without_discarding_plot(configured_environment, chapters):
+    from test_pipeline import _valid_outline_entry
+    from novel_generator.services.prompts import parse_outline
+
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=chapters)
+        brief = {"genre_profile": "cyberpunk", "content_kind": "fiction",
+                 "book_type": "novel", "structure": "continuous"}
+        run.project.story_brief = brief
+        bible = parse_story_bible(_story_bible_json()).model_copy(update={"book_spec": brief})
+        # Reproduce the old pattern: the last partial block cannot reach its
+        # quiet chapter even after the previous deterministic rebalance.
+        original = [_valid_outline_entry(i, chapters) for i in range(1, chapters + 1)]
+        for entry in original:
+            entry["chapter_mode"] = pipeline._fallback_chapter_mode(entry["chapter_number"])
+        with pytest.raises(ValueError):
+            parse_outline(json.dumps({"chapters": original}), chapters, book_spec=brief)
+        repaired = pipeline._validated_outline_or_fallback(session, run.project, run, bible, original)
+        assert len(repaired) == chapters
+        assert parse_outline(json.dumps({"chapters": repaired}), chapters, book_spec=brief) == repaired
+        for old, new in zip(original, repaired):
+            for key in ("title", "objective", "conflict_turn", "character_turn", "reveal", "ending_state"):
+                assert new[key] == old[key]
+        assert sum(old["chapter_mode"] != new["chapter_mode"] for old, new in zip(original, repaired)) == 1
+        fallback = pipeline._fallback_outline_entries(run.project, bible, 1, chapters, chapters)
+        # Fallback outcomes may require a midpoint adjustment, but its mode
+        # schedule itself must already satisfy the quiet-window rule.
+        assert all(any(row["chapter_mode"] in {"breather", "aftermath"}
+                       for row in fallback[start:start + 4]) for start in range(0, chapters, 4))
+
+
+def test_whole_book_pacing_rejection_enters_bounded_replanner(configured_environment, monkeypatch):
+    plans = []
+    validations = []
+
+    def generate(session, run, bible, client, provider, model, **kwargs):
+        plans.append(kwargs)
+        return deepcopy(run.outline)
+
+    def validate(session, project, run, bible, outline, **kwargs):
+        validations.append(outline)
+        if len(validations) == 1:
+            raise pipeline.OutlinePacingValidationError("Final repair: missing breather in chapters 13-14.")
+        return outline
+
+    monkeypatch.setattr(outline_recovery, "generate_outline", generate)
+    monkeypatch.setattr(progression, "generate_spine", lambda *args: None)
+    monkeypatch.setattr(pipeline, "_validated_outline_or_fallback", validate)
+    monkeypatch.setattr(progression, "review_outline", lambda session, run, outline, *args:
+        progression.parse_review(json.dumps(clean([row["chapter_number"] for row in outline])), outline))
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=14)
+        result = progression.plan_outline(session, run, parse_story_bible(_story_bible_json()),
+                                          object(), "ollama", "test", get_settings())
+        assert result == run.outline and len(plans) == 2
+        assert "missing breather" in plans[1]["repairs"][0]["problem"]
+        assert plans[1]["repairs"][0]["source_entries"][0]["ending_state"] == run.outline[0]["ending_state"]
+        assert _events(run, "outline_pacing_replan_requested")
+
+
+def test_pacing_replan_exhaustion_still_blocks_drafting(configured_environment, monkeypatch):
+    monkeypatch.setattr(outline_recovery, "generate_outline", lambda session, run, *args, **kwargs: deepcopy(run.outline))
+    monkeypatch.setattr(progression, "generate_spine", lambda *args: None)
+    def reject(*args, **kwargs):
+        raise pipeline.OutlinePacingValidationError("Final repair: invalid pacing.")
+    monkeypatch.setattr(pipeline, "_validated_outline_or_fallback", reject)
+    monkeypatch.setattr(progression, "review_outline", lambda *args: pytest.fail("Invalid outline must not pass."))
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=14)
+        with pytest.raises(pipeline.OutlinePacingValidationError, match="invalid pacing"):
+            progression.plan_outline(session, run, parse_story_bible(_story_bible_json()),
+                object(), "ollama", "test", get_settings().model_copy(update={"autonomous_outline_repair_attempts": 2}))
+        assert len(_events(run, "outline_pacing_replan_requested")) == 1
