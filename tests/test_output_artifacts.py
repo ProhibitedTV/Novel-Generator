@@ -36,6 +36,8 @@ def test_suspected_artifact_requires_independent_evidence_verdict(configured_env
 @pytest.mark.parametrize('text',[
     'The chapter ends with Mara watching the ferry.',SYNOPSIS,
     'This chapter shows how to secure a paper ledger.',
+    'The ledger from Chapter 4 was still on the table.',
+    '"Read Chapter 21 of the handbook," Mara said.',
     '\"The chapter ended badly,\" Mara said, closing her novel.',
 ])
 def test_intentional_book_form_and_dialogue_are_not_automatically_rejected(configured_environment,monkeypatch,text):
