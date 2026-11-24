@@ -4,15 +4,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from sqlalchemy import select
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..bootstrap import run_migrations
 from ..db import build_session_factory
-from ..models import ChapterStatus, RunStatus
+from ..models import ChapterStatus, GenerationRun, RunStatus
 from ..repositories import (
     claim_next_queued_run, create_project, create_run, ensure_provider_configs,
-    get_run_for_processing,
+    get_run_for_processing, recover_running_runs,
 )
 from ..schemas import ProjectCreate, RunCreate, StoryBrief
 from ..settings import Settings, get_settings
@@ -22,6 +23,10 @@ from .runner import install_generation_runtime
 from .editorial_coverage import review_coverage
 from .autonomous_editorial import ACCEPTANCE_CONTRACT
 from .export_integrity import verify_manuscript_exports
+from .state import resume_failed_run
+from .run_recovery import release_provider_retries
+from .worker_lease import exclusive_worker_lease
+from .worker_heartbeat import maintain_worker_heartbeat
 
 
 def load_project_spec(path: Path, model: str) -> ProjectCreate:
@@ -84,6 +89,60 @@ def verification_report(run, artifacts_dir: Path) -> dict:
     }
 
 
+
+def outline_verification_report(run) -> dict:
+    """An outline qualification is not manuscript acceptance."""
+    from .autonomous_editorial import _hash
+    from .outline_progression import parse_review
+    from .prompts import parse_outline
+    expected = list(range(1, run.requested_chapters + 1))
+    outline = run.outline or []
+    error = run.error_message
+    valid = False
+    reviewed = False
+    if run.story_bible and outline:
+        try:
+            parse_outline(json.dumps({"chapters": outline}), run.requested_chapters,
+                          book_spec=run.story_bible.get("book_spec"))
+            valid = True
+            if len(outline) == 1:
+                reviewed = True  # No cross-chapter progression to review.
+            else:
+                current_hash = _hash(outline)
+                latest = next((e.payload for e in sorted(run.events, key=lambda e: e.sequence, reverse=True)
+                               if e.event_type == "outline_progression_review_completed"
+                               and e.payload.get("source_outline_hash") == current_hash), None)
+                reviewed = bool(latest and parse_review(json.dumps(latest["review"]), outline).passed)
+        except (ValueError, KeyError, TypeError) as exc:
+            error = error or str(exc)
+    chapters = sorted(run.chapters, key=lambda c: c.chapter_number)
+    accepted = bool(run.status == RunStatus.AWAITING_APPROVAL and valid and reviewed
+                    and [c.chapter_number for c in chapters] == expected
+                    and not any(c.content for c in chapters))
+    return {
+        "run_id": run.id, "model": run.model_name, "status": run.status.value,
+        "qualification_mode": "outline-only", "outline_checks_passed": accepted,
+        "outline_schema_valid": valid, "progression_passed": reviewed,
+        "requested_chapters": run.requested_chapters, "saved_outline_chapters": len(outline),
+        "pipeline_complete": False, "autonomous_checks_passed": False, "error": error,
+        "failed_attempts": sum(a.status == "failed" for a in run.stage_attempts),
+        "quality_note": "Outline qualification only; no manuscript has been accepted or exported.",
+    }
+
+
+def prepare_qualification_directory(output: Path, configuration: dict, *, resume: bool) -> None:
+    """Only open an existing isolated qualification directory with a matching manifest."""
+    marker = output / "qualification.json"
+    if resume:
+        if not marker.is_file() or not (output / "verification.db").is_file():
+            raise ValueError("Resume requires an existing qualification manifest and verification.db.")
+        if json.loads(marker.read_text(encoding="utf-8")) != configuration:
+            raise ValueError("Resume settings differ from the saved qualification. Repeat the original options.")
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+        marker.write_text(json.dumps(configuration, indent=2), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", required=True)
@@ -97,6 +156,8 @@ def main() -> int:
     parser.add_argument("--words-per-chapter", type=int, default=500)
     parser.add_argument("--context-tokens", type=int, default=32768)
     parser.add_argument("--profile", choices=["draft", "balanced", "strict", "autonomous"], default="autonomous")
+    parser.add_argument("--outline-only", action="store_true", help="Qualify the autonomous story bible and outline without drafting.")
+    parser.add_argument("--resume", action="store_true", help="Resume the same isolated qualification directory with identical options.")
     args = parser.parse_args()
     if args.chapters < 1 or args.words_per_chapter < 100:
         parser.error("Use at least one chapter and 100 words per chapter.")
@@ -105,9 +166,21 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
 
+    if args.outline_only and args.profile != "autonomous":
+        parser.error("--outline-only requires the autonomous profile.")
     output = args.output_dir.resolve()
-    # A fresh directory makes accidentally reusing a production database impossible.
-    output.mkdir(parents=True, exist_ok=False)
+    configuration = {
+        "version": 1, "model": args.model, "review_model": args.review_model,
+        "revision_model": args.revision_model, "base_url": args.base_url,
+        "context_tokens": args.context_tokens, "chapters": args.chapters,
+        "words_per_chapter": args.words_per_chapter, "profile": args.profile,
+        "outline_only": args.outline_only,
+        "project": custom_project.model_dump(mode="json") if custom_project else None,
+    }
+    try:
+        prepare_qualification_directory(output, configuration, resume=args.resume)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
     os.environ.update({
         "DATABASE_URL": f"sqlite:///{(output / 'verification.db').as_posix()}",
         "ARTIFACTS_DIR": str(output / "manuscript"),
@@ -116,7 +189,12 @@ def main() -> int:
         "OLLAMA_NUM_CTX": str(args.context_tokens),
     })
     get_settings.cache_clear()
-    settings = Settings()
+    settings = Settings().model_copy(update={"worker_exclusive": True})
+    with exclusive_worker_lease(settings):
+        return run_qualification(args, output, settings, custom_project)
+
+
+def run_qualification(args, output, settings, custom_project):
     run_migrations()
     factory = build_session_factory(settings)
     with factory() as session:
@@ -129,46 +207,71 @@ def main() -> int:
                 provider.ensure_model("ollama", model)
                 routing[stage] = {"provider_name": "ollama", "model_name": model}
         install_generation_runtime()
-        project = create_project(session, custom_project or ProjectCreate(
-            title="The Last Tide Ledger",
-            premise=("Harbor surveyor Mara Vale discovers that the tide ledger was falsified to condemn "
-                     "the old ferry district. With retired ferryman Ivo Chen she must prove the fraud "
-                     "at a public hearing before the district is demolished. The evidence costs Mara "
-                     "her position because her own signature authorized the original survey."),
-            desired_word_count=args.chapters * args.words_per_chapter,
-            requested_chapters=args.chapters,
-            min_words_per_chapter=max(100, args.words_per_chapter * 4 // 5),
-            max_words_per_chapter=args.words_per_chapter * 3 // 2,
-            preferred_model=args.model,
-            story_brief=StoryBrief(
-                genre_profile="mystery",
-                setting="A contemporary coastal harbor; no speculative technology.",
-                protagonist="Mara Vale, harbor surveyor",
-                supporting_cast=["Ivo Chen, retired ferryman"],
-                ending_target="Mara proves the fraud at the hearing, saves the district, and loses her job. Show the aftermath.",
-                world_rules=["The original ledger is paper and cannot be remotely modified.",
-                             "Mara signed the false survey before discovering the fraud."],
-                must_include=["A torn carbon copy planted early becomes evidence at the hearing."],
-                avoid=["Resurrection", "Magic", "A new antagonist or mystery replacing the ending"],
-            ),
-        ))
-        run = create_run(session, project, RunCreate(
-            project_id=project.id, pause_after_outline=False, quality_profile=args.profile,
-            developmental_rewrite_enabled=args.profile != "draft",
-            task_routing=routing,
-        ))
+        if args.resume:
+            ids = list(session.scalars(select(GenerationRun.id).limit(2)))
+            if len(ids) != 1:
+                raise ValueError("Qualification resume requires exactly one saved run.")
+            recover_running_runs(session, reason="qualification_resume")
+            session.commit()
+            run = get_run_for_processing(session, ids[0])
+            if run.status == RunStatus.FAILED:
+                resume_failed_run(session, run)
+                session.commit()
+            release_provider_retries(session)
+            session.commit()
+        else:
+            project = create_project(session, custom_project or ProjectCreate(
+                title="The Last Tide Ledger",
+                premise=("Harbor surveyor Mara Vale discovers that the tide ledger was falsified to condemn "
+                         "the old ferry district. With retired ferryman Ivo Chen she must prove the fraud "
+                         "at a public hearing before the district is demolished. The evidence costs Mara "
+                         "her position because her own signature authorized the original survey."),
+                desired_word_count=args.chapters * args.words_per_chapter,
+                requested_chapters=args.chapters,
+                min_words_per_chapter=max(100, args.words_per_chapter * 4 // 5),
+                max_words_per_chapter=args.words_per_chapter * 3 // 2,
+                preferred_model=args.model,
+                story_brief=StoryBrief(
+                    genre_profile="mystery",
+                    setting="A contemporary coastal harbor; no speculative technology.",
+                    protagonist="Mara Vale, harbor surveyor",
+                    supporting_cast=["Ivo Chen, retired ferryman"],
+                    ending_target="Mara proves the fraud at the hearing, saves the district, and loses her job. Show the aftermath.",
+                    world_rules=["The original ledger is paper and cannot be remotely modified.",
+                                 "Mara signed the false survey before discovering the fraud."],
+                    must_include=["A torn carbon copy planted early becomes evidence at the hearing."],
+                    avoid=["Resurrection", "Magic", "A new antagonist or mystery replacing the ending"],
+                ),
+            ))
+            run = create_run(session, project, RunCreate(
+                project_id=project.id, pause_after_outline=False, quality_profile=args.profile,
+                developmental_rewrite_enabled=args.profile != "draft",
+                task_routing=routing,
+            ))
+            # Only the isolated CLI requests an autonomous outline pause.
+            # Ordinary autonomous runs retain their no-approval policy.
+            if args.outline_only:
+                run.pause_after_outline = True
+            session.commit()
+        run_id = run.id
+        claimed = claim_next_queued_run(session, worker_id="local-verification")
         session.commit()
-        claim_next_queued_run(session, worker_id="local-verification")
-        session.commit()
-        run = get_run_for_processing(session, run.id)
+        run = get_run_for_processing(session, run_id)
         print(json.dumps({"run_id": run.id, "output_dir": str(output), "status": "starting"}), flush=True)
-        process_run_safe(session, run, settings, provider)
+        if claimed is not None:
+            with maintain_worker_heartbeat(factory, run_id, "local-verification",
+                    interval_seconds=min(30.0, settings.run_stale_after_seconds / 3)):
+                process_run_safe(session, run, settings, provider)
         session.expire_all()
-        run = get_run_for_processing(session, run.id)
-        report = verification_report(run, settings.artifacts_dir)
-        (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+        run = get_run_for_processing(session, run_id)
+        report = outline_verification_report(run) if args.outline_only else verification_report(run, settings.artifacts_dir)
+        report_path = output / "report.json"
+        temporary = output / "report.json.tmp"
+        temporary.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        temporary.replace(report_path)
         print(json.dumps(report, indent=2), flush=True)
-        accepted = report["pipeline_complete"] and (args.profile != "autonomous" or report["autonomous_checks_passed"])
+        accepted = (report["outline_checks_passed"] if args.outline_only else
+                    report["pipeline_complete"] and (args.profile != "autonomous" or report["autonomous_checks_passed"]))
         return 0 if accepted else 1
 
 

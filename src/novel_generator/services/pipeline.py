@@ -1698,6 +1698,7 @@ def _pause_for_outline_review(session: Session, run: GenerationRun) -> None:
     run.status = RunStatus.AWAITING_APPROVAL
     run.current_step = "outline_review"
     run.current_chapter = None
+    run.worker_id = None
     record_event(session, run, "outline_ready_for_approval", {"message": "Outline is ready for approval."})
     session.commit()
 
@@ -3065,9 +3066,6 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
 
     if not run.outline:
         _generate_outline(session, run, story_bible, client, settings)
-        if run.pause_after_outline:
-            _pause_for_outline_review(session, run)
-            return
     else:
         if autonomous_editorial.enabled(run):
             from .outline_progression import review_outline, locked_prefix
@@ -3077,6 +3075,12 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
                     "Stored outline has confirmed progression defects. Preserve the draft and continue with a rebuilt outline from the earliest affected chapter.")
         create_chapters_from_outline(session, run)
         session.commit()
+
+    # A worker may exit after committing the outline but before saving the
+    # approval pause. Honor the saved pause on recovery as well as first pass.
+    if run.pause_after_outline:
+        _pause_for_outline_review(session, run)
+        return
 
     run.continuity_ledger = _build_initial_ledger(story_bible).model_dump()
     _sync_summary_context(run, settings.chapter_summary_window)

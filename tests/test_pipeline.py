@@ -1859,3 +1859,25 @@ def test_worker_startup_recovery_only_requeues_stale_runs(configured_environment
         assert refreshed_stale.status == RunStatus.QUEUED
         assert refreshed_stale.events[-1].payload["recovery_reason"] == "worker_startup"
         assert refreshed_fresh.status == RunStatus.RUNNING
+
+
+def test_saved_outline_still_pauses_after_interruption(configured_environment):
+    settings = get_settings()
+    with get_session_factory()() as session:
+        project = _create_project(session, requested_chapters=2)
+        run = create_run(session, project, RunCreate(project_id=project.id, model_name="test-model"))
+        session.commit()
+        process_run_safe(session, run, settings, FakeOllamaClient([_story_bible_json(), _outline_json(2)]))
+        assert run.status == RunStatus.AWAITING_APPROVAL
+        before = run.outline
+        # Simulate interruption after the outline transaction, before the pause.
+        run.status = RunStatus.RUNNING
+        run.current_step = "outline"
+        run.worker_id = "replacement-worker"
+        session.commit()
+        process_run_safe(session, run, settings, FakeOllamaClient([]))
+        assert run.status == RunStatus.AWAITING_APPROVAL
+        assert run.worker_id is None
+        assert run.outline == before
+        assert all(not chapter.content for chapter in run.chapters)
+        assert len(list_stage_attempts(session, run.id)) == 2

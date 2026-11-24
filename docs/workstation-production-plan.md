@@ -45,3 +45,29 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml start worker
 ```
 
 Queue just one run. Choose Autonomous only if full source-pair QA is wanted; it has no manual outline pause. Publication mode permits outline approval and layout helpers but does not provide the same full autonomous acceptance contract. Do not present either as a guarantee of human publication quality. Monitor committed chapters and final audit coverage. Download a recovery draft if time expires; label it as a draft, and retain the actual QA verdict.
+
+
+## Qualify the exact 14-chapter planning workload first
+
+For an autonomous planning-only probe, the same production story-bible,
+outline batch, pacing validation and progression-review paths run in a separate
+database. No chapters are drafted and no manuscript acceptance is claimed.
+
+```cmd
+docker compose -f docker-compose.yml -f docker-compose.local.yml exec -T web python -m novel_generator.services.local_verification --model gemma4:26b-a4b --base-url http://host.docker.internal:11434 --chapters 14 --words-per-chapter 3000 --context-tokens 32768 --outline-only --output-dir /app/artifacts/gemma26-outline-14
+```
+
+A successful report requires `outline_checks_passed: true`, a saved outline
+with the requested chapter count, and a matching progression verdict.
+`pipeline_complete` and `autonomous_checks_passed` remain false intentionally.
+Use the usual two-chapter full-pipeline probe for prose and export checks.
+
+To resume either new qualification type after an interruption, repeat the same
+command and append `--resume`. The directory must contain its own manifest and
+database, and all original options must match. A completed qualification is
+reported without generating a new book; a failed or interrupted run resumes
+saved checkpoints. If a provider cooldown is still active, the invocation
+reports the queued state rather than bypassing the cooldown. An isolated
+exclusive lock prevents two qualification processes from opening the same
+database concurrently. Earlier probes without a manifest cannot be resumed by
+this command. Keep the production worker stopped while benchmarking.

@@ -209,3 +209,45 @@ def test_custom_story_rejects_unreachable_length_before_startup(tmp_path):
         "requested_chapters": 2, "desired_word_count": 60000, "min_words_per_chapter": 100, "max_words_per_chapter": 200}))
     with pytest.raises(ValueError, match="unreachable"):
         load_project_spec(path, "local-model")
+
+
+def test_outline_qualification_requires_current_progression_evidence(tmp_path):
+    from novel_generator.services.local_verification import outline_verification_report
+    from novel_generator.services.prompts import parse_outline, parse_story_bible
+    from test_pipeline import _outline_json, _story_bible_json
+
+    run = _run(tmp_path)
+    run.status = RunStatus.AWAITING_APPROVAL
+    run.story_bible = parse_story_bible(_story_bible_json()).model_dump()
+    run.outline = parse_outline(_outline_json(2), 2, book_spec=run.story_bible.get("book_spec"))
+    for chapter in run.chapters:
+        chapter.content = None
+        chapter.status = ChapterStatus.PENDING
+    assert not outline_verification_report(run)["outline_checks_passed"]
+    _event(run, "outline_progression_review_completed", {
+        "source_outline_hash": _hash(run.outline),
+        "review": {"reviewed_chapters": [1, 2], "progression_coherent": True, "issues": []},
+    })
+    report = outline_verification_report(run)
+    assert report["outline_checks_passed"]
+    assert not report["pipeline_complete"] and not report["autonomous_checks_passed"]
+    run.outline[0]["title"] = "Altered after review"
+    assert not outline_verification_report(run)["outline_checks_passed"]
+
+
+def test_qualification_resume_requires_exact_manifest_and_existing_database(tmp_path):
+    from novel_generator.services.local_verification import prepare_qualification_directory
+
+    output = tmp_path / "probe"
+    config = {"version": 1, "model": "local-model", "outline_only": True}
+    prepare_qualification_directory(output, config, resume=False)
+    with pytest.raises(ValueError, match="verification.db"):
+        prepare_qualification_directory(output, config, resume=True)
+    (output / "verification.db").touch()
+    prepare_qualification_directory(output, config, resume=True)
+    with pytest.raises(ValueError, match="differ"):
+        prepare_qualification_directory(output, {**config, "model": "different"}, resume=True)
+    with pytest.raises(FileExistsError):
+        prepare_qualification_directory(output, config, resume=False)
+    with pytest.raises(ValueError, match="manifest"):
+        prepare_qualification_directory(tmp_path, config, resume=True)
