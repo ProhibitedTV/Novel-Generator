@@ -18,7 +18,7 @@ def _run(tmp_path):
     run = SimpleNamespace(
         id="test-run", model_name="local-model", status=RunStatus.COMPLETED, error_message=None,
         project=SimpleNamespace(title='Synthetic test book',story_brief={}),
-        requested_chapters=2, target_word_count=1000, artifacts=artifacts,
+        requested_chapters=2, target_word_count=1000, min_words_per_chapter=5, max_words_per_chapter=8, artifacts=artifacts,
         events=[SimpleNamespace(event_type="summary_fallback", payload={"chapter_number": 1}, sequence=1, created_at=datetime.utcnow())],
         stage_attempts=[],
         chapters=[SimpleNamespace(chapter_number=number, title=f'Turn {number}', status=ChapterStatus.COMPLETED,
@@ -36,6 +36,8 @@ def _event(run, kind, payload):
 
 
 def _accept(run):
+    # The synthetic accepted manuscript contains twelve words.
+    run.target_word_count = 12
     hashes = {str(c.chapter_number): _hash(c.content) for c in run.chapters}
     def review(scope, numbers, context=None):
         _event(run, 'autonomous_review_completed', {'scope': scope,
@@ -306,3 +308,45 @@ def test_qualification_driver_never_reclaims_terminal_or_paused_run(configured_e
         run.status = terminal
         session.commit()
         assert verification.drive_qualification(session, factory, run.id, get_settings(), object()).status == terminal
+
+
+@pytest.mark.parametrize("scope", ["final_chapter", "canon_identity", "developmental_chapter", "adjacent_chapters", "whole_book"])
+def test_current_acceptance_rejects_unbound_review_evidence(tmp_path, scope):
+    run = _run(tmp_path)
+    _accept(run)
+    for event in run.events:
+        if event.payload.get("scope") == scope:
+            event.payload.pop("source_hashes")
+    report = verification_report(run, tmp_path)
+    assert report["pipeline_complete"]
+    assert not report["editorial_coverage"]["accepted"]
+    assert not report["autonomous_checks_passed"]
+
+
+@pytest.mark.parametrize("failure", ["book_short", "book_long", "chapter_short", "chapter_long"])
+def test_qualification_independently_rechecks_manuscript_length(tmp_path, failure):
+    run = _run(tmp_path)
+    _accept(run)
+    if failure == "book_short":
+        run.target_word_count = 1000
+    elif failure == "book_long":
+        run.target_word_count = 5
+    elif failure == "chapter_short":
+        run.min_words_per_chapter = 7
+    else:
+        run.max_words_per_chapter = 5
+    report = verification_report(run, tmp_path)
+    assert report["pipeline_complete"]
+    assert report["editorial_coverage"]["accepted"]
+    assert not report["autonomous_checks_passed"]
+    assert not report["length_checks"]["total_within_target" if failure.startswith("book") else "chapters_within_range"]
+
+
+def test_blank_chapter_cannot_be_accepted_even_with_matching_audit_hashes(tmp_path):
+    run = _run(tmp_path)
+    run.chapters[0].content = "   "
+    _accept(run)
+    report = verification_report(run, tmp_path)
+    assert not report["editorial_coverage"]["accepted"]
+    assert not report["pipeline_complete"]
+    assert not report["autonomous_checks_passed"]

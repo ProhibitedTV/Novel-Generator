@@ -9,10 +9,11 @@ def review_coverage(run):
     source_hashes = {str(chapter.chapter_number): _hash(chapter.content or "") for chapter in chapters}
     manuscript_hash = _hash([(chapter.chapter_number, chapter.content) for chapter in chapters])
     events = sorted(run.events, key=lambda event: event.sequence)
-    source_complete = [chapter.chapter_number for chapter in chapters] == expected and all(chapter.content for chapter in chapters)
+    source_complete = bool(expected) and [chapter.chapter_number for chapter in chapters] == expected and all((chapter.content or "").strip() for chapter in chapters)
     accepted = next((event for event in reversed(events)
         if event.event_type == "autonomous_quality_passed" and source_complete
         and (event.payload or {}).get("manuscript_hash") == manuscript_hash), None)
+    contract = (accepted.payload or {}).get("acceptance_contract", 1) if accepted else 2
     reviews = {}
     for event in events:
         payload = event.payload or {}
@@ -42,9 +43,9 @@ def review_coverage(run):
         if bound_hashes is not None:
             if bound_hashes != {str(number): source_hashes.get(str(number)) for number in numbers}:
                 continue
-        elif not accepted or event.sequence > accepted.sequence:
+        elif contract >= 2 or not accepted or event.sequence > accepted.sequence:
             # Old events did not store individual hashes. Infer their binding
-            # only inside a complete acceptance snapshot matching current prose.
+            # only for legacy contract 1 acceptance snapshots matching current prose.
             continue
         reviews[(scope, tuple(numbers))] = {
             "passed": review.passed, "checks": {
@@ -65,7 +66,6 @@ def review_coverage(run):
     chapter_passes = sum(review["passed"] for review in chapter_reviews.values())
     pair_passes = sum(review["passed"] for review in pair_reviews)
     complete = bool(accepted and chapter_passes == len(expected) and pair_passes == max(0, len(expected) - 1) and book and book["passed"])
-    contract = (accepted.payload or {}).get("acceptance_contract", 1) if accepted else 2
     if contract >= 2:
         complete = complete and developmental_passes == len(expected) and identity_passes == len(expected) and cross_passes == cross_target
     concerns = [event.payload for event in events if event.event_type == "editorial_concerns_recorded"
