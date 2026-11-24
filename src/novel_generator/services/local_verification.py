@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from sqlalchemy import select
 from datetime import datetime, timezone
 from pathlib import Path
@@ -194,17 +195,48 @@ def main() -> int:
         return run_qualification(args, output, settings, custom_project)
 
 
+def drive_qualification(session, factory, run_id, settings, provider, *, on_wait=None):
+    """Use the production cooldown queue until the isolated run actually settles."""
+    last_wait = None
+    while True:
+        release_provider_retries(session)
+        session.commit()
+        session.expire_all()
+        run = get_run_for_processing(session, run_id)
+        if run.status != RunStatus.QUEUED:
+            return run
+        if run.current_step == "provider_wait":
+            if run.error_message != last_wait:
+                last_wait = run.error_message
+                if on_wait is not None:
+                    on_wait(run)
+            # Do not hold an open transaction while the provider is offline.
+            session.commit()
+            time.sleep(min(30.0, max(1.0, settings.worker_poll_interval_seconds)))
+            continue
+        claimed = claim_next_queued_run(session, worker_id="local-verification")
+        session.commit()
+        if claimed is None or claimed.id != run_id:
+            raise RuntimeError("Isolated qualification could not claim its saved run.")
+        with maintain_worker_heartbeat(factory, run_id, "local-verification",
+                interval_seconds=min(30.0, settings.run_stale_after_seconds / 3)):
+            process_run_safe(session, claimed, settings, provider)
+        session.expire_all()
+
+
 def run_qualification(args, output, settings, custom_project):
     run_migrations()
     factory = build_session_factory(settings)
     with factory() as session:
         configs = ensure_provider_configs(session, settings)
         provider = ProviderManager(settings, configs)
-        provider.ensure_model("ollama", args.model)
+        if not args.resume:
+            provider.ensure_model("ollama", args.model)
         routing = {}
         for stage, model in (("autonomous_review", args.review_model), ("autonomous_revision", args.revision_model)):
             if model:
-                provider.ensure_model("ollama", model)
+                if not args.resume:
+                    provider.ensure_model("ollama", model)
                 routing[stage] = {"provider_name": "ollama", "model_name": model}
         install_generation_runtime()
         if args.resume:
@@ -254,16 +286,11 @@ def run_qualification(args, output, settings, custom_project):
                 run.pause_after_outline = True
             session.commit()
         run_id = run.id
-        claimed = claim_next_queued_run(session, worker_id="local-verification")
-        session.commit()
-        run = get_run_for_processing(session, run_id)
-        print(json.dumps({"run_id": run.id, "output_dir": str(output), "status": "starting"}), flush=True)
-        if claimed is not None:
-            with maintain_worker_heartbeat(factory, run_id, "local-verification",
-                    interval_seconds=min(30.0, settings.run_stale_after_seconds / 3)):
-                process_run_safe(session, run, settings, provider)
-        session.expire_all()
-        run = get_run_for_processing(session, run_id)
+        print(json.dumps({"run_id": run_id, "output_dir": str(output), "status": "starting"}), flush=True)
+        def report_wait(waiting):
+            print(json.dumps({"run_id": run_id, "status": "provider_wait",
+                              "message": waiting.error_message}), flush=True)
+        run = drive_qualification(session, factory, run_id, settings, provider, on_wait=report_wait)
         report = outline_verification_report(run) if args.outline_only else verification_report(run, settings.artifacts_dir)
         report_path = output / "report.json"
         temporary = output / "report.json.tmp"
