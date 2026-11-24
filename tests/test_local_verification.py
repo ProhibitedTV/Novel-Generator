@@ -350,3 +350,48 @@ def test_blank_chapter_cannot_be_accepted_even_with_matching_audit_hashes(tmp_pa
     assert not report["editorial_coverage"]["accepted"]
     assert not report["pipeline_complete"]
     assert not report["autonomous_checks_passed"]
+
+
+def test_qualification_evidence_aggregates_routes_wall_time_and_recovery(tmp_path):
+    from datetime import timedelta, timezone
+    run = _run(tmp_path)
+    run.started_at = datetime(2026, 11, 24, 20)
+    run.completed_at = run.started_at.replace(tzinfo=timezone.utc) + timedelta(hours=3)
+    run.recovery_count = 2
+    def attempt(stage, status, duration, metrics=None):
+        return SimpleNamespace(stage=stage, provider_name="ollama", model_name="local-model",
+                               status=status, duration_ms=duration,
+                               attempt_metadata={"provider_metrics": metrics or {}})
+    run.stage_attempts = [
+        attempt("chapter_draft", "success", 5000, {"prompt_eval_count": 100, "eval_count": 200}),
+        attempt("chapter_draft", "failed", 1000),
+        attempt("autonomous_review", "interrupted", None),
+    ]
+    identity = {"provider": "ollama", "model": "local-model", "digest": "a" * 64, "verified": True}
+    for _ in range(2):
+        _event(run, "autonomous_review_completed", {"reviewer_identity": identity, "adjudicator_identity": identity})
+    _event(run, "provider_retry_scheduled", {})
+    _event(run, "autonomous_repair_completed", {})
+    _event(run, "run_failed", {"failed_step": "chapter_draft", "chapter_number": 2,
+                               "error_type": "ProviderError", "message": "Bearer private-token"})
+    evidence = verification_report(run, tmp_path)["qualification_evidence"]
+    assert evidence["wall_seconds"] == 10800
+    assert evidence["recovery_count"] == 2
+    assert evidence["event_counts"] == {"provider_retry_scheduled": 1, "autonomous_repair_completed": 1}
+    assert evidence["observed_editorial_model_identities"] == [identity]
+    draft, review = evidence["stages"]
+    assert draft["status_counts"] == {"success": 1, "failed": 1}
+    assert draft["recorded_duration_ms"] == 6000 and draft["timed_attempts"] == 2
+    assert draft["token_metric_attempts"] == 1
+    assert (draft["prompt_tokens"], draft["completion_tokens"]) == (100, 200)
+    assert review["timed_attempts"] == 0 and review["status_counts"] == {"interrupted": 1}
+    assert evidence["last_failure"]["chapter"] == 2
+    assert "private-token" not in evidence["last_failure"]["message"]
+
+
+def test_qualification_evidence_does_not_invent_missing_metrics(tmp_path):
+    evidence = verification_report(_run(tmp_path), tmp_path)["qualification_evidence"]
+    assert evidence["wall_seconds"] is None
+    assert evidence["stages"] == []
+    assert evidence["observed_editorial_model_identities"] == []
+    assert evidence["last_failure"] is None

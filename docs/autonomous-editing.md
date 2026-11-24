@@ -226,3 +226,12 @@ fingerprints. This avoids spending a single global 24-sweep allowance on a
 24-chapter book where an edit may invalidate book-wide evidence after just one
 chapter. Individual strategy budgets remain persisted and bounded; no review
 is waived.
+
+The completed qualification report includes `qualification_evidence`: elapsed
+wall time across resumes, stage/provider/model attempt counts and recorded
+inference duration, token counts where both provider counters exist, recovery
+and repair event counts, observed editorial model identities, and the last
+recorded failure. These are historical observations, not inferred throughput or
+proof of literary quality. Missing timings and unverified model identities are
+not treated as successful evidence. Review diagnostics for private text before
+sharing them.

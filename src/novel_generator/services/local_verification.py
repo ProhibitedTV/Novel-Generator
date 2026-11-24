@@ -40,6 +40,75 @@ def load_project_spec(path: Path, model: str) -> ProjectCreate:
     return project
 
 
+def qualification_evidence(run) -> dict:
+    """Summarize persisted observations, including failed and interrupted work."""
+    from .run_diagnostics import safe_message
+
+    def utc(value):
+        if value is None:
+            return None
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+    started = utc(getattr(run, "started_at", None))
+    completed = utc(getattr(run, "completed_at", None))
+    stages = {}
+    for attempt in run.stage_attempts:
+        route = (attempt.stage, attempt.provider_name, attempt.model_name)
+        row = stages.setdefault(route, {
+            "stage": route[0], "provider": route[1], "model": route[2],
+            "attempts": 0, "status_counts": {}, "recorded_duration_ms": 0,
+            "timed_attempts": 0, "prompt_tokens": 0, "completion_tokens": 0,
+            "token_metric_attempts": 0,
+        })
+        row["attempts"] += 1
+        status = attempt.status
+        row["status_counts"][status] = row["status_counts"].get(status, 0) + 1
+        if attempt.duration_ms is not None:
+            row["timed_attempts"] += 1
+            row["recorded_duration_ms"] += attempt.duration_ms
+        metrics = (attempt.attempt_metadata or {}).get("provider_metrics") or {}
+        prompt, completion = metrics.get("prompt_eval_count"), metrics.get("eval_count")
+        if isinstance(prompt, int) and isinstance(completion, int):
+            row["token_metric_attempts"] += 1
+            row["prompt_tokens"] += prompt
+            row["completion_tokens"] += completion
+    events = sorted(run.events, key=lambda event: event.sequence)
+    identities = []
+    seen = set()
+    for event in events:
+        if event.event_type != "autonomous_review_completed":
+            continue
+        for key in ("reviewer_identity", "adjudicator_identity"):
+            identity = (event.payload or {}).get(key)
+            if isinstance(identity, dict):
+                fingerprint = json.dumps(identity, sort_keys=True)
+                if fingerprint not in seen:
+                    seen.add(fingerprint)
+                    identities.append(identity)
+    failure = next((event.payload for event in reversed(events) if event.event_type == "run_failed"), None)
+    counts = {}
+    for event in events:
+        kind = event.event_type
+        if kind.startswith("autonomous_repair_") or kind.startswith("provider_retry_") or kind in {
+            "run_requeued", "run_resume_queued", "continuity_output_rejected",
+            "continuity_checkpoint_invalidated", "autonomous_metadata_invalidated",
+        }:
+            counts[kind] = counts.get(kind, 0) + 1
+    return {
+        "started_at_utc": started.isoformat() if started else None,
+        "completed_at_utc": completed.isoformat() if completed else None,
+        "wall_seconds": max(0, (completed - started).total_seconds()) if started and completed else None,
+        "recovery_count": getattr(run, "recovery_count", 0),
+        "event_counts": counts,
+        "stages": sorted(stages.values(), key=lambda row: (-row["recorded_duration_ms"], row["stage"], row["model"])),
+        "observed_editorial_model_identities": identities,
+        "last_failure": None if failure is None else {
+            "step": failure.get("failed_step"), "chapter": failure.get("chapter_number"),
+            "type": failure.get("error_type"), "message": safe_message(failure.get("message")),
+        },
+    }
+
+
 def verification_report(run, artifacts_dir: Path) -> dict:
     from .book_specs import run_book_brief
     brief = run_book_brief(run)
@@ -68,6 +137,7 @@ def verification_report(run, artifacts_dir: Path) -> dict:
         "run_id": run.id,
         "model": run.model_name,
         "status": run.status.value,
+        "qualification_evidence": qualification_evidence(run),
         "quality_profile": getattr(run, "quality_profile", "balanced"),
         "book_form": {key: brief.get(key) for key in
                       ("book_type", "content_kind", "structure", "genre_profile", "genre_description")},
