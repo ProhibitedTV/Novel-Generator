@@ -14,7 +14,7 @@ from ..db import build_session_factory
 from ..models import ChapterStatus, GenerationRun, RunStatus
 from ..repositories import (
     claim_next_queued_run, create_project, create_run, ensure_provider_configs,
-    get_run_for_processing, recover_running_runs,
+    get_run_for_processing, recover_running_runs, record_event,
 )
 from ..schemas import ProjectCreate, RunCreate, StoryBrief
 from ..settings import Settings, get_settings
@@ -38,6 +38,36 @@ def load_project_spec(path: Path, model: str) -> ProjectCreate:
     if not project.requested_chapters * project.min_words_per_chapter <= project.desired_word_count <= project.requested_chapters * project.max_words_per_chapter:
         raise ValueError("Project word target is unreachable within its chapter word ranges.")
     return project
+
+
+def qualification_launch_evidence(args, settings, provider) -> dict:
+    """Capture non-secret controls and initial installed model identities."""
+    from .provider_errors import ProviderError
+    from .run_diagnostics import safe_message
+
+    fields = (
+        "ollama_num_ctx", "ollama_num_predict", "ollama_structured_temperature",
+        "ollama_think", "ollama_continuity_think", "ollama_continuity_temperature",
+        "ollama_adjudication_think", "ollama_adjudication_temperature",
+        "ollama_adaptive_runtime", "provider_chat_timeout_seconds",
+        "provider_recovery_attempts", "autonomous_chapter_repair_attempts",
+        "autonomous_prose_repair_attempts", "autonomous_targeted_repair_attempts",
+        "autonomous_manuscript_repair_rounds", "autonomous_outline_repair_attempts",
+    )
+    controls = {key: getattr(settings, key) for key in fields}
+    routes = {"author": args.model, "review": args.review_model or args.model,
+              "revision": args.revision_model or args.model}
+    observations = {}
+    # A resumed run may be waiting for an offline provider. Never add a
+    # prerequisite network call to that recovery path.
+    if not args.resume:
+        for model in dict.fromkeys(routes.values()):
+            try:
+                observations[model] = provider.model_identity("ollama", model)
+            except ProviderError as exc:
+                observations[model] = {"verified": False, "error": safe_message(str(exc))}
+    return {"manual_resume": bool(args.resume), "controls": controls,
+            "requested_model_roles": routes, "initial_model_observations": observations}
 
 
 def qualification_evidence(run) -> dict:
@@ -99,6 +129,9 @@ def qualification_evidence(run) -> dict:
         "completed_at_utc": completed.isoformat() if completed else None,
         "wall_seconds": max(0, (completed - started).total_seconds()) if started and completed else None,
         "recovery_count": getattr(run, "recovery_count", 0),
+        "qualification_launches": [event.payload for event in events if event.event_type == "qualification_launch"],
+        "explicit_resume_observed": any(event.event_type == "run_resume_queued" or
+            (event.event_type == "qualification_launch" and event.payload.get("manual_resume")) for event in events),
         "event_counts": counts,
         "stages": sorted(stages.values(), key=lambda row: (-row["recorded_duration_ms"], row["stage"], row["model"])),
         "observed_editorial_model_identities": identities,
@@ -418,6 +451,8 @@ def run_qualification(args, output, settings, custom_project):
             if args.outline_only:
                 run.pause_after_outline = True
             session.commit()
+        record_event(session, run, "qualification_launch", qualification_launch_evidence(args, settings, provider))
+        session.commit()
         run_id = run.id
         print(json.dumps({"run_id": run_id, "output_dir": str(output), "status": "starting"}), flush=True)
         def report_wait(waiting):
