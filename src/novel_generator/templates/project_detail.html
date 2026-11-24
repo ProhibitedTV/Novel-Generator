@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "library_actions.html" import project_actions %}
 
 {% block title %}{{ project.title }} - Novel Generator{% endblock %}
 
@@ -54,6 +55,12 @@
   </section>
 {% endif %}
 
+{% if library_summary.focus %}
+<section class="panel" aria-label="Current draft">
+  <div class="section-header"><div class="section-header-copy"><h2>Current draft</h2><p>Return to the active or most recent run before starting another.</p></div></div>
+  {{ project_actions(library_summary) }}
+</section>
+{% endif %}
 <section class="project-command-bar" aria-label="Project summary">
   <div class="project-command-summary">
     <span class="detail-label">Complete book target</span>
