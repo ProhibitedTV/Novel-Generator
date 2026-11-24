@@ -2744,3 +2744,67 @@ code {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+
+
+/* Compact studio: preserve content, controls and readable type, remove excess
+   chrome. The reader keeps its own generous typography and margins. */
+.shell-header { padding: .65rem 0 .5rem; gap: .5rem; }
+.brand-block { display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap; }
+.brand { font-size: 1.2rem; letter-spacing: 0; }
+.brand-copy { font-size: .78rem; }
+.shell-nav { gap: .25rem; }
+.shell-nav a { font-size: .86rem; padding: .45rem .65rem; min-height: 36px; }
+.shell-main { gap: .75rem; }
+.shell-main :is(.panel:not(.reader-shell), .hero-card, .status-card, .callout, .page-banner) { padding: .85rem; box-shadow: none; }
+.shell-main :is(.panel, .hero-card, .callout) h1 { font-size: clamp(1.35rem, 2.5vw, 1.8rem); line-height: 1.25; }
+.shell-main :is(.panel, .hero-card, .callout) h2 { font-size: 1.15rem; line-height: 1.35; }
+.shell-main .reader-page h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); line-height: 1.2; }
+.shell-main .hero-copy { font-size: .94rem; line-height: 1.48; max-width: none; }
+.section-header { margin-bottom: .65rem; gap: .6rem; }
+.grid, .workspace-view { gap: .75rem; }
+.project-list, .run-table, .artifact-list, .chapter-list { gap: .5rem; }
+.project-card, .run-row, .artifact-card, .action-card { padding: .7rem; box-shadow: none; }
+.project-card .chapter-copy { -webkit-line-clamp: 2; }
+.run-row-event { -webkit-line-clamp: 2; }
+.project-premise-preview { -webkit-line-clamp: 2; }
+.workspace-nav { padding: .25rem; gap: .2rem; box-shadow: none; }
+.workspace-nav a { padding: .45rem .65rem; font-size: .85rem; }
+.run-command-center, .run-operations { gap: .5rem; }
+.compact-run-status { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: .5rem; }
+.compact-run-status .run-status-primary { display: flex; flex-wrap: wrap; align-items: center; }
+.compact-run-status :is(.run-status-primary, .run-status-item) { min-height: 0; padding: .55rem .65rem; align-content: center; }
+.compact-run-status .run-status-item strong { font-size: 1rem; }
+.run-progress-rails { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+.progress-rail { padding: .5rem .65rem; gap: .3rem; }
+.run-health-meta { gap: .5rem; }
+.run-health-card .eyebrow { margin: 0; }
+.book-completion-panel { margin-top: 0; padding: .65rem; gap: .45rem; }
+.book-completion-panel .section-header { margin: 0; }
+.book-completion-score { min-width: 4rem; }
+.book-completion-score strong { font-size: 1.45rem; }
+.compact-details { padding: .5rem .65rem; margin-top: 0; }
+.compact-details > :not(summary) { margin-top: .5rem; }
+.run-management-actions { min-width: auto; }
+.run-connection { gap: .4rem; }
+.run-failure-panel { padding: .75rem; }
+.project-command-bar { display: none; } /* target is already shown in the project header */
+@media (max-width: 980px) {
+  .shell-header { display: flex; }
+  .run-health-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .brand-copy { display: none; }
+  .shell-nav { width: 100%; }
+  .shell-nav a { flex: 1 1 auto; min-height: 44px; }
+  .workspace-nav a { flex: 0 0 auto; min-height: 44px; display: inline-flex; align-items: center; }
+  .workspace-nav { flex-wrap: wrap; }
+  .compact-run-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compact-run-status .run-status-primary { grid-column: 1 / -1; }
+  .run-progress-rails { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .run-health-meta { grid-template-columns: 1fr; }
+  .run-shell > .section-header .hero-actions { display: flex; flex-wrap: wrap; }
+  .run-shell > .section-header .hero-actions > :is(a, form, details) { width: auto; flex: 1 1 auto; }
+  .run-shell > .section-header .hero-actions :is(button, .button) { min-height: 44px; }
+  .workspace-shortcuts { display: flex; flex-wrap: wrap; }
+  .workspace-shortcuts > a { flex: 1 1 auto; min-height: 44px; }
+}

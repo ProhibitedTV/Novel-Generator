@@ -26,9 +26,7 @@
   <script type="application/json" data-run-stages-json>{{ run_stage_data|tojson }}</script>
   <div class="section-header">
     <div class="page-header-copy">
-      <p class="eyebrow">Book workspace</p>
       <h1>{{ project.title }}</h1>
-      <p class="hero-copy">Follow your book from first draft to editorial review and export.</p>
     </div>
     <div class="hero-actions">
       <a class="button secondary" href="/projects/{{ project.id }}">Back to project</a>
@@ -85,48 +83,25 @@
   </section>
   <div class="workspace-view" data-workspace-view="overview" id="book-overview">
   <div class="run-command-center">
-    <div class="run-status-strip">
+    <div class="run-status-strip compact-run-status">
       <div class="run-status-primary">
-        <span class="detail-label">Status</span>
         <span class="badge status-{{ run.status.value }}" data-run-status-label>{{ run.status.value.replace("_", " ") }}</span>
         <strong data-run-step-label>{{ current_stage_context.label }}</strong>
       </div>
       <div class="run-status-item">
-        <span class="detail-label">Chapter</span>
-        <strong data-run-chapter-label>{{ run.current_chapter or "-" }}</strong>
-        <span class="field-note">{{ run.requested_chapters }} planned</span>
+        <span class="detail-label">Current chapter</span>
+        <strong><span data-run-chapter-label>{{ run.current_chapter or "-" }}</span> / {{ run.requested_chapters }}</strong>
       </div>
       <div class="run-status-item">
         <span class="detail-label">Elapsed</span>
         <strong data-run-elapsed>{{ "Starting soon" if not run.started_at else "-" }}</strong>
-        <span class="field-note">Pipeline v{{ run.pipeline_version or 1 }}</span>
-      </div>
-      <div class="run-status-item">
-        <span class="detail-label">Profile</span>
-        <strong>{{ quality_profile.label }}</strong>
-        <span class="field-note">{{ quality_profile.summary }}</span>
-      </div>
-      <div class="run-status-item">
-        <span class="detail-label">Words</span>
-        <strong data-run-word-progress>{{ total_run_words }}</strong>
-        <span class="field-note"><span data-run-word-progress-label>{{ word_progress_percent }}%</span> of {{ run.target_word_count }}</span>
-      </div>
-      <div class="run-status-item">
-        <span class="detail-label">Complete</span>
-        <strong data-run-completed-chapters>{{ completed_chapter_count }}</strong>
-        <span class="field-note">chapters saved</span>
-      </div>
-      <div class="run-status-item">
-        <span class="detail-label">Events</span>
-        <strong data-run-event-count>{{ event_count }}</strong>
-        <span class="field-note"><span data-run-artifact-count>{{ run.artifacts|length }}</span> artifacts</span>
       </div>
     </div>
 
     <div class="run-progress-rails">
       <div class="progress-rail">
         <div class="progress-rail-topline">
-          <span class="detail-label">Chapter completion</span>
+          <span class="detail-label">Chapters complete</span>
           <strong data-run-chapter-progress-label>{{ completed_chapter_count }} / {{ run.requested_chapters }}</strong>
         </div>
         <div class="progress-track" aria-hidden="true">
@@ -135,8 +110,8 @@
       </div>
       <div class="progress-rail">
         <div class="progress-rail-topline">
-          <span class="detail-label">Word target</span>
-          <strong><span data-run-word-progress-label>{{ word_progress_percent }}%</span></strong>
+          <span class="detail-label">Words <span data-run-word-progress>{{ total_run_words }}</span> / {{ run.target_word_count }}</span>
+          <strong data-run-word-progress-label>{{ word_progress_percent }}%</strong>
         </div>
         <div class="progress-track" aria-hidden="true">
           <span data-run-word-progress-bar style="width: {{ word_progress_percent }}%"></span>
@@ -194,6 +169,10 @@
           <span class="detail-value">{{ quality_profile.label }} - {{ quality_profile.summary }}</span>
         </div>
         <div class="detail-item">
+          <span class="detail-label">Saved checkpoints</span>
+          <span class="detail-value"><span data-run-completed-chapters>{{ completed_chapter_count }}</span> complete chapters · <span data-run-event-count>{{ event_count }}</span> events · <span data-run-artifact-count>{{ run.artifacts|length }}</span> artifacts · Pipeline v{{ run.pipeline_version or 1 }}</span>
+        </div>
+        <div class="detail-item">
           <span class="detail-label">Queued</span>
           <span class="detail-value">{{ run.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
         </div>
@@ -229,8 +208,8 @@
   <section class="book-completion-panel" data-book-completion>
     <div class="section-header">
       <div class="section-header-copy">
-        <p class="eyebrow">Complete book target</p>
-        <h2>{{ book_completion.title }}</h2>
+        <h2>Complete book target</h2>
+        <p>{{ book_completion.title }}</p>
         <p>{{ book_completion.body }}</p>
       </div>
       <div class="book-completion-score">
