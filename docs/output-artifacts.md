@@ -30,3 +30,15 @@ Adjudication rejected a false allegation against the nonfiction control; its
 matching wording alone did not authorize a rewrite. All three verdicts matched
 the expected outcomes. This narrow qualification is not an evaluation across
 all genres or artifact patterns. Private source and detailed results stay local.
+
+## Recovering saved chapter prose
+
+The run's Edition snapshot offers **Download recovery draft (unreviewed)** as
+soon as saved chapter prose is available. The endpoint
+`GET /api/runs/{run_id}/recovery-draft` returns a Markdown attachment directly
+from committed database content, including failed or in-progress runs. It
+preserves raw prose, chapter order and status, lists missing chapter numbers,
+and explicitly identifies the file as a recovery draft rather than a publication
+export. Empty runs return HTTP 409; unknown runs return HTTP 404. No model call,
+filesystem write, database mutation, or publication acceptance is performed.
+A recovery snapshot is not a substitute for a database backup or final QA.
