@@ -46,7 +46,7 @@
       <p class="error-text">{{ form_errors.__all__ }}</p>
     {% endif %}
 
-    <form method="post" action="/projects/new" class="stack-form">
+    <form method="post" action="/projects/new" class="stack-form" data-single-submit>
       <label>
         Title
         <input class="{{ 'input-invalid' if form_errors.title }}" type="text" name="title" value="{{ form_values.title }}" required placeholder="The Glass Orchard">
@@ -352,6 +352,7 @@
         <button class="secondary" type="submit" name="action" value="save">Save project only</button>
         <a class="button secondary" href="/projects">Cancel</a>
       </div>
+      <p class="field-note" role="status" data-submission-status hidden>Submitting your book settings. No second submission is needed.</p>
     </form>
   </article>
 
