@@ -5,7 +5,7 @@
 {% block content %}
 <nav class="workspace-nav" aria-label="Book workspace" data-workspace-nav data-default-view="{{ 'plan' if awaiting_outline_approval else 'overview' }}">
     <a href="#book-overview" data-workspace-link="overview">Overview</a>
-    <a href="#book-manuscript" data-workspace-link="manuscript">Read manuscript</a>
+    <a href="#book-manuscript" data-workspace-link="manuscript">Manuscript</a>
     <a href="#book-plan" data-workspace-link="plan">Story plan</a>
     <a href="#book-editorial" data-workspace-link="editorial">Editorial review</a>
     <a href="#book-exports" data-workspace-link="exports">Downloads</a>
@@ -226,7 +226,7 @@
     </details>
   </section>
   <div class="workspace-shortcuts">
-    <a class="button" href="#book-manuscript">Read saved chapters</a>
+    <a class="button" href="/runs/{{ run.id }}/read">Read saved chapters</a>
     <a class="button secondary" href="#book-editorial">Check editorial readiness</a>
     <a class="button secondary" href="#book-exports">Download files</a>
   </div>
@@ -242,6 +242,7 @@
           <p>{{ manuscript_edition.snapshot_label }} #{{ manuscript_edition.edition_number }}. Use this workspace to verify chapter coverage, final-edit state, QA, and export readiness before treating the run as the book candidate.</p>
         </div>
         <div class="hero-actions">
+          <a class="button" href="/runs/{{ run.id }}/read">Open book reader</a>
           {% if manuscript_edition.primary_artifact %}
             <a class="button" href="/api/artifacts/{{ manuscript_edition.primary_artifact.id }}/download">Download manuscript</a>
           {% endif %}
@@ -1392,6 +1393,12 @@
       <p>{{ run.artifacts|length }} ready</p>
     </div>
 
+    {% if run.chapters|selectattr("content")|list %}
+      <a class="artifact-card" href="/api/runs/{{ run.id }}/recovery-draft">
+        <span class="artifact-kind">Saved prose</span>
+        <div class="artifact-meta"><strong>Download recovery draft (unreviewed)</strong><span class="detail-value">Available even before final review or export.</span></div>
+      </a>
+    {% endif %}
     {% if qa_artifact %}
       <a class="artifact-card qa-artifact-card" href="/api/artifacts/{{ qa_artifact.id }}/download">
         <span class="artifact-kind">editorial feedback</span>
@@ -1694,6 +1701,7 @@
             {% endif %}
 
             {% if chapter.content %}
+              <a class="button secondary" href="/runs/{{ run.id }}/read?chapter={{ chapter.chapter_number }}">Read chapter</a>
               <details class="chapter-preview-shell chapter-review-section" data-review-section>
                 <summary>
                   <span>Preview chapter text</span>

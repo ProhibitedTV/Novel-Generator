@@ -9,11 +9,11 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_app_settings, get_db, get_templates
-from ..models import ChapterStatus, GenerationRun, Project, RunStageAttempt, RunStatus
+from ..models import ChapterDraft, ChapterStatus, GenerationRun, Project, RunStageAttempt, RunStatus
 from ..repositories import (
     create_project,
     create_run,
@@ -3732,6 +3732,49 @@ def run_detail(
             **_run_dashboard_context(run),
         },
     )
+
+
+@router.get("/runs/{run_id}/read")
+def read_manuscript(
+    run_id: str,
+    request: Request,
+    chapter: int | None = None,
+    db: Session = Depends(get_db),
+):
+    # Fetch the book identity and saved chapter index without loading event logs,
+    # review payloads, or the prose of every chapter.
+    run = db.execute(
+        select(GenerationRun.id, GenerationRun.status, GenerationRun.requested_chapters,
+               Project.title.label("book_title"))
+        .join(Project, GenerationRun.project_id == Project.id)
+        .where(GenerationRun.id == run_id)
+    ).one_or_none()
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    chapters = db.execute(
+        select(ChapterDraft.chapter_number, ChapterDraft.title, ChapterDraft.status)
+        .where(ChapterDraft.run_id == run_id, func.length(func.trim(ChapterDraft.content)) > 0)
+        .order_by(ChapterDraft.chapter_number)
+    ).all()
+    selected = next((row for row in chapters if row.chapter_number == chapter), None)
+    if chapter is not None and selected is None:
+        raise HTTPException(status_code=404, detail="Saved chapter not found.")
+    if selected is None and chapters:
+        selected = chapters[0]
+    prose = ""
+    previous = following = None
+    if selected is not None:
+        position = chapters.index(selected)
+        previous = chapters[position - 1] if position > 0 else None
+        following = chapters[position + 1] if position + 1 < len(chapters) else None
+        prose = db.scalar(select(ChapterDraft.content).where(
+            ChapterDraft.run_id == run_id,
+            ChapterDraft.chapter_number == selected.chapter_number,
+        )) or ""
+    return _render(request, "manuscript_reader.html", {
+        "active_nav": "projects", "run": run, "chapters": chapters,
+        "selected": selected, "prose": prose, "previous": previous, "following": following,
+    })
 
 
 @router.post("/runs/{run_id}/publication-export")

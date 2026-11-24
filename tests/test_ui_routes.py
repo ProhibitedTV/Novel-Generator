@@ -1595,3 +1595,37 @@ def test_recovery_draft_download_preserves_saved_prose_without_acceptance(client
         run.status = RunStatus.RUNNING
         session.commit()
     assert "Run status: running" in client.get(url).text
+
+
+def test_manuscript_reader_only_loads_selected_saved_chapter(client):
+    _, run_id = seed_project_and_run()
+    url = f"/runs/{run_id}/read"
+    assert "No saved prose yet" in client.get(url).text
+    assert client.get("/runs/missing/read").status_code == 404
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        run.outline = [outline_entry(n) for n in range(1, 5)]
+        create_chapters_from_outline(session, run)
+        session.flush()
+        session.refresh(run, attribute_names=["chapters"])
+        run.chapters[0].content = "Unique first prose <script>alert(1)</script>."
+        run.chapters[2].content = "Unique third prose."
+        run.status = RunStatus.RUNNING
+        session.commit()
+    first = client.get(url)
+    assert first.status_code == 200
+    assert "Unique first prose &lt;script&gt;" in first.text
+    assert "<script>alert(1)</script>" not in first.text
+    assert "Unique third prose." not in first.text
+    assert "2 of 4 chapters with saved prose" in first.text
+    assert f'href="{url}?chapter=3"' in first.text
+    assert "data-event-log" not in first.text
+    third = client.get(url + "?chapter=3")
+    assert third.status_code == 200
+    assert "Unique third prose." in third.text
+    assert "Unique first prose" not in third.text
+    assert f'href="{url}?chapter=1"' in third.text
+    assert client.get(url + "?chapter=2").status_code == 404
+    assert client.get(url + "?chapter=4").status_code == 404
+    with get_session_factory()() as session:
+        assert get_run(session, run_id).status == RunStatus.RUNNING
