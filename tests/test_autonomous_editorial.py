@@ -1443,6 +1443,8 @@ def test_core_stage_interruptions_never_become_content_fallbacks(configured_envi
     monkeypatch.setattr(pipeline, "_supervised_provider_chat", interrupt)
     with get_session_factory()() as session:
         run = make_run(session)
+        run.continuity_ledger = pipeline._build_initial_ledger(pipeline._story_bible_from_run(run)).model_dump()
+        session.commit()
         chapter = run.chapters[0]
         original = chapter.content
         if stage == "chapter_plan":
