@@ -154,7 +154,11 @@ def _rewrite_manuscript_chapters(
             data_start = start + len(label)
             end = content.find(marker, data_start)
             if end >= 0:
-                item["content"] = content[:data_start] + compact_json + content[end:]
+                item["content"] = (
+                    content[:start]
+                    + "Manuscript chapter capsules (summaries, QA signals and selected excerpts; NOT full chapter prose):\n"
+                    + compact_json + content[end:]
+                )
                 replaced = True
         rewritten.append(item)
 

@@ -1417,6 +1417,14 @@
         <div class="artifact-meta"><strong>Download recovery draft (unreviewed)</strong><span class="detail-value">Available even before final review or export.</span></div>
       </a>
     {% endif %}
+    {% for event in run.events if event.event_type == "draft_edition_saved" %}
+      {% if event.payload.stage in ["first-draft", "structural-draft"] %}
+      <a class="artifact-card" href="/api/runs/{{ run.id }}/draft-editions/{{ event.payload.stage }}">
+        <span class="artifact-kind">Working edition</span>
+        <div class="artifact-meta"><strong>{{ "Complete first draft" if event.payload.stage == "first-draft" else "Post-developmental draft" }}</strong><span class="detail-value">{{ event.payload.words }} words · Preserved before later editing · Not a publication export</span></div>
+      </a>
+      {% endif %}
+    {% endfor %}
     {% if qa_artifact %}
       <a class="artifact-card qa-artifact-card" href="/api/artifacts/{{ qa_artifact.id }}/download">
         <span class="artifact-kind">editorial feedback</span>
