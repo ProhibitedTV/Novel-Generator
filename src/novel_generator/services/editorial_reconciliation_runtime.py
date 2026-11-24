@@ -56,19 +56,8 @@ def _record(pipeline: Any, session: Any, run: Any, event_type: str, payload: dic
 
 
 def _must_propagate(run, error):
-    """Never swallow cancellation or an unattended run's provider outage."""
-    from .pipeline import RunCanceled
-    from .provider_errors import ProviderTransportError
-
-    seen = set()
-    while error is not None and id(error) not in seen:
-        seen.add(id(error))
-        if isinstance(error, RunCanceled):
-            return True
-        if getattr(run, "quality_profile", None) == "autonomous" and isinstance(error, ProviderTransportError):
-            return True
-        error = error.__cause__
-    return False
+    from .pipeline import _must_propagate_stage_error
+    return _must_propagate_stage_error(run, error)
 
 
 def reconcile_developmental_continuity(

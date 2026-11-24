@@ -1429,3 +1429,36 @@ def test_final_length_repair_precedes_expensive_book_context_audits(configured_e
         assert expensive <= {scope for scope, repaired in scopes if repaired}
         from novel_generator.services.editorial_coverage import review_coverage
         assert review_coverage(run)["accepted"]
+
+
+@pytest.mark.parametrize("stage", ["manuscript_qa", "developmental_rewrite", "final_edit", "chapter_plan"])
+@pytest.mark.parametrize("failure", ["transport", "canceled"])
+def test_core_stage_interruptions_never_become_content_fallbacks(configured_environment, monkeypatch, stage, failure):
+    from novel_generator.services.provider_errors import ProviderTransportError
+    error = ProviderTransportError("Temporary model outage") if failure == "transport" else pipeline.RunCanceled("Canceled")
+    def interrupt(*args, **kwargs):
+        raise error
+    install_fake_provider(monkeypatch)
+    monkeypatch.setattr(pipeline, "_generate_structured_output", interrupt)
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", interrupt)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        run.continuity_ledger = pipeline._build_initial_ledger(pipeline._story_bible_from_run(run)).model_dump()
+        session.commit()
+        chapter = run.chapters[0]
+        original = chapter.content
+        if stage == "chapter_plan":
+            chapter.plan = None
+            session.commit()
+        with pytest.raises(type(error)):
+            if stage == "manuscript_qa":
+                pipeline._run_manuscript_qa(session, run, run.chapters, object())
+            elif stage == "developmental_rewrite":
+                pipeline._run_developmental_rewrite(session, run, run.chapters, ManuscriptQaReport(), object())
+            elif stage == "final_edit":
+                pipeline._run_final_editing_pass(session, run, run.chapters, ManuscriptQaReport(), None, object())
+            else:
+                pipeline._draft_chapter(session, run, chapter, pipeline._outline_entry(run, 1),
+                                        pipeline._story_bible_from_run(run), get_settings(), object())
+        assert chapter.content == original
+        assert not any("fallback" in event.event_type for event in run.events)

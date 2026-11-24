@@ -89,6 +89,19 @@ class RunCanceled(Exception):
     pass
 
 
+def _must_propagate_stage_error(run, error):
+    """Never swallow cancellation or an unattended run's provider outage."""
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, RunCanceled):
+            return True
+        if getattr(run, "quality_profile", None) == "autonomous" and isinstance(error, ProviderTransportError):
+            return True
+        error = error.__cause__
+    return False
+
+
 class OutlinePacingValidationError(autonomous_editorial.AutonomousQualityError):
     """A generated outline failed whole-book validation after local repairs."""
 
@@ -1420,6 +1433,8 @@ def _generate_story_bible(session: Session, run: GenerationRun, settings: Settin
             "story_bible",
         )
     except Exception as exc:
+        if _must_propagate_stage_error(run, exc):
+            raise
         story_bible = _fallback_story_bible(project, run)
         if autonomous_editorial.enabled(run):
             raise autonomous_editorial.AutonomousQualityError("Story-bible generation failed; autonomous mode cannot proceed with placeholder canon.") from exc
@@ -1502,6 +1517,8 @@ def _generate_outline_chunks(
                 None,
             )
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             if autonomous_editorial.enabled(run):
                 raise autonomous_editorial.AutonomousQualityError("Outline chunk generation failed; autonomous mode requires a validated plot.") from exc
             chunk = _fallback_outline_entries(
@@ -1574,6 +1591,8 @@ def _generate_outline(session: Session, run: GenerationRun, story_bible: StoryBi
             )
         run.outline = outline if autonomous_editorial.enabled(run) else _validated_outline_or_fallback(session, project, run, story_bible, outline)
     except Exception as exc:
+        if _must_propagate_stage_error(run, exc):
+            raise
         fallback = _fallback_outline_entries(project, story_bible, 1, run.requested_chapters, run.requested_chapters)
         if autonomous_editorial.enabled(run):
             raise autonomous_editorial.AutonomousQualityError(f"Outline generation failed; saved batches can be resumed. {exc}") from exc
@@ -1696,6 +1715,8 @@ def _expand_chapter_to_minimum(
             )
             session.commit()
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             chapter.word_count = len((chapter.content or "").split())
             record_event(
                 session,
@@ -1782,6 +1803,8 @@ def _load_draft_continuity(session, run, chapter, ledger, story_bible, outline_e
             "continuity_update", chapter.chapter_number,
         )
     except Exception as exc:
+        if _must_propagate_stage_error(run, exc):
+            raise
         if autonomous:
             raise autonomous_editorial.AutonomousQualityError("Continuity extraction failed; autonomous mode cannot invent a checkpoint from the outline.") from exc
         update = _fallback_continuity_update(chapter, ledger, outline_entry, plan)
@@ -1847,6 +1870,8 @@ def _draft_chapter(
                 chapter.chapter_number,
             )
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             plan = _fallback_chapter_plan(chapter, outline_entry, story_bible)
             record_event(
                 session,
@@ -1963,6 +1988,8 @@ def _draft_chapter(
                     chapter.chapter_number,
                 )
             except Exception as exc:
+                if _must_propagate_stage_error(run, exc):
+                    raise
                 critique = _fallback_chapter_critique(chapter, lint_result)
                 record_event(
                     session,
@@ -2072,6 +2099,8 @@ def _draft_chapter(
                     chapter.chapter_number,
                 )
             except Exception as exc:
+                if _must_propagate_stage_error(run, exc):
+                    raise
                 final_critique = _fallback_chapter_critique(chapter, final_lint)
                 record_event(
                     session,
@@ -2111,6 +2140,8 @@ def _draft_chapter(
             if not chapter.summary:
                 raise RuntimeError(f"Chapter {chapter.chapter_number} summary was empty.")
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             if autonomous_editorial.enabled(run):
                 raise autonomous_editorial.AutonomousQualityError("Chapter summary failed; autonomous continuity requires a summary of the actual prose.") from exc
             chapter.summary = _fallback_chapter_summary(chapter, outline_entry, plan)
@@ -2181,6 +2212,8 @@ def _run_manuscript_qa(
             "manuscript_qa",
         )
     except Exception as exc:
+        if _must_propagate_stage_error(run, exc):
+            raise
         fallback_message = (
             "Manuscript QA model output was unusable after repair; generated a deterministic QA report instead."
         )
@@ -2556,6 +2589,8 @@ def _run_publication_humanization_pass(
             )
             session.commit()
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             chapter.word_count = len((chapter.content or "").split())
             record_event(
                 session,
@@ -2648,6 +2683,8 @@ def _run_publication_compression_pass(
             )
             session.commit()
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             chapter.word_count = len((chapter.content or "").split())
             record_event(
                 session,
@@ -2765,6 +2802,8 @@ def _run_developmental_rewrite(
             "developmental_rewrite",
         )
     except Exception as exc:
+        if _must_propagate_stage_error(run, exc):
+            raise
         record_event(
             session,
             run,
@@ -2966,6 +3005,8 @@ def _run_developmental_revision_waves(
             )
             session.commit()
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             chapter.word_count = len((chapter.content or "").split())
             record_event(
                 session,
@@ -3075,6 +3116,8 @@ def _run_final_editing_pass(
             )
             session.commit()
         except Exception as exc:
+            if _must_propagate_stage_error(run, exc):
+                raise
             chapter.word_count = len((chapter.content or "").split())
             record_event(
                 session,
