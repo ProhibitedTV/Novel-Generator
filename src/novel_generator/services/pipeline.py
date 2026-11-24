@@ -482,6 +482,40 @@ def _outline_entry(run: GenerationRun, chapter_number: int) -> StructuredOutline
     raise RuntimeError(f"Structured outline entry for chapter {chapter_number} was not found.")
 
 
+def _merge_named_continuity_state(previous, changes, entities):
+    """Resolve explicit canon aliases before applying new state changes.
+
+    Unknown names and ambiguous aliases are left untouched; this is not fuzzy
+    entity matching. If a single update supplies contradictory alias values,
+    retain both for editorial inspection instead of guessing which is true.
+    """
+    def key(name):
+        return " ".join(name.casefold().split())
+
+    owners = {}
+    for entity in entities:
+        item = CanonicalEntity.model_validate(entity)
+        for name in (item.name, *item.aliases):
+            owners.setdefault(key(name), set()).add(item.name)
+    lookup = {alias: next(iter(names)) for alias, names in owners.items() if len(names) == 1}
+
+    def normalize(states):
+        groups = {}
+        for name, value in states.items():
+            groups.setdefault(lookup.get(key(name), name), []).append((name, value))
+        result = {}
+        for canonical, rows in groups.items():
+            if len({value for _, value in rows}) == 1:
+                result[canonical] = rows[0][1]
+            else:
+                # Contradictory state assertions are evidence, not something
+                # an alias normalization helper should adjudicate.
+                result.update(rows)
+        return result
+
+    return {**normalize(previous), **normalize(changes)}
+
+
 def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinuityUpdate) -> ContinuityLedger:
     collisions = detect_canonical_entity_collisions(current_ledger.active_entities, update.new_entities_introduced)
     if collisions:
@@ -509,15 +543,16 @@ def _ledger_from_update(current_ledger: ContinuityLedger, update: ChapterContinu
             )
         system_state_transitions.append(transition)
 
+    entities = merge_canonical_entities(current_ledger.active_entities, update.new_entities_introduced)
     return ContinuityLedger(
         current_patch_status=update.current_patch_status or current_ledger.current_patch_status,
-        character_states={**current_ledger.character_states, **update.character_states},
+        character_states=_merge_named_continuity_state(current_ledger.character_states, update.character_states, entities),
         world_state=update.world_state or current_ledger.world_state,
         open_threads=_dedupe([*current_ledger.open_threads, *update.open_threads]),
         resolved_threads=_dedupe([*current_ledger.resolved_threads, *update.resolved_threads]),
         timeline=timeline,
-        active_entities=merge_canonical_entities(current_ledger.active_entities, update.new_entities_introduced),
-        entity_state_changes={**current_ledger.entity_state_changes, **update.entity_state_changes},
+        active_entities=entities,
+        entity_state_changes=_merge_named_continuity_state(current_ledger.entity_state_changes, update.entity_state_changes, entities),
         open_promises_by_name={**current_ledger.open_promises_by_name, **update.open_promises_by_name},
         ideology_state_by_character={**current_ledger.ideology_state_by_character, **update.ideology_state_by_character},
         memory_damage={**current_ledger.memory_damage, **update.memory_damage},
