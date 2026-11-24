@@ -55,6 +55,22 @@ def _record(pipeline: Any, session: Any, run: Any, event_type: str, payload: dic
         recorder(session, run, event_type, payload)
 
 
+def _must_propagate(run, error):
+    """Never swallow cancellation or an unattended run's provider outage."""
+    from .pipeline import RunCanceled
+    from .provider_errors import ProviderTransportError
+
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, RunCanceled):
+            return True
+        if getattr(run, "quality_profile", None) == "autonomous" and isinstance(error, ProviderTransportError):
+            return True
+        error = error.__cause__
+    return False
+
+
 def reconcile_developmental_continuity(
     session: Any,
     run: Any,
@@ -130,6 +146,8 @@ def reconcile_developmental_continuity(
                     chapter.summary = old_summary
             except Exception as exc:
                 chapter.summary = old_summary
+                if _must_propagate(run, exc):
+                    raise
                 _record(
                     pipeline,
                     session,
@@ -164,6 +182,8 @@ def reconcile_developmental_continuity(
                 )
                 continuity_refreshed = True
             except Exception as exc:
+                if _must_propagate(run, exc):
+                    raise
                 if old_update:
                     continuity_update = ChapterContinuityUpdate.model_validate(old_update)
                 _record(
@@ -250,15 +270,17 @@ def _wrap_developmental_revision_waves(
     @functools.wraps(waves)
     def wrapped(*args: Any, **kwargs: Any) -> None:
         waves(*args, **kwargs)
+        bound = signature.bind_partial(*args, **kwargs)
         try:
-            bound = signature.bind_partial(*args, **kwargs)
             reconcile(
                 bound.arguments["session"],
                 bound.arguments["run"],
                 list(bound.arguments.get("chapters") or []),
                 bound.arguments["client"],
             )
-        except Exception:
+        except Exception as exc:
+            if _must_propagate(bound.arguments.get("run"), exc):
+                raise
             # The normal pipeline's final QA now sees literal final prose and ending-debt evidence.
             # Reconciliation is valuable but should not throw away a successfully revised manuscript.
             return

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from novel_generator.schemas import ChapterContinuityUpdate, ContinuityLedger
 from novel_generator.services.editorial_reconciliation_runtime import (
     _wrap_developmental_revision_waves,
@@ -148,3 +150,67 @@ def test_developmental_wrapper_reconciles_after_revision_wave() -> None:
     wrapped(object(), object(), [object()], object(), object(), object())
 
     assert order == ["waves", "reconcile"]
+
+
+@pytest.mark.parametrize("stage", ["summary", "continuity"])
+@pytest.mark.parametrize("failure", ["transport", "canceled", "wrapped_transport"])
+def test_reconciliation_propagates_recoverable_interruptions(configured_environment, monkeypatch, stage, failure):
+    from novel_generator.dependencies import get_session_factory
+    from novel_generator.services import pipeline
+    from novel_generator.services.provider_errors import ProviderTransportError
+    from test_autonomous_editorial import make_run, install_fake_provider
+    install_fake_provider(monkeypatch)
+
+    def interrupt(*args, **kwargs):
+        if failure == "canceled":
+            raise pipeline.RunCanceled()
+        if failure == "wrapped_transport":
+            raise RuntimeError("Wrapper") from ProviderTransportError("Offline")
+        raise ProviderTransportError("Offline")
+
+    if stage == "summary":
+        monkeypatch.setattr(pipeline, "_supervised_provider_chat", interrupt)
+    else:
+        monkeypatch.setattr(pipeline, "_supervised_provider_chat", lambda *a, **kw: "Refreshed summary.")
+        monkeypatch.setattr(pipeline, "_generate_structured_output", interrupt)
+    expected = pipeline.RunCanceled if failure == "canceled" else RuntimeError if failure == "wrapped_transport" else ProviderTransportError
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        chapter.continuity_update = _continuity(1)
+        original = chapter.content
+        pipeline.record_event(session, run, _REVISION_EVENT_FOR_TEST, {"chapter_number": 1})
+        session.commit()
+        with pytest.raises(expected):
+            reconcile_developmental_continuity(session, run, [chapter], object())
+        assert chapter.content == original
+        assert pending_reconciliation_chapters(run) == [1]
+        assert not any("reconciliation_fallback" in event.event_type for event in run.events)
+
+
+_REVISION_EVENT_FOR_TEST = "developmental_chapter_revision_completed"
+
+
+@pytest.mark.parametrize("profile,failure,propagates", [
+    ("autonomous", "transport", True),
+    ("balanced", "transport", False),
+    ("balanced", "canceled", True),
+    ("autonomous", "canceled", True),
+    ("autonomous", "ordinary", False),
+])
+def test_developmental_wrapper_preserves_control_flow(profile, failure, propagates):
+    from novel_generator.services.pipeline import RunCanceled
+    from novel_generator.services.provider_errors import ProviderTransportError
+    error = {"transport": ProviderTransportError("Offline"), "canceled": RunCanceled(),
+             "ordinary": ValueError("Invalid checkpoint")}[failure]
+    def waves(session, run, chapters, client):
+        pass
+    def reconcile(*args):
+        raise error
+    wrapped = _wrap_developmental_revision_waves(waves, reconcile=reconcile)
+    args = (object(), SimpleNamespace(quality_profile=profile), [], object())
+    if propagates:
+        with pytest.raises(type(error)):
+            wrapped(*args)
+    else:
+        wrapped(*args)
