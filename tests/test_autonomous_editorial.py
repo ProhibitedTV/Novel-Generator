@@ -1236,3 +1236,34 @@ def test_destructive_range_fallback_leaves_saved_chapter_unchanged(configured_en
         assert chapter.content == source
         assert chapter.word_count == len(source.split())
         assert not editor._events(run, "autonomous_repair_completed")
+
+
+def test_final_sweep_skips_stale_group_but_repairs_independent_later_chapter(monkeypatch):
+    from types import SimpleNamespace
+    from novel_generator.services.autonomous_contracts import EditorialIssue
+    chapters = [SimpleNamespace(chapter_number=n, content=f"Original prose {n}.") for n in (1, 2, 3)]
+    diagnoses = [EditorialIssue.model_validate(issue(number=n)) for n in (1, 2, 3)]
+    diagnoses[0]._reviewed_source_hashes = {1: editor._hash(chapters[0].content)}
+    diagnoses[1]._reviewed_source_hashes = {1: editor._hash(chapters[0].content), 2: editor._hash(chapters[1].content)}
+    diagnoses[2]._reviewed_source_hashes = {3: editor._hash(chapters[2].content)}
+    repaired, deferred = [], []
+    def repair(session, run, chapter, ledger, issues, settings, client, phase):
+        repaired.append(chapter.chapter_number)
+        chapter.content += " Corrected."
+    monkeypatch.setattr(editor, "_repair", repair)
+    monkeypatch.setattr(editor, "_record", lambda session, run, kind, payload: deferred.append(payload["chapter_number"]))
+    settings = SimpleNamespace(autonomous_manuscript_repair_rounds=1)
+    editor._apply_final_repairs(None, None, chapters, {n: {} for n in (1, 2, 3)}, diagnoses, settings, None, 0)
+    assert repaired == [1, 3]
+    assert deferred == [2]
+    assert chapters[1].content == "Original prose 2."
+
+
+def test_bookwide_sweep_budget_scales_with_chapters_without_waiving_limit(monkeypatch):
+    from types import SimpleNamespace
+    settings = SimpleNamespace(autonomous_manuscript_repair_rounds=2)
+    chapters = [SimpleNamespace(chapter_number=n, content="Original.") for n in range(1, 25)]
+    assert editor._final_sweep_budget(settings, chapters) == 48
+    assert editor._final_sweep_budget(settings, chapters[:1]) == 2
+    with pytest.raises(editor.AutonomousQualityError, match="bounded automatic editorial rounds"):
+        editor._apply_final_repairs(None, None, chapters, {}, [], settings, None, 48)

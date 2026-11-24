@@ -1277,8 +1277,15 @@ def _identity_context(run, chapter):
                 for row in bible.get("character_agendas", [])]}}
 
 
+def _final_sweep_budget(settings, chapters):
+    # A source-bound whole-book diagnosis can become stale after a single edit.
+    # Allow each chapter its own bounded opportunity rather than spending a
+    # single global allowance on all chapters combined.
+    return settings.autonomous_manuscript_repair_rounds * max(1, len(chapters))
+
+
 def _apply_final_repairs(session, run, chapters, before, issues, settings, client, round_number):
-    if round_number >= settings.autonomous_manuscript_repair_rounds:
+    if round_number >= _final_sweep_budget(settings, chapters):
         raise AutonomousQualityError("Manuscript still has unresolved issues after the bounded automatic editorial rounds.")
     by_chapter = {}
     for issue in issues:
@@ -1290,9 +1297,9 @@ def _apply_final_repairs(session, run, chapters, before, issues, settings, clien
         hashes = {c.chapter_number: _hash(c.content or "") for c in chapters}
         if any(hashes.get(number) != digest for issue in group for number, digest in issue._reviewed_source_hashes.items()):
             _record(session, run, "autonomous_reaudit_required", {
-                "message": "An earlier repair changed supporting prose; re-audit remaining diagnoses before editing.",
+                "message": "An earlier repair changed supporting prose; defer this chapter until a fresh audit.",
                 "chapter_number": chapter.chapter_number})
-            return
+            continue
         _repair(session, run, chapter, before[chapter.chapter_number], group, settings, client, "final")
 
 
@@ -1324,7 +1331,7 @@ def finish_manuscript(session, run, chapters, settings, client, qa_report):
     if not enabled(run):
         return qa_report
     try:
-        for round_number in range(settings.autonomous_manuscript_repair_rounds + 1):
+        for round_number in range(_final_sweep_budget(settings, chapters) + 1):
             before = _refresh_metadata(session, run, chapters, client)
             issues = []
             for chapter in chapters:

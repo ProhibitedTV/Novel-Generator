@@ -99,7 +99,7 @@ Environment settings bound the extra work:
 
 - `AUTONOMOUS_CHAPTER_REPAIR_ATTEMPTS=12`: repair attempts per chapter during drafting.
 - `AUTONOMOUS_PROSE_REPAIR_ATTEMPTS=12`: separate prose/repetition repair attempts per chapter in each draft/final phase.
-- `AUTONOMOUS_MANUSCRIPT_REPAIR_ROUNDS=24`: final repair sweeps and the maximum final repair attempts per chapter.
+- `AUTONOMOUS_MANUSCRIPT_REPAIR_ROUNDS=24`: maximum full-chapter final repair attempts per chapter. The book-wide sweep ceiling is this value times the number of chapters; separate targeted/prose limits still apply.
 - `AUTONOMOUS_OUTLINE_REPAIR_ATTEMPTS=4`: whole-book planning rounds, accepting values from 1 through 24.
 
 The chapter and manuscript limits accept values from 1 through 100. These are work budgets, not time limits;
@@ -218,3 +218,11 @@ use the supervised Compose worker for automatic process-restart recovery.
 A terminal editorial failure is reported rather than silently accepted. Inspect
 `report.json` and the manuscript directory after the command settles.
 Do not run competing GPU-intensive qualification and production jobs.
+
+During final editorial sweeps, a changed supporting passage defers only the
+stale diagnosis group. Other source-current groups remain eligible. Every
+subsequent sweep refreshes the ledger and rechecks affected source/context
+fingerprints. This avoids spending a single global 24-sweep allowance on a
+24-chapter book where an edit may invalidate book-wide evidence after just one
+chapter. Individual strategy budgets remain persisted and bounded; no review
+is waived.
