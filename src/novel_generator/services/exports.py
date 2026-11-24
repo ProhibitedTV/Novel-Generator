@@ -287,6 +287,26 @@ def export_run_artifacts(
     return artifacts
 
 
+def require_complete_manuscript(run: GenerationRun, chapters: list[ChapterDraft]) -> None:
+    """Reject incomplete or misordered source before writing a finished book."""
+    expected = list(range(1, run.requested_chapters + 1))
+    actual = [chapter.chapter_number for chapter in chapters]
+    if not expected or actual != expected:
+        raise ValueError(
+            f"Manuscript is incomplete or out of order: expected chapters 1–{run.requested_chapters}; "
+            f"received {len(actual)} chapter(s)."
+        )
+    empty = [
+        chapter.chapter_number
+        for chapter in chapters
+        if not sanitize_chapter_content(chapter.content or "")
+    ]
+    if empty:
+        raise ValueError(
+            "Manuscript has empty chapter prose: " + ", ".join(map(str, empty)) + "."
+        )
+
+
 def export_publication_artifact(
     artifacts_dir: Path,
     project: Project,
@@ -301,6 +321,7 @@ def export_publication_artifact(
     if not profile.publication_ready:
         raise ValueError("Choose a publication export profile.")
     publication_front_matter = _normalize_front_matter(front_matter) if profile.include_front_matter else None
+    require_complete_manuscript(run, chapters)
 
     run_dir = artifacts_dir / run.id
     run_dir.mkdir(parents=True, exist_ok=True)

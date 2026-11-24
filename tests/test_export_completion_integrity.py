@@ -66,3 +66,24 @@ def test_cancel_during_export_neither_completes_nor_retries(configured_environme
         assert run.status==RunStatus.CANCELED and len(calls)==1
         assert run.chapters[0].content==source
         assert not any(e.event_type=='run_completed' for e in run.events)
+
+
+@pytest.mark.parametrize("defect", ["missing", "wrong_number", "blank"])
+def test_completion_rejects_incomplete_source_before_export(configured_environment, monkeypatch, defect):
+    monkeypatch.setattr(pipeline, "export_run_artifacts", lambda *args, **kwargs: pytest.fail("Incomplete source must not be exported"))
+    with get_session_factory()() as session:
+        run = make_run(session, chapters=2)
+        run.quality_profile = "balanced"
+        chapters = list(run.chapters)
+        if defect == "missing":
+            chapters = chapters[:1]
+        elif defect == "wrong_number":
+            chapters[1].chapter_number = 3
+        else:
+            chapters[1].content = "   "
+        source = [chapter.content for chapter in chapters]
+        with pytest.raises(RuntimeError, match="Cannot complete manuscript export"):
+            pipeline._export_completed_run(session, run, chapters, get_settings(), ManuscriptQaReport())
+        assert run.status != RunStatus.COMPLETED
+        assert not any(event.event_type == "run_completed" for event in run.events)
+        assert [chapter.content for chapter in chapters] == source

@@ -46,7 +46,7 @@ from .editorial import (
     render_qa_report_markdown,
     render_revised_outline_markdown,
 )
-from .exports import export_run_artifacts
+from .exports import export_run_artifacts, require_complete_manuscript
 from .genre_profiles import genre_profile
 from .book_specs import uses_book_contract, run_book_brief
 from .ollama import OllamaClient
@@ -172,9 +172,10 @@ def _sorted_chapters(run: GenerationRun) -> list:
 def _require_requested_chapters(session: Session, run: GenerationRun) -> list:
     session.refresh(run, attribute_names=["chapters"])
     chapters = _sorted_chapters(run)
-    if len(chapters) != run.requested_chapters:
+    if [chapter.chapter_number for chapter in chapters] != list(range(1, run.requested_chapters + 1)):
         raise RuntimeError(
-            f"Run expected {run.requested_chapters} chapter checkpoints, but only {len(chapters)} were available."
+            f"Run expected {run.requested_chapters} chapter checkpoints numbered consecutively from 1, "
+            f"but received {[chapter.chapter_number for chapter in chapters]}."
         )
     return chapters
 
@@ -3166,6 +3167,10 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
 
 def _export_completed_run(session, run, completed_chapters, settings, qa_report,
                           rewrite_markdown=None, revised_outline_markdown=None, developmental_qa_markdown=None, *, client=None):
+    try:
+        require_complete_manuscript(run, completed_chapters)
+    except ValueError as exc:
+        raise RuntimeError(f"Cannot complete manuscript export: {exc}") from exc
     qa_markdown = render_qa_report_markdown(qa_report)
     for chapter in completed_chapters:
         chapter.status = ChapterStatus.COMPLETED
