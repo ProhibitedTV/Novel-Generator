@@ -89,6 +89,10 @@ class RunCanceled(Exception):
     pass
 
 
+class OutlinePacingValidationError(autonomous_editorial.AutonomousQualityError):
+    """A generated outline failed whole-book validation after local repairs."""
+
+
 OUTLINE_CHUNK_THRESHOLD = 32
 OUTLINE_CHUNK_SIZE = 8
 PUBLICATION_READINESS_THRESHOLD = 7
@@ -930,7 +934,7 @@ def _fallback_story_bible(project: Any, run: GenerationRun) -> StoryBible:
     )
 
 
-def _fallback_chapter_mode(chapter_number: int) -> str:
+def _fallback_chapter_mode(chapter_number: int, total_chapters: int | None = None) -> str:
     pattern = [
         "systems_crisis",
         "investigation",
@@ -941,6 +945,14 @@ def _fallback_chapter_mode(chapter_number: int) -> str:
         "breather",
         "reversal",
     ]
+    # A final block of one or two chapters would otherwise end before the
+    # pattern reaches its required quiet chapter. Alternate the preceding
+    # block's quiet mode to respect the two-chapter no-repeat rule.
+    if total_chapters is not None and total_chapters >= 4 and total_chapters % 4 in (1, 2):
+        tail_start = total_chapters - total_chapters % 4 + 1
+        if chapter_number == tail_start:
+            previous_quiet = pattern[(chapter_number - 3) % len(pattern)]
+            return "breather" if previous_quiet == "aftermath" else "aftermath"
     return pattern[(chapter_number - 1) % len(pattern)]
 
 
@@ -986,7 +998,7 @@ def _fallback_outline_entries(
     canon_name = story_bible.canon_registry[0].name if story_bible.canon_registry else "the central pressure"
     entries: list[dict[str, Any]] = []
     for chapter_number in range(start_chapter, end_chapter + 1):
-        mode = _fallback_chapter_mode(chapter_number)
+        mode = _fallback_chapter_mode(chapter_number, total_chapters)
         entries.append(
             {
                 "chapter_number": chapter_number,
@@ -1058,7 +1070,28 @@ def _repair_outline_for_full_book_validation(
         for item in repaired:
             if item["chapter_number"] <= locked_chapters:
                 continue
-            item["chapter_mode"] = _fallback_chapter_mode(item["chapter_number"])
+            item["chapter_mode"] = _fallback_chapter_mode(item["chapter_number"], requested_chapters)
+
+    # Whole-book validation counts even the last partial four-chapter block.
+    # Prefer a single metadata adjustment over replacing every chapter mode.
+    # Never change a preserved chapter or introduce a nearby repeated mode.
+    if requested_chapters >= 4 and not uses_book_contract(story_bible.book_spec):
+        for start in range(0, requested_chapters, 4):
+            end = min(start + 4, requested_chapters)
+            if any(item["chapter_mode"] in {"breather", "aftermath"} for item in repaired[start:end]):
+                continue
+            for index in range(start, end):
+                if index < locked_chapters:
+                    continue
+                nearby = {
+                    repaired[j]["chapter_mode"]
+                    for j in range(max(0, index - 2), min(requested_chapters, index + 3))
+                    if j != index
+                }
+                mode = next((candidate for candidate in ("aftermath", "breather") if candidate not in nearby), None)
+                if mode is not None:
+                    repaired[index]["chapter_mode"] = mode
+                    break
 
     for item in repaired:
         if item["chapter_number"] <= locked_chapters:
@@ -1296,7 +1329,12 @@ def _validated_outline_or_fallback(
             except Exception as rebalance_exc:
                 fallback_error = rebalance_exc
         if autonomous_editorial.enabled(run):
-            raise autonomous_editorial.AutonomousQualityError("Outline could not be repaired without replacing the generated plot.") from exc
+            detail = f"Initial validation: {exc}. Final repair: {fallback_error}."
+            autonomous_editorial._record(session, run, "outline_validation_rejected", {
+                "message": "Combined outline failed full-book validation after pacing repairs.",
+                "error": str(exc), "repair_error": str(fallback_error),
+            })
+            raise OutlinePacingValidationError(f"Outline could not be repaired without replacing the generated plot. {detail}") from exc
         record_event(
             session,
             run,
