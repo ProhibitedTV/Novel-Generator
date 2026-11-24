@@ -284,3 +284,51 @@ def test_completed_repair_is_not_refunded_on_unrelated_interruption(configured_e
         session.commit()
         session.refresh(run, ["events"])
         assert not any(e.event_type == "autonomous_repair_interrupted" for e in run.events)
+
+
+def test_unlimited_transport_recovery_survives_old_budget_and_session_restart(configured_environment):
+    from novel_generator.repositories import record_event
+    settings = get_settings().model_copy(update={"provider_recovery_attempts": -1})
+    factory = get_session_factory()
+    now = datetime.utcnow()
+    with factory() as session:
+        run = make_run(session)
+        run_id = run.id
+        for _ in range(96):
+            record_event(session, run, "provider_retry_scheduled", {"attempt": 1})
+        session.commit()
+        assert schedule_provider_retry(session, run, settings, ProviderTransportError("offline"), now=now)
+        event = run.events[-1]
+        assert event.payload["attempt"] == 97
+        assert event.payload["limit"] is None
+        assert datetime.fromisoformat(event.payload["retry_at"]) == now + timedelta(minutes=15)
+        assert run.chapters[0].content == PROSE
+    with factory() as session:
+        assert release_provider_retries(session, now=now + timedelta(minutes=15)) == 1
+        run = claim_next_queued_run(session)
+        assert run.id == run_id
+        assert run.chapters[0].content == PROSE
+        assert schedule_provider_retry(session, run, settings, ProviderTransportError("still offline"))
+        assert run.events[-1].payload["attempt"] == 98
+        request_run_cancellation(session, run)
+        session.commit()
+        assert release_provider_retries(session, now=now + timedelta(days=2)) == 0
+        assert run.status == RunStatus.CANCELED
+
+
+def test_disabled_transport_recovery_remains_disabled(configured_environment):
+    settings = get_settings().model_copy(update={"provider_recovery_attempts": 0})
+    with get_session_factory()() as session:
+        run = make_run(session)
+        assert not schedule_provider_retry(session, run, settings, ProviderTransportError("offline"))
+        assert run.current_step != "provider_wait"
+
+
+def test_unlimited_recovery_does_not_retry_other_profiles_or_quality_errors(configured_environment):
+    settings = get_settings().model_copy(update={"provider_recovery_attempts": -1})
+    with get_session_factory()() as session:
+        run = make_run(session)
+        assert not schedule_provider_retry(session, run, settings, ValueError("continuity failure"))
+        run.quality_profile = "balanced"
+        session.commit()
+        assert not schedule_provider_retry(session, run, settings, ProviderTransportError("offline"))

@@ -49,7 +49,10 @@ def schedule_provider_retry(session, run, settings, error, *, now=None):
     attempts = session.scalar(schedules_query) or 0
     if run.current_step == "autonomous_revision":
         interrupt_unsaved_editorial_repair(session, run, reason="provider_transport")
-    if attempts >= settings.provider_recovery_attempts:
+    # Transport outages are not editorial failures. In unattended mode, wait
+    # for the provider to recover without spending the book's quality budget.
+    limit = settings.provider_recovery_attempts
+    if limit >= 0 and attempts >= limit:
         record_event(session, run, "provider_retry_exhausted", {
             "message": "Automatic provider retry budget exhausted. Restore provider connectivity and resume the saved run.",
             "attempts": attempts, "limit": settings.provider_recovery_attempts,
@@ -67,7 +70,7 @@ def schedule_provider_retry(session, run, settings, error, *, now=None):
     run.error_message = f"Provider temporarily unavailable; automatic retry at {due.isoformat()} UTC. {error}"
     record_event(session, run, "provider_retry_scheduled", {
         "message": run.error_message, "retry_at": due.isoformat(), "attempt": attempts + 1,
-        "limit": settings.provider_recovery_attempts,
+        "limit": limit if limit >= 0 else None,
         "interrupted_step": step, "chapter_number": run.current_chapter,
         "last_successful_inference_at": last_success.isoformat() if last_success else None,
     })
