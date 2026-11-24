@@ -81,14 +81,16 @@ def diagnostics_text(session, run_id, *, stale_after_seconds):
     events = session.execute(select(RunEvent.sequence, RunEvent.event_type, RunEvent.payload).where(
         RunEvent.run_id == run_id, RunEvent.event_type.in_([
             "run_failed", "outline_validation_rejected", "outline_batch_rejected",
-            "provider_retry_scheduled", "run_requeued", "outline_pacing_replan_requested",
+            "provider_retry_scheduled", "provider_retry_exhausted", "provider_retry_invalid",
+            "run_requeued", "outline_pacing_replan_requested", "autonomous_repair_interrupted",
         ]),
     ).order_by(RunEvent.sequence.desc()).limit(8)).all()
     lines += ["", "Recent failure and recovery events (newest first):"]
     for event in events:
         lines.append(f"#{event.sequence} {event.event_type}")
         payload = event.payload or {}
-        for key in ("failed_step", "chapter_number", "error_type", "message", "error", "repair_error", "retry_at"):
+        for key in ("failed_step", "interrupted_step", "chapter_number", "error_type", "message",
+                    "error", "repair_error", "retry_at", "attempt", "attempts", "limit", "reason"):
             if payload.get(key) is not None:
                 lines.append(f"  {key}: {safe_message(payload[key])}")
         for cause in (payload.get("causes") or [])[:5]:

@@ -487,6 +487,23 @@ def touch_run_heartbeat(session: Session, run: GenerationRun) -> None:
     session.flush()
 
 
+def interrupt_unsaved_editorial_repair(session: Session, run: GenerationRun, *, reason: str) -> bool:
+    """Exclude only the latest unfinished repair, not prior rejected candidates."""
+    latest = session.scalar(select(RunEvent).where(
+        RunEvent.run_id == run.id,
+        RunEvent.event_type.in_(["autonomous_repair_started", "autonomous_repair_completed", "autonomous_repair_interrupted"]),
+    ).order_by(RunEvent.sequence.desc()).limit(1))
+    if latest is None or latest.event_type != "autonomous_repair_started":
+        return False
+    if latest.payload.get("chapter_number") != run.current_chapter:
+        return False
+    record_event(session, run, "autonomous_repair_interrupted", {
+        "message": "An interruption prevented saving the revision; preserve its editorial attempt budget.",
+        "started_event_id": latest.id, "reason": reason,
+    })
+    return True
+
+
 def recover_running_runs(
     session: Session,
     *,
@@ -516,6 +533,10 @@ def recover_running_runs(
             attempt.error_type = "WorkerInterrupted"
             attempt.error_message = "Worker ownership was recovered before this call's outcome was saved."
             attempt.attempt_metadata = {**(attempt.attempt_metadata or {}), "recovery_reason": reason}
+        if (run.current_step == "autonomous_revision"
+                and any(attempt.stage == "autonomous_revision" and attempt.chapter_number == run.current_chapter
+                        for attempt in interrupted)):
+            interrupt_unsaved_editorial_repair(session, run, reason=reason)
         if run.cancel_requested:
             run.status = RunStatus.CANCELED
             run.current_step = "canceled"
