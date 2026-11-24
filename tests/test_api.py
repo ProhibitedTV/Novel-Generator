@@ -564,3 +564,60 @@ def test_event_history_pagination_and_compact_stream_preserve_legacy_api(client,
             payload = "".join(response.iter_text())
         assert "Action 4" in payload and "event: terminal" in payload
         assert ("PRIVATE_EVIDENCE" in payload) == (compact == "false")
+
+
+def test_draft_editions_preserve_original_source_and_reject_corruption(client, monkeypatch):
+    from novel_generator.models import ChapterDraft, ChapterStatus
+    from novel_generator.services.draft_editions import save_draft_edition, edition_path
+    from novel_generator.settings import get_settings
+
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+    _, run_id = create_project_and_run(client)
+    settings = get_settings()
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        for number in (1, 2):
+            session.add(ChapterDraft(run_id=run_id, chapter_number=number, title=f"Turn {number}",
+                outline_summary="Intended event", content=f"Original prose {number}.",
+                status=ChapterStatus.COMPLETED, word_count=3))
+        session.commit()
+        session.refresh(run, ["chapters"])
+        first = save_draft_edition(session, run, run.chapters, settings.artifacts_dir, "first-draft")
+        run.chapters[0].content = "Revised structural prose."
+        session.commit()
+        assert save_draft_edition(session, run, run.chapters, settings.artifacts_dir, "first-draft") == first
+        save_draft_edition(session, run, run.chapters, settings.artifacts_dir, "structural-draft")
+        run.chapters[0].content = "Later line-edited prose."
+        session.commit()
+    first_url = f"/api/runs/{run_id}/draft-editions/first-draft"
+    response = client.get(first_url)
+    assert response.status_code == 200
+    assert "Original prose 1." in response.text and "Revised structural prose." not in response.text
+    assert "NOT A PUBLICATION EXPORT" in response.text
+    response = client.get(f"/api/runs/{run_id}/draft-editions/structural-draft")
+    assert response.status_code == 200 and "Revised structural prose." in response.text
+    assert "Later line-edited prose." not in response.text
+    assert "Complete first draft" in client.get(f"/runs/{run_id}").text
+    assert client.get(f"/api/runs/{run_id}/draft-editions/unknown").status_code == 404
+    edition_path(settings.artifacts_dir, run_id, "first-draft").write_text("corrupted", encoding="utf-8")
+    assert client.get(first_url).status_code == 409
+
+
+def test_legacy_edited_run_does_not_relabel_current_prose_as_first_draft(client, monkeypatch):
+    from novel_generator.models import ChapterDraft
+    from novel_generator.services.draft_editions import save_draft_edition
+    from novel_generator.settings import get_settings
+
+    monkeypatch.setattr(OllamaClient, "list_models", lambda self: ["test-model"])
+    _, run_id = create_project_and_run(client)
+    with get_session_factory()() as session:
+        run = get_run(session, run_id)
+        for number in (1, 2):
+            session.add(ChapterDraft(run_id=run_id, chapter_number=number, title=f"Turn {number}",
+                outline_summary="Intended event", content=f"Already edited prose {number}."))
+        record_event(session, run, "final_editing_started", {"message": "Legacy line edit"})
+        session.commit()
+        session.refresh(run, ["chapters"])
+        for stage in ("first-draft", "structural-draft"):
+            assert save_draft_edition(session, run, run.chapters, get_settings().artifacts_dir, stage) is None
+            assert client.get(f"/api/runs/{run_id}/draft-editions/{stage}").status_code == 404

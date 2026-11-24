@@ -662,7 +662,10 @@ def build_chapter_draft_messages(
             "role": "system",
             "content": (
                 "You write vivid, coherent fiction chapters. Return prose only with no markdown fences and no chapter heading. "
-                "Advance the story, vary sentence openings, and avoid repeated abstract phrasing."
+                "Advance the story, vary sentence openings, and avoid repeated abstract phrasing. "
+                "Write as a novelist experiencing a scene from inside the character's perspective, not as an editor "
+                "ticking off a plan. Let each action change what another character can do next; make readers infer "
+                "meaning through choices, reactions and subtext. Do not explain the literary function of a scene."
             ),
         },
         {
@@ -969,7 +972,10 @@ def build_summary_messages(chapter: ChapterDraft, outline_entry: StructuredOutli
             "role": "user",
             "content": (
                 f"Summarize chapter {chapter.chapter_number} in 3 to 5 sentences.\n"
-                f"Make sure the summary captures the external change, the character turn, the price paid, the emotional consequence, and the new ending state.\n\n"
+                f"Make sure the summary captures the external change, the character turn, the price paid, the emotional consequence, and the new ending state.\n"
+                "This is a reverse outline of the prose actually written, not a recap of the author's plan. "
+                "If an intended event never occurs, a choice is not made, or a promised payoff remains unresolved, state that plainly; "
+                "do not report it as completed because it appears in the outline. Distinguish observed facts from intentions and inference.\n\n"
                 f"Chapter outline:\n{json.dumps(entry, indent=2)}\n\n"
                 f"{chapter.content or ''}"
             ),
@@ -1193,7 +1199,9 @@ def build_developmental_rewrite_messages(
             "role": "system",
             "content": (
                 "You are a developmental editor planning structural rewrites for AI-generated fiction. "
-                "Return valid JSON only. Do not rewrite prose; diagnose structure and produce actionable chapter-map changes."
+                "Return valid JSON only. Do not rewrite prose; diagnose structure and produce actionable chapter-map changes. "
+                "Compare the intended story with the story actually told. Preserve effective scenes, distinctive voices and deliberate ambiguity. "
+                "Prioritize changes by reader impact and causal dependencies; never force every chapter to be rewritten."
             ),
         },
         {
@@ -1227,6 +1235,9 @@ def build_developmental_rewrite_messages(
                 '  "post_rewrite_risk_targets": ["string"]\n'
                 "}\n\n"
                 "Every chapter must appear in chapter_actions. Identify chapters that do not permanently change the story. "
+                "Use keep when there is no supported structural change. A summary describes the draft, while an outline describes intention; "
+                "neither proves an omitted event occurred. Treat missing evidence as an investigation need, not a confirmed defect. "
+                "If given excerpts or capsules instead of full text, limit conclusions to the available evidence. "
                 + NOVELIST_PROCESS_REQUIREMENTS
                 + "Prioritize structural diagnosis before prose polish: act order, scene causality, character arc, reader promise, tension, pacing, and continuity must be solved before line-level repairs. "
                 "Use merge or cut only when the story can preserve the permanent consequence elsewhere. "
@@ -1321,6 +1332,8 @@ def build_chapter_edit_messages(
                 + NOVELIST_PROCESS_REQUIREMENTS
                 + "- treat this as a line-edit after structural work: improve clarity, rhythm, subtext, and precision without changing the approved manuscript architecture\n"
                 "- do not add a new scene, new twist, new system rule, new character, chapter heading, author note, or outline summary\n"
+                "- edit the existing words with restraint; preserve intentional sentence fragments, idiosyncratic speech, narrative distance, recurring motifs, and effective passages\n"
+                "- do not invent a structural fix during line editing: unresolved plot or canon issues belong to developmental review\n"
                 "- polish sentence rhythm, paragraph flow, transitions, sensory specificity, and dialogue subtext\n"
                 "- remove repeated phrasing, filler explanation, and meta/outlining language such as 'the next problem', 'the chapter ends', 'pushing the story forward', or 'sets up'\n"
                 "- replace vague emotional labels with concrete gesture, image, choice, or fallout where the existing scene supports it\n"

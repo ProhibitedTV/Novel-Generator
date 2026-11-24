@@ -438,6 +438,28 @@ def api_run_diagnostics(run_id: str, db: Session = Depends(get_db),
     return Response(report, media_type="text/plain", headers={"Cache-Control": "no-store"})
 
 
+@router.get("/runs/{run_id}/draft-editions/{stage}")
+def api_download_draft_edition(run_id: str, stage: str, db: Session = Depends(get_db),
+                               settings: Settings = Depends(get_app_settings)) -> Response:
+    from hashlib import sha256
+    from ..services.draft_editions import EDITION_LABELS, edition_event, edition_path
+    if stage not in EDITION_LABELS or db.scalar(select(GenerationRun.id).where(GenerationRun.id == run_id)) is None:
+        raise HTTPException(status_code=404, detail="Draft edition not found.")
+    event = edition_event(db, run_id, stage)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Draft edition has not been saved.")
+    path = edition_path(settings.artifacts_dir, run_id, stage)
+    if not path.is_file():
+        raise HTTPException(status_code=409, detail="Archived draft edition file is missing.")
+    data = path.read_bytes()
+    if sha256(data).hexdigest() != event.payload.get("sha256"):
+        raise HTTPException(status_code=409, detail="Archived draft edition failed its checksum.")
+    return Response(data, media_type="text/markdown", headers={
+        "Content-Disposition": f'attachment; filename="{stage}-{run_id}.md"',
+        "Cache-Control": "no-store",
+    })
+
+
 @router.get("/runs/{run_id}/recovery-draft")
 def api_download_recovery_draft(run_id: str, db: Session = Depends(get_db)) -> Response:
     """Download committed prose without altering editorial state or writing artifacts."""

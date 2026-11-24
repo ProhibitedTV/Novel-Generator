@@ -3117,6 +3117,8 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
             + ", ".join(str(chapter_number) for chapter_number in incomplete_chapters)
         )
 
+    from .draft_editions import save_draft_edition
+    save_draft_edition(session, run, completed_chapters, settings.artifacts_dir, "first-draft")
     qa_report, qa_markdown = _run_manuscript_qa(session, run, completed_chapters, client)
     developmental_plan: DevelopmentalRewritePlan | None = None
     rewrite_markdown = None
@@ -3131,6 +3133,7 @@ def process_run(session: Session, run: GenerationRun, settings: Settings, client
             client,
         )
         _run_developmental_revision_waves(session, run, completed_chapters, qa_report, developmental_plan, client)
+        save_draft_edition(session, run, completed_chapters, settings.artifacts_dir, "structural-draft")
         _run_publication_humanization_pass(session, run, completed_chapters, qa_report, client)
         _run_publication_compression_pass(session, run, completed_chapters, qa_report, client)
 
