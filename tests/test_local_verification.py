@@ -440,3 +440,42 @@ def test_inspection_does_not_create_missing_database(tmp_path):
     with pytest.raises(ValueError, match="existing qualification"):
         inspect_qualification(tmp_path)
     assert not (tmp_path / "verification.db").exists()
+
+
+def test_qualification_launch_records_nonsecret_settings_and_deduplicates_models():
+    from novel_generator.settings import Settings
+    from novel_generator.services.local_verification import qualification_launch_evidence
+    from novel_generator.services.provider_errors import ProviderTransportError
+
+    calls = []
+    def identity(provider, model):
+        calls.append((provider, model))
+        if model == "review-model":
+            raise ProviderTransportError("Bearer private-token")
+        return {"verified": True, "digest": "a" * 64}
+    provider = SimpleNamespace(model_identity=identity)
+    args = SimpleNamespace(model="author-model", review_model="review-model", revision_model=None, resume=False)
+    settings = Settings(secret_key="secret-value", openai_compatible_api_key="private-api-key")
+    evidence = qualification_launch_evidence(args, settings, provider)
+    assert calls == [("ollama", "author-model"), ("ollama", "review-model")]
+    assert evidence["initial_model_observations"]["author-model"]["verified"]
+    assert not evidence["initial_model_observations"]["review-model"]["verified"]
+    assert evidence["controls"]["provider_recovery_attempts"] == settings.provider_recovery_attempts
+    assert all(secret not in json.dumps(evidence) for secret in ("secret-value", "private-api-key", "private-token"))
+    args.resume = True
+    calls.clear()
+    resumed = qualification_launch_evidence(args, settings, provider)
+    assert resumed["manual_resume"] and resumed["initial_model_observations"] == {}
+    assert calls == []
+
+
+def test_qualification_report_distinguishes_explicit_resume_from_automatic_recovery(tmp_path):
+    run = _run(tmp_path)
+    _event(run, "qualification_launch", {"manual_resume": False})
+    _event(run, "provider_retry_scheduled", {})
+    evidence = verification_report(run, tmp_path)["qualification_evidence"]
+    assert not evidence["explicit_resume_observed"]
+    _event(run, "qualification_launch", {"manual_resume": True})
+    evidence = verification_report(run, tmp_path)["qualification_evidence"]
+    assert evidence["explicit_resume_observed"]
+    assert len(evidence["qualification_launches"]) == 2
