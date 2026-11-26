@@ -11,6 +11,10 @@ from .prompts import extract_json_payload
 from .structured_schema_runtime import make_schema_marker
 
 
+class NoUsableRangeRepair(ValueError):
+    """Range proposals failed to make a substantive source change."""
+
+
 class ChapterRangeEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     start_paragraph: StrictInt = Field(ge=1)
@@ -49,7 +53,7 @@ def apply_edits(text, payload, *, maximum_words):
     if not candidate.strip():
         raise ValueError("Do not delete the entire chapter.")
     if " ".join(candidate.split()) == " ".join(text.split()):
-        raise ValueError("No usable change was made to the diagnosed source.")
+        raise NoUsableRangeRepair("No usable change was made to the diagnosed source.")
     if len(candidate.split()) > maximum_words:
         raise ValueError(f"Repaired chapter exceeds the bounded {maximum_words}-word ceiling.")
     return candidate
@@ -97,7 +101,80 @@ def repair(text, issues, context, generate, *, validate_candidate=None):
             return candidate
         except (ValueError, TypeError, KeyError) as exc:
             if attempt == 2:
-                raise ValueError(f"Structural range repair could not produce usable edits: {exc}") from exc
+                error_type = NoUsableRangeRepair if isinstance(exc, NoUsableRangeRepair) else ValueError
+                raise error_type(f"Structural range repair could not produce usable edits: {exc}") from exc
             # Do not replay malformed or copied assistant output as a new source.
             messages = messages[:3] + [{"role": "user", "content": f"Correct the edit proposal: {exc}"}]
     raise AssertionError("Unreachable")
+
+
+def repair_anchored_window(text, issues, context, generate, *, validate_candidate=None):
+    """Last resort for copied range edits: replace one bounded, grounded window.
+
+    A structural diagnosis may need more than its cited paragraph. Include one
+    neighbor on either side, but never guess a location or silently rewrite an
+    unbounded chapter. The caller must still re-audit the resulting prose.
+    """
+    from .local_prose_repair import repair_plan
+    from .book_specs import uses_book_contract, contract_text
+
+    # Scope is relaxed only for finding anchors; the original diagnoses and
+    # their structural requirements remain in the prompt and subsequent audit.
+    plan = repair_plan(text, [issue.model_copy(update={"repair_scope": "passage"})
+                              for issue in issues], max_passages=16)
+    if not plan:
+        raise ValueError("No bounded, source-grounded window for fallback repair.")
+    spans = paragraph_spans(text)
+    indices = [i for i, (start, end) in enumerate(spans)
+               if any(start < span[1] and end > span[0] for span, _ in plan)]
+    if not indices:
+        raise ValueError("No source paragraphs for fallback repair.")
+    first, last = max(0, min(indices) - 1), min(len(spans) - 1, max(indices) + 1)
+    start, end = spans[first][0], spans[last][1]
+    original = text[start:end]
+    words = len(original.split())
+    if words > 650:
+        raise ValueError("Diagnosed window is too broad for a bounded prose repair.")
+    maximum = max(context["chapter_word_range"][1], math.ceil(len(text.split()) * 1.25))
+    max_replacement = min(maximum - len(text[:start].split()) - len(text[end:].split()),
+                          max(40, 2 * words))
+    instruction = (
+        "Correct the editable passage using the verified editorial diagnoses. "
+        "Return ONLY the replacement prose for that passage, not JSON, a plan, or a chapter heading. "
+        "An earlier paragraph-range proposal copied the source and was rejected. Make an actual "
+        "correction to the diagnosed facts or events; changing whitespace is not a repair. "
+        "Preserve correct facts, names, voice, and transitions to the read-only neighbors. "
+        "Do not reproduce the neighbors. Do not invent a new subplot or perform a future chapter's payoff. "
+        "If a required event is missing, add it inside the editable passage. The result will be independently re-audited."
+    )
+    brief = context.get("author_brief", {})
+    if uses_book_contract(brief):
+        instruction += "\n" + contract_text(brief)
+    payload = {
+        "editable_passage": original,
+        "diagnoses": [issue.model_dump() for issue in issues],
+        "read_only_before": text[max(0, start - 1200):start],
+        "read_only_after": text[end:end + 1200],
+        "read_only_context": {key: value for key, value in context.items() if key != "actual_prose"},
+        "maximum_replacement_words": max_replacement,
+    }
+    messages = [{"role": "system", "content": instruction},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
+    reason = ""
+    for attempt in range(1, 3):
+        prompt = messages + ([{"role": "user", "content": f"Previous response rejected: {reason}. Correct the passage itself."}] if reason else [])
+        replacement = generate(prompt, attempt).strip()
+        try:
+            if not replacement or " ".join(replacement.split()) == " ".join(original.split()):
+                raise ValueError("No usable change to the editable passage.")
+            if len(replacement.split()) > max_replacement:
+                raise ValueError("Replacement exceeds the bounded passage word allowance.")
+            candidate = text[:start] + replacement + text[end:]
+            if len(candidate.split()) > maximum:
+                raise ValueError("Repaired chapter exceeds the bounded word ceiling.")
+            if validate_candidate is not None:
+                validate_candidate(candidate)
+            return candidate
+        except ValueError as exc:
+            reason = str(exc)
+    raise ValueError(f"Anchored prose fallback could not produce usable edits: {reason}")

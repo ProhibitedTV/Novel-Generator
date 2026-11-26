@@ -991,7 +991,7 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
         # copy. Switch representations within this persisted repair attempt:
         # the model proposes explicit source ranges, and untouched prose stays
         # byte-for-byte intact. Fresh audits still decide whether the edit works.
-        from .chapter_range_repair import repair as repair_ranges
+        from .chapter_range_repair import NoUsableRangeRepair, repair as repair_ranges, repair_anchored_window
         from .provider_controls import make_ollama_controls_marker
         _record(session, run, "autonomous_repair_strategy_changed", {
             "message": "Chapter rewrite did not resolve the diagnosis; switching automatically to source paragraph edits.",
@@ -1025,6 +1025,26 @@ def _repair(session, run, chapter, ledger, issues, settings, client, phase: str,
 
         try:
             return repair_ranges(before, issues, context, generate_ranges, validate_candidate=validate_range_candidate)
+        except NoUsableRangeRepair as exc:
+            _record(session, run, "autonomous_repair_strategy_changed", {
+                "message": "Paragraph edits copied the source; attempting a bounded, evidence-anchored prose replacement.",
+                "chapter_number": chapter.chapter_number, "phase": phase,
+                "from_strategy": "paragraph_ranges", "to_strategy": "anchored_prose", "reason": str(exc),
+            })
+            def generate_anchored(passage_messages, passage_attempt):
+                pipeline._ensure_not_canceled(session, run)
+                _check_context(passage_messages, client, provider)
+                return pipeline.sanitize_chapter_content(pipeline._supervised_provider_chat(
+                    session, run, client, provider, model, passage_messages, stage="autonomous_revision",
+                    chapter_number=chapter.chapter_number, metadata={"phase": phase,
+                        "repair_attempt": len(attempts) + 1, "repair_mode": "anchored_prose",
+                        "candidate_attempt": passage_attempt},
+                ))
+            try:
+                return repair_anchored_window(before, issues, context, generate_anchored,
+                                              validate_candidate=validate_range_candidate)
+            except ValueError as fallback:
+                raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change ({reason}): {exc}; {fallback}") from fallback
         except ValueError as exc:
             raise AutonomousQualityError(f"Chapter {chapter.chapter_number} repair produced no usable change ({reason}): {exc}") from exc
     def retry_as_chapter(reason):
