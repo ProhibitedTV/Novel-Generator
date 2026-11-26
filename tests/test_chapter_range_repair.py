@@ -183,3 +183,58 @@ def test_range_fallback_retries_unsafe_candidate_before_saving(configured_enviro
         assert ("Localized repair changed chapter length" if unsafe == "truncation" else
                 "earlier rejected version") in range_prompts[1][-1]["content"]
         assert len(editor._events(run, "autonomous_repair_completed")) == 1
+
+
+@pytest.mark.parametrize("successful", [True, False])
+def test_repeated_structural_range_noops_use_anchored_prose_without_accepting_it(
+        configured_environment, monkeypatch, successful):
+    from novel_generator.dependencies import get_session_factory
+    from novel_generator.settings import get_settings
+    from novel_generator.services import autonomous_editorial as editor, pipeline
+    from test_autonomous_editorial import make_run, clean_review, issue
+
+    source = "Untouched opening.\n\n" + SOURCE + "\n\nUntouched closing."
+    calls = []
+
+    def chat(*args, **kwargs):
+        metadata = kwargs["metadata"]
+        calls.append(metadata["repair_mode"])
+        assert chapter.content == source
+        if metadata["repair_mode"] == "paragraph_ranges":
+            return json.dumps({"edits": [dict(start_paragraph=3, end_paragraph=3,
+                                              replacement_text="Erroneous premature scene.")]})
+        assert metadata["repair_mode"] == "anchored_prose"
+        payload = json.loads(args[5][1]["content"])
+        original = payload["editable_passage"]
+        assert original == SOURCE
+        assert "actual_prose" not in payload["read_only_context"]
+        return original.replace("Erroneous premature scene.", "They stayed outside.") if successful else original
+
+    monkeypatch.setattr(pipeline, "_supervised_provider_chat", chat)
+    with get_session_factory()() as session:
+        run = make_run(session)
+        chapter = run.chapters[0]
+        chapter.content = source
+        chapter.summary = "Old summary."
+        session.commit()
+        diagnosis = editor.validate_review(json.dumps({**clean_review([1]), "canon_consistent": False,
+            "issues": [dict(issue(evidence="Erroneous premature scene."), repair_scope="chapter")]}), [chapter])
+        editor._record(session, run, "autonomous_repair_started", {
+            "chapter_number": 1, "phase": "draft", "repair_kind": "chapter", "attempt": 1,
+            "issues": [diagnosis.issues[0].model_dump()], "before_hash": editor._hash(source)})
+        ledger = pipeline._build_initial_ledger(pipeline._story_bible_from_run(run))
+        if successful:
+            editor._repair(session, run, chapter, ledger, diagnosis.issues, get_settings(), object(), "draft")
+            assert chapter.content == source.replace("Erroneous premature scene.", "They stayed outside.")
+            assert chapter.summary is None
+            assert len(editor._events(run, "autonomous_repair_completed")) == 1
+        else:
+            with pytest.raises(editor.AutonomousQualityError, match="Anchored prose fallback"):
+                editor._repair(session, run, chapter, ledger, diagnosis.issues, get_settings(), object(), "draft")
+            assert chapter.content == source
+            assert chapter.summary == "Old summary."
+            assert not editor._events(run, "autonomous_repair_completed")
+        assert calls == ["paragraph_ranges"] * 3 + ["anchored_prose"] * (1 if successful else 2)
+        assert len(editor._events(run, "autonomous_repair_started")) == 2
+        assert not editor._events(run, "autonomous_quality_passed")
+        assert editor._events(run, "autonomous_repair_strategy_changed")[-1]["to_strategy"] == "anchored_prose"
